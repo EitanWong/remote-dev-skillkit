@@ -1,3 +1,5 @@
+//go:build !rdev_bootstrap_focused
+
 package release
 
 import (
@@ -109,6 +111,69 @@ func TestVerifyBundleRejectsMissingRequiredArtifact(t *testing.T) {
 	}
 	if !bundleCheckFailed(verification, "required_artifacts_present") {
 		t.Fatalf("expected required artifact check to fail: %#v", verification.Checks)
+	}
+}
+
+func TestCreateBundleBindsVersionAndTargetPlatform(t *testing.T) {
+	dir := t.TempDir()
+	key, err := signing.Generate("release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	for _, name := range []string{"rdev-host.exe", "rdev-verify.exe"} {
+		artifactPath := filepath.Join(dir, name)
+		if err := os.WriteFile(artifactPath, []byte(name+"-binary"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		manifest, err := SignArtifactForRelease(artifactPath, key, now, "v0.2.0", "windows/amd64")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := WriteManifest(artifactPath+".rdev-release.json", manifest); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	bundle, err := CreateBundle(BundleOptions{
+		Dir:               dir,
+		Version:           "v0.2.0",
+		TargetPlatform:    "windows/amd64",
+		ArtifactPaths:     []string{"rdev-host.exe", "rdev-verify.exe"},
+		RequiredArtifacts: []string{"rdev-host.exe", "rdev-verify.exe"},
+		Key:               key,
+		Now:               now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Version != "v0.2.0" || bundle.TargetPlatform != "windows/amd64" {
+		t.Fatalf("bundle omitted signed release metadata: %#v", bundle)
+	}
+	bundlePath := filepath.Join(dir, "release-bundle.json")
+	if err := WriteBundle(bundlePath, bundle); err != nil {
+		t.Fatal(err)
+	}
+	root := model.NewTrustBundle(key.ID, key.PublicKey)
+	verification, err := VerifyBundle(bundlePath, root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verification.OK() || verification.Version != bundle.Version || verification.TargetPlatform != bundle.TargetPlatform {
+		t.Fatalf("verified bundle did not expose signed release metadata: %#v", verification)
+	}
+
+	tampered := bundle
+	tampered.TargetPlatform = "linux/amd64"
+	if err := WriteBundle(bundlePath, tampered); err != nil {
+		t.Fatal(err)
+	}
+	verification, err = VerifyBundle(bundlePath, root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.OK() || !bundleCheckFailed(verification, "bundle_signature_valid") {
+		t.Fatalf("tampered signed target platform should fail bundle verification: %#v", verification)
 	}
 }
 

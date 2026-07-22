@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/bootstrapcmd/windowsentry"
 	"github.com/EitanWong/remote-dev-skillkit/internal/service"
 	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 )
@@ -352,7 +353,10 @@ func writeAcceptanceFile(path string, content []byte, force bool) error {
 	if err := file.Close(); err != nil {
 		return err
 	}
-	return os.Chmod(path, 0o600)
+	if err := os.Chmod(path, 0o600); err != nil {
+		return err
+	}
+	return windowsentry.ProtectPrivatePath(path, false)
 }
 
 func writeManagedMacServicePlan(path string, plan ManagedMacServicePlan) error {

@@ -24,7 +24,6 @@ import (
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
-	"github.com/EitanWong/remote-dev-skillkit/internal/hostcmd"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
 	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
@@ -148,8 +147,9 @@ func TestProbingTicketPowerShellBootstrapUsesAuthoritativePublicCandidate(t *tes
 	body := rec.Body.String()
 	for _, want := range []string{
 		publicBase + "/assets",
-		publicBase + "/v1/support-session/preconnect",
+		publicBase + "/layered-assets.json",
 		publicBase + "/v1/tickets/" + ticket.Code + "/manifest",
+		"rdev-bootstrap",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("bootstrap omitted authoritative public base fragment %q", want)
@@ -420,11 +420,11 @@ func TestJoinPageAndBootstrapScripts(t *testing.T) {
 		accept   string
 		contains []string
 	}{
-		{path: "/join/" + ticket.Code, contains: []string{"Connect This Machine", "Recommended Entry", "Agent Package Catalog", "rdev.connection-entry.package-catalog.v1", "planned-release-asset-required", "rdev-connection-entry-windows-amd64.zip", "bootstrap.sh", "bootstrap.ps1"}},
+		{path: "/join/" + ticket.Code, contains: []string{"Connect This Machine", "Recommended Entry", "Agent Package Catalog", "rdev.connection-entry.package-catalog.v1", "planned-release-asset-required", "rdev-connection-entry-windows-amd64.zip", "bootstrap.sh", "bootstrap.ps1", "signed core"}},
 		{path: "/join/" + ticket.Code + "?lang=zh-CN", contains: []string{"连接这台机器", "推荐入口", "Agent 包目录", "接下来会发生什么", "bootstrap.ps1"}},
 		{path: "/join/" + ticket.Code, accept: "pt-PT,pt;q=0.9", contains: []string{"Conectar Esta Maquina", "O que acontece depois"}},
-		{path: "/join/" + ticket.Code + "/bootstrap.sh", contains: []string{"host serve", "Downloading verified rdev helper", ".gz", "gzip -dc", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport long-poll", "--once=false", "--max-tasks 0", "--identity-store", "host-identity.json", "caffeinate -dimsu", "systemd-inhibit --what=sleep:idle", "does not bypass lock-screen"}},
-		{path: "/join/" + ticket.Code + "/bootstrap.ps1", contains: []string{"host serve", "Downloading verified rdev helper", ".gz", "GzipStream", ".sha256", "--manifest-url", "--manifest-root-public-key", "--transport long-poll", "--once=false", "--max-tasks 0", "--identity-store", "host-identity.json", "ES_DISPLAY_REQUIRED", "does not", "bypass lock-screen policy"}},
+		{path: "/join/" + ticket.Code + "/bootstrap.sh", contains: []string{"rdev-bootstrap", "layered-run", ".sha256", "--root-public-key", "--expected-release-version", "--manifest-url", "--manifest-root-public-key", "--transport auto", "--once=false", "--max-tasks 0", "--identity-store", "host-identity.json"}},
+		{path: "/join/" + ticket.Code + "/bootstrap.ps1", contains: []string{"rdev-bootstrap", "layered-run", "attempt-check", ".sha256", "Get-FileHash", "LocalApplicationData", "icacls.exe", "--root-public-key", "--expected-release-version", "--manifest-url", "--manifest-root-public-key", "--transport", "'auto'", "--once=false", "--max-tasks"}},
 	} {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
 		if tc.accept != "" {
@@ -441,13 +441,14 @@ func TestJoinPageAndBootstrapScripts(t *testing.T) {
 			}
 		}
 		if strings.Contains(rec.Body.String(), "ExecutionPolicy Bypass") ||
-			strings.Contains(rec.Body.String(), "rdev is required") {
+			strings.Contains(rec.Body.String(), "rdev is required") ||
+			strings.Contains(rec.Body.String(), "checks for <code>rdev</code>") {
 			t.Fatalf("%s should not require preinstalled rdev or bypass execution policy:\n%s", tc.path, rec.Body.String())
 		}
 	}
 }
 
-func TestBootstrapScriptsReportPreconnectBeforeHelperDownload(t *testing.T) {
+func TestBootstrapScriptsRemainSmallAndSkipLegacyPreconnect(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	handler := server.Handler()
 	ticket := createTicket(t, handler)
@@ -463,9 +464,12 @@ func TestBootstrapScriptsReportPreconnectBeforeHelperDownload(t *testing.T) {
 			t.Fatalf("%s expected 200, got %d: %s", path, rec.Code, rec.Body.String())
 		}
 		body := rec.Body.String()
-		for _, want := range []string{"/v1/support-session/preconnect", "downloading-helper", "rdev-bootstrap-preconnect"} {
-			if !strings.Contains(body, want) {
-				t.Fatalf("%s expected %q in bootstrap body:\n%s", path, want, body)
+		if !strings.Contains(body, "rdev-bootstrap") || !strings.Contains(body, "layered-run") {
+			t.Fatalf("%s must hand off through rdev-bootstrap:\n%s", path, body)
+		}
+		for _, forbidden := range []string{"/v1/support-session/preconnect", "downloading-helper", "rdev-bootstrap-preconnect"} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s retained legacy preconnect marker %q:\n%s", path, forbidden, body)
 			}
 		}
 		if rec.Body.Len() >= 1<<20 {
@@ -474,7 +478,7 @@ func TestBootstrapScriptsReportPreconnectBeforeHelperDownload(t *testing.T) {
 	}
 }
 
-func TestBootstrapScriptsUseVerifiedHelperCache(t *testing.T) {
+func TestBootstrapScriptsVerifyBootstrapAndUseProtectedCache(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	handler := server.Handler()
 	ticket := createTicket(t, handler)
@@ -489,14 +493,13 @@ func TestBootstrapScriptsUseVerifiedHelperCache(t *testing.T) {
 			name: "shell",
 			path: "/join/" + ticket.Code + "/bootstrap.sh",
 			contains: []string{
-				"remote-dev-skillkit/helpers",
-				"using-cached-helper",
-				"verifying-helper",
-				"starting-full-helper",
+				"rdev-bootstrap-$os-$arch",
+				"RemoteDevSkillkit/cache",
 				"shasum -a 256",
-				"cp \"$out\" \"$cache_path\"",
+				"chmod 700",
+				"layered-run",
 			},
-			forbidden: []string{"systemctl enable", "launchctl load", "sudo "},
+			forbidden: []string{"systemctl enable", "launchctl load", "sudo ", "starting-full-helper"},
 		},
 		{
 			name: "powershell",
@@ -504,14 +507,13 @@ func TestBootstrapScriptsUseVerifiedHelperCache(t *testing.T) {
 			contains: []string{
 				"RemoteDevSkillkit",
 				"cache",
-				"helpers",
-				"using-cached-helper",
-				"verifying-helper",
-				"starting-full-helper",
+				"rdev-bootstrap-windows-$arch.exe",
 				"Get-FileHash",
-				"Copy-Item -Force -Path $rdevPath -Destination $cachePath",
+				"AllowAutoRedirect = $false",
+				"Protect-RdevPath",
+				"layered-run",
 			},
-			forbidden: []string{"New-Service", "sc.exe", "Set-Service"},
+			forbidden: []string{"New-Service", "sc.exe", "Set-Service", "starting-full-helper"},
 		},
 	} {
 		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
@@ -534,7 +536,38 @@ func TestBootstrapScriptsUseVerifiedHelperCache(t *testing.T) {
 	}
 }
 
-func TestShellBootstrapRetryLoopSurvivesSetE(t *testing.T) {
+func TestGeneratedConnectionBootstrapUsesRdevBootstrapOnly(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	ticket := createTicket(t, server.Handler())
+	for _, path := range []string{
+		"/join/" + ticket.Code + "/bootstrap.sh",
+		"/join/" + ticket.Code + "/bootstrap.ps1",
+	} {
+		rec := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s expected 200, got %d", path, rec.Code)
+		}
+		body := rec.Body.String()
+		if !strings.Contains(body, "rdev-bootstrap") {
+			t.Fatalf("%s must invoke rdev-bootstrap:\n%s", path, body)
+		}
+		for _, forbidden := range []string{
+			"command -v rdev",
+			"Get-Command rdev",
+			" host serve",
+			"rdev-host",
+			"Downloading verified rdev helper",
+			"rdev-bootstrap upgrade",
+		} {
+			if strings.Contains(body, forbidden) {
+				t.Fatalf("%s contains legacy connection path %q:\n%s", path, forbidden, body)
+			}
+		}
+	}
+}
+
+func TestShellBootstrapInvokesCoreOnceThroughBootstrap(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	handler := server.Handler()
 	ticket := createTicket(t, handler)
@@ -549,64 +582,35 @@ func TestShellBootstrapRetryLoopSurvivesSetE(t *testing.T) {
 	if !strings.Contains(body, "set -eu") {
 		t.Fatalf("expected strict shell mode in bootstrap body:\n%s", body)
 	}
-	if !strings.Contains(body, "if \"$rdev_cmd\" host serve ") ||
-		!strings.Contains(body, "rdev_exit=0") ||
-		!strings.Contains(body, "rdev_exit=$?") {
-		t.Fatalf("expected retry loop to capture host serve failures without set -e aborting:\n%s", body)
+	if strings.Count(body, "\"$bootstrap_path\" layered-run") != 1 ||
+		!strings.Contains(body, "status=$?") {
+		t.Fatalf("expected exactly one layered bootstrap invocation with propagated status:\n%s", body)
 	}
-	if strings.Contains(body, "\n  \"$rdev_cmd\" host serve ") {
-		t.Fatalf("bootstrap must not run host serve as a bare command under set -e:\n%s", body)
+	for _, forbidden := range []string{"host serve", "rdev_max_retries", "rdev_attempt"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("bootstrap retained legacy retry path %q:\n%s", forbidden, body)
+		}
 	}
 }
 
-func TestBootstrapRetryLoopsStopOnPermanentHostFailureAndKeepSixAttemptLimit(t *testing.T) {
+func TestPowerShellBootstrapUsesOneSharedAttemptState(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	handler := server.Handler()
 	ticket := createTicket(t, handler)
-	permanentCode := strconv.Itoa(hostcmd.PermanentJoinFailureExitCode)
-
-	tests := []struct {
-		name     string
-		path     string
-		contains []string
-	}{
-		{
-			name: "shell",
-			path: "/join/" + ticket.Code + "/bootstrap.sh",
-			contains: []string{
-				"rdev_permanent_exit=" + permanentCode,
-				"rdev_max_retries=5",
-				`[ "$rdev_exit" -eq "$rdev_permanent_exit" ]`,
-				`[ "$rdev_attempt" -gt "$rdev_max_retries" ]`,
-			},
-		},
-		{
-			name: "powershell",
-			path: "/join/" + ticket.Code + "/bootstrap.ps1",
-			contains: []string{
-				"$rdevPermanentExitCode = " + permanentCode,
-				"$rdevMaxRetries = 5",
-				"$rdevExitCode -ne $rdevPermanentExitCode",
-				"$rdevAttempt -le $rdevMaxRetries",
-			},
-		},
+	req := httptest.NewRequest(http.MethodGet, "/join/"+ticket.Code+"/bootstrap.ps1", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
-			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
-			if rec.Code != http.StatusOK {
-				t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-			}
-			body := rec.Body.String()
-			for _, want := range tc.contains {
-				if !strings.Contains(body, want) {
-					t.Fatalf("bootstrap must contain %q:\n%s", want, body)
-				}
-			}
-		})
+	body := rec.Body.String()
+	for _, want := range []string{"$attemptDir", "attempt-check", "--attempt-dir", "--launcher", "'powershell'"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("PowerShell bootstrap must contain %q:\n%s", want, body)
+		}
+	}
+	if strings.Count(body, "& $bootstrapPath @bootstrapArgs") != 1 {
+		t.Fatalf("PowerShell bootstrap must launch layered-run exactly once:\n%s", body)
 	}
 }
 
@@ -630,7 +634,7 @@ func TestUnexpectedControlPlaneErrorIsRecoverableAndDoesNotLeakDetails(t *testin
 	}
 }
 
-func TestBootstrapHelperDownloadsUseRetryBackoff(t *testing.T) {
+func TestBootstrapDownloadsUseTLSAndChecksumVerification(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	handler := server.Handler()
 	ticket := createTicket(t, handler)
@@ -642,15 +646,9 @@ func TestBootstrapHelperDownloadsUseRetryBackoff(t *testing.T) {
 		t.Fatalf("expected shell bootstrap 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 	shellBody := rec.Body.String()
-	for _, want := range []string{
-		"rdev_curl_retry_flags=\"--retry 3 --retry-delay 2 --connect-timeout 10\"",
-		"curl $rdev_curl_retry_flags -fsSL",
-		"\"/${asset}.gz\" -o \"$tmp_gz\"",
-		"\"/${asset}\" -o \"$out\"",
-		"\"/${asset}.sha256\"",
-	} {
+	for _, want := range []string{"--proto '=https'", "--tlsv1.2", "--retry 3", ".sha256", "SHA-256 mismatch", "rdev-bootstrap"} {
 		if !strings.Contains(shellBody, want) {
-			t.Fatalf("expected shell helper download retry/backoff fragment %q in bootstrap body:\n%s", want, shellBody)
+			t.Fatalf("expected shell bootstrap verification fragment %q in bootstrap body:\n%s", want, shellBody)
 		}
 	}
 
@@ -671,21 +669,9 @@ func TestBootstrapHelperDownloadsUseRetryBackoff(t *testing.T) {
 		t.Fatalf("PowerShell bootstrap ticket hash header = %q, want opaque hash %q", got, expectedTicketHash)
 	}
 	powerShellBody := rec.Body.String()
-	for _, want := range []string{
-		"function Invoke-RdevWebRequestWithRetry",
-		"[int]$MaxAttempts = 3",
-		"Start-Sleep -Seconds",
-		"HttpWebRequest",
-		"AddRange",
-		".part",
-		"PartialContent",
-		"Invoke-RdevWebRequestWithRetry -Uri ('",
-		"+ $asset + '.gz') -OutFile $compressedPath",
-		"+ $asset) -OutFile $rdevPath",
-		"+ $asset + '.sha256')",
-	} {
+	for _, want := range []string{"AllowAutoRedirect = $false", "Get-FileHash", ".sha256", "SHA-256 mismatch", "attempt-check", "--transport', 'auto'"} {
 		if !strings.Contains(powerShellBody, want) {
-			t.Fatalf("expected PowerShell helper download retry/backoff fragment %q in bootstrap body:\n%s", want, powerShellBody)
+			t.Fatalf("expected PowerShell bootstrap verification fragment %q in bootstrap body:\n%s", want, powerShellBody)
 		}
 	}
 }
@@ -695,7 +681,7 @@ func TestSupportSessionStatusIncludesPreconnectEvents(t *testing.T) {
 	handler := server.Handler()
 	ticket := createTicket(t, handler)
 
-	preconnectBody := bytes.NewBufferString(`{"ticket_code":"` + ticket.Code + `","phase":"downloading-helper","os":"windows","arch":"amd64","asset":"rdev-windows-amd64.exe","source":"rdev-bootstrap-preconnect","message":"downloading helper"}`)
+	preconnectBody := bytes.NewBufferString(`{"ticket_code":"` + ticket.Code + `","phase":"downloading-core","os":"windows","arch":"amd64","asset":"rdev-host-windows-amd64.exe","source":"rdev-bootstrap-layered","message":"downloading verified core runtime"}`)
 	preconnectReq := httptest.NewRequest(http.MethodPost, "/v1/support-session/preconnect", preconnectBody)
 	preconnectReq.Header.Set("Content-Type", "application/json")
 	preconnectRec := httptest.NewRecorder()
@@ -747,17 +733,17 @@ func TestSupportSessionStatusIncludesPreconnectEvents(t *testing.T) {
 	}
 	event := statusPayload.TargetPreconnects[0]
 	if event.TicketCode != ticket.Code ||
-		event.Phase != "downloading-helper" ||
+		event.Phase != "downloading-core" ||
 		event.OS != "windows" ||
 		event.Arch != "amd64" ||
-		event.Asset != "rdev-windows-amd64.exe" ||
-		event.Source != "rdev-bootstrap-preconnect" ||
+		event.Asset != "rdev-host-windows-amd64.exe" ||
+		event.Source != "rdev-bootstrap-layered" ||
 		event.SeenCount != 1 {
 		t.Fatalf("unexpected preconnect event: %#v", event)
 	}
 	if statusPayload.TargetPreconnectSummary.Status != "target-downloading" ||
-		statusPayload.TargetPreconnectSummary.Phase != "downloading-helper" ||
-		statusPayload.TargetPreconnectSummary.CountByPhase["downloading-helper"] != 1 ||
+		statusPayload.TargetPreconnectSummary.Phase != "downloading-core" ||
+		statusPayload.TargetPreconnectSummary.CountByPhase["downloading-core"] != 1 ||
 		!strings.Contains(statusPayload.TargetPreconnectSummary.AgentInterpretation, "not disconnected") {
 		t.Fatalf("unexpected preconnect summary: %#v", statusPayload.TargetPreconnectSummary)
 	}
@@ -951,45 +937,109 @@ func TestSupportSessionStatusUnknownTicketDoesNotExposeHosts(t *testing.T) {
 
 func TestJoinAssetsServeConfiguredBinaryAndHash(t *testing.T) {
 	dir := t.TempDir()
-	binaryPath := filepath.Join(dir, "rdev.exe")
-	if err := os.WriteFile(binaryPath, []byte("fake rdev binary\n"), 0o600); err != nil {
+	binaryPath := filepath.Join(dir, "rdev-bootstrap-windows-amd64.exe")
+	if err := os.WriteFile(binaryPath, []byte("fake bootstrap binary\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	server := NewServer(gateway.NewMemoryGateway())
-	server.Assets.RdevWindowsAMD64Path = binaryPath
+	server.Assets.RdevBootstrapWindowsAMD64Path = binaryPath
 	handler := server.Handler()
 
-	req := httptest.NewRequest(http.MethodGet, "/assets/rdev-windows-amd64.exe.sha256", nil)
+	req := httptest.NewRequest(http.MethodGet, "/assets/rdev-bootstrap-windows-amd64.exe.sha256", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
 	}
-	sum := sha256.Sum256([]byte("fake rdev binary\n"))
+	sum := sha256.Sum256([]byte("fake bootstrap binary\n"))
 	if strings.TrimSpace(rec.Body.String()) != hex.EncodeToString(sum[:]) {
 		t.Fatalf("unexpected sha body: %q", rec.Body.String())
 	}
 
-	req = httptest.NewRequest(http.MethodGet, "/assets/rdev-windows-amd64.exe", nil)
+	req = httptest.NewRequest(http.MethodGet, "/assets/rdev-bootstrap-windows-amd64.exe", nil)
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "fake rdev binary") {
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "fake bootstrap binary") {
 		t.Fatalf("expected configured binary, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRdevHostWindowsAMD64AssetServesExactBinaryAndHashOnly(t *testing.T) {
+	dir := t.TempDir()
+	binaryContent := []byte("fake Windows host core runtime\n")
+	binaryPath := filepath.Join(dir, "rdev-host-windows-amd64.exe")
+	if err := os.WriteFile(binaryPath, binaryContent, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(gateway.NewMemoryGateway())
+	server.Assets.RdevHostWindowsAMD64Path = binaryPath
+	handler := server.Handler()
+
+	req := httptest.NewRequest(http.MethodGet, "/assets/rdev-host-windows-amd64.exe", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), binaryContent) {
+		t.Fatalf("expected configured Windows host runtime, got %d: %q", rec.Code, rec.Body.Bytes())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/assets/rdev-host-windows-amd64.exe.sha256", nil)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	sum := sha256.Sum256(binaryContent)
+	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != hex.EncodeToString(sum[:]) {
+		t.Fatalf("expected Windows host runtime checksum, got %d: %q", rec.Code, rec.Body.String())
+	}
+
+	for _, requestPath := range []string{
+		"/assets/rdev-host-windows-arm64.exe",
+		"/assets/rdev-host-windows-amd64.exe.extra",
+		"/assets/nested/rdev-host-windows-amd64.exe",
+		"/assets/../rdev-host-windows-amd64.exe",
+		"/assets/rdev-host-windows-amd64.exe.gz",
+		"/assets/rdev-host-windows-amd64.exe.gz.sha256",
+		"/assets/rdev-host-windows-amd64.exe/",
+		"/assets/rdev-host-windows-amd64.exe.sha256/",
+		"/assets/rdev-host-windows-amd64.exe?download=1",
+		"/assets/rdev-host-windows-amd64.exe.sha256?download=1",
+		"/assets/%2Frdev-host-windows-amd64.exe",
+		"/assets/%2Frdev-host-windows-amd64.exe.sha256",
+	} {
+		req = httptest.NewRequest(http.MethodGet, requestPath, nil)
+		rec = httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code == http.StatusOK || bytes.Contains(rec.Body.Bytes(), binaryContent) {
+			t.Fatalf("unexpected Windows host asset exposure for %q: %d %q", requestPath, rec.Code, rec.Body.Bytes())
+		}
+	}
+}
+
+func TestAssetErrorsDoNotExposeConfiguredFilesystemPath(t *testing.T) {
+	privatePath := filepath.Join(t.TempDir(), "private", "rdev-host-windows-amd64.exe")
+	rec := httptest.NewRecorder()
+	NewServer(gateway.NewMemoryGateway()).serveGzipAsset(rec, privatePath)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected asset read failure, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), privatePath) || strings.Contains(rec.Body.String(), filepath.Dir(privatePath)) {
+		t.Fatalf("asset error exposed configured filesystem path: %s", rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"error":"asset is unavailable"`) {
+		t.Fatalf("expected generic asset error, got %s", rec.Body.String())
 	}
 }
 
 func TestJoinAssetsServeGzipBinary(t *testing.T) {
 	dir := t.TempDir()
-	binaryPath := filepath.Join(dir, "rdev.exe")
-	content := bytes.Repeat([]byte("fake rdev binary\n"), 1024)
+	binaryPath := filepath.Join(dir, "rdev-bootstrap-windows-amd64.exe")
+	content := bytes.Repeat([]byte("fake bootstrap binary\n"), 1024)
 	if err := os.WriteFile(binaryPath, content, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	server := NewServer(gateway.NewMemoryGateway())
-	server.Assets.RdevWindowsAMD64Path = binaryPath
+	server.Assets.RdevBootstrapWindowsAMD64Path = binaryPath
 	handler := server.Handler()
 
-	req := httptest.NewRequest(http.MethodGet, "/assets/rdev-windows-amd64.exe.gz", nil)
+	req := httptest.NewRequest(http.MethodGet, "/assets/rdev-bootstrap-windows-amd64.exe.gz", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -1010,14 +1060,14 @@ func TestJoinAssetsServeGzipBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(got, content) {
-		t.Fatal("gzip helper body did not round trip")
+		t.Fatal("gzip bootstrap body did not round trip")
 	}
 }
 
 func TestTicketManifestPackageCatalogIncludesHelperAssetMirrors(t *testing.T) {
 	dir := t.TempDir()
-	windowsHelper := filepath.Join(dir, "rdev-windows-amd64.exe")
-	helperContent := []byte("signed helper mirror contract\n")
+	windowsHelper := filepath.Join(dir, "rdev-bootstrap-windows-amd64.exe")
+	helperContent := []byte("signed bootstrap mirror contract\n")
 	if err := os.WriteFile(windowsHelper, helperContent, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1026,7 +1076,7 @@ func TestTicketManifestPackageCatalogIncludesHelperAssetMirrors(t *testing.T) {
 
 	gw := gateway.NewMemoryGateway()
 	server := NewServer(gw)
-	server.Assets.RdevWindowsAMD64Path = windowsHelper
+	server.Assets.RdevBootstrapWindowsAMD64Path = windowsHelper
 	handler := server.Handler()
 	ticket := createTicket(t, handler)
 
@@ -1055,15 +1105,15 @@ func TestTicketManifestPackageCatalogIncludesHelperAssetMirrors(t *testing.T) {
 	if candidate.ID == "" {
 		t.Fatalf("windows-amd64 candidate missing: %#v", payload.Manifest.PackageCatalog.Candidates)
 	}
-	if candidate.HelperAsset.Name != "rdev-windows-amd64.exe" ||
+	if candidate.HelperAsset.Name != "rdev-bootstrap-windows-amd64.exe" ||
 		candidate.HelperAsset.ExpectedSHA256 != expectedSHA ||
-		candidate.HelperAsset.SHA256URL != "https://gateway.example.test/assets/rdev-windows-amd64.exe.sha256" ||
+		candidate.HelperAsset.SHA256URL != "https://gateway.example.test/assets/rdev-bootstrap-windows-amd64.exe.sha256" ||
 		len(candidate.HelperAsset.Mirrors) < 2 {
 		t.Fatalf("expected helper asset mirror contract, got %#v", candidate.HelperAsset)
 	}
-	if candidate.HelperAsset.Mirrors[0].URL != "https://gateway.example.test/assets/rdev-windows-amd64.exe.gz" ||
+	if candidate.HelperAsset.Mirrors[0].URL != "https://gateway.example.test/assets/rdev-bootstrap-windows-amd64.exe.gz" ||
 		candidate.HelperAsset.Mirrors[0].Compression != "gzip" ||
-		candidate.HelperAsset.Mirrors[1].URL != "https://gateway.example.test/assets/rdev-windows-amd64.exe" ||
+		candidate.HelperAsset.Mirrors[1].URL != "https://gateway.example.test/assets/rdev-bootstrap-windows-amd64.exe" ||
 		candidate.HelperAsset.Mirrors[1].Compression != "" {
 		t.Fatalf("unexpected helper mirrors: %#v", candidate.HelperAsset.Mirrors)
 	}

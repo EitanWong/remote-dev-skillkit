@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -122,7 +121,7 @@ func (a App) serve(ctx context.Context, args []string) error {
 	manifestURL := fs.String("manifest-url", "", "signed join manifest URL")
 	name := fs.String("name", "", "host display name; defaults to detected hostname")
 	once := fs.Bool("once", true, "join once and exit after printing status")
-	transport := fs.String("transport", "poll", "session event transport: auto, poll, long-poll, or wss")
+	transport := fs.String("transport", "poll", "session event transport: auto, poll, or long-poll")
 	pollInterval := fs.Duration("poll-interval", time.Second, "session event polling interval when --once=false")
 	longPollTimeout := fs.Duration("long-poll-timeout", 25*time.Second, "long-poll wait duration when --transport=long-poll")
 	maxTasks := fs.Int("max-tasks", 1, "maximum session tasks to process when --once=false; 0 = unlimited")
@@ -194,7 +193,7 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 		opts.Transport = "poll"
 	}
 	switch opts.Transport {
-	case "auto", "poll", "long-poll", "wss":
+	case "auto", "poll", "long-poll":
 	default:
 		return fmt.Errorf("unsupported host transport %q", opts.Transport)
 	}
@@ -207,13 +206,22 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 		return err
 	}
 	if opts.ManifestURL != "" {
-		manifest, err := fetchJoinManifest(ctx, gatewayClient, opts.ManifestURL, opts.TrustPin, opts.ManifestRootPublicKey)
+		if !safeRouteURL(strings.TrimSpace(opts.ManifestURL)) {
+			return fmt.Errorf("join manifest URL must use HTTPS or an explicit loopback development endpoint")
+		}
+		configuredGateway := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
+		manifestCtx, cancelManifest := context.WithTimeout(ctx, 30*time.Second)
+		manifest, err := fetchJoinManifest(manifestCtx, gatewayClient, opts.ManifestURL, opts.TrustPin, opts.ManifestRootPublicKey)
+		cancelManifest()
 		if err != nil {
-			return err
+			return fmt.Errorf("join manifest verification failed")
+		}
+		if configuredGateway != "" && !joinManifestContainsGateway(manifest, configuredGateway) {
+			return fmt.Errorf("configured gateway is not present in the verified join manifest")
 		}
 		opts.ManifestGatewayCandidates = manifest.GatewayCandidates
 		if strings.TrimSpace(opts.GatewayURL) == "" {
-			opts.GatewayURL = selectJoinManifestGatewayURL(ctx, gatewayClient, manifest)
+			opts.GatewayURL = manifest.GatewayURL
 		}
 		opts.TicketCode = manifest.TicketCode
 		opts.TrustPin = manifest.TrustFingerprint
@@ -231,6 +239,16 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 	if !isLocalDevGatewayURL(opts.GatewayURL) && !isSignedManifestGatewayURL(opts.GatewayURL, manifestRootVerified) {
 		return fmt.Errorf("non-local gateway registration requires --manifest-url with --manifest-root-public-key and an HTTPS or private/LAN gateway URL")
 	}
+	routes := newGatewayCandidateSet(opts.GatewayURL, opts.ManifestGatewayCandidates, opts.Transport)
+	if err := validateGatewayCandidateSet(routes, manifestRootVerified); err != nil {
+		return err
+	}
+	selectedRoute, err := routes.initialize(ctx, gatewayClient, opts.TrustPin)
+	if err != nil {
+		return err
+	}
+	opts.GatewayURL = selectedRoute.URL
+	opts.Transport = selectedRoute.Transport
 	identity, identityCreated, err := hostidentity.LoadOrCreate(opts.IdentityStorePath, opts.IdentityKeyID)
 	if err != nil {
 		return err
@@ -250,10 +268,7 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 		RenewAfterMS:        20_000,
 		RetryAfterMS:        1_000,
 	}
-	switch opts.Transport {
-	case "wss":
-		endpointSpec.Transport = controlplane.TransportWSS
-	case "poll":
+	if opts.Transport == "poll" {
 		endpointSpec.Transport = controlplane.TransportPoll
 	}
 	var enrollmentCertificateSummary *model.HostEnrollmentCertificate
@@ -264,7 +279,9 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 		}
 		enrollmentCertificateSummary = &certificate
 	}
-	session, endpoint, lease, _, err := joinSessionByCode(ctx, gatewayClient, opts.GatewayURL, opts.TicketCode, endpointSpec)
+	joinCtx, cancelJoin := context.WithTimeout(ctx, 30*time.Second)
+	session, endpoint, lease, initialEvents, err := joinSessionByCode(joinCtx, gatewayClient, opts.GatewayURL, opts.TicketCode, endpointSpec)
+	cancelJoin()
 	if err != nil {
 		return err
 	}
@@ -319,7 +336,7 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 	} else {
 		_, _ = fmt.Fprintf(a.Stderr, "[rdev] keep-awake not active: %s\n", keepAwake.Detail)
 	}
-	processed, err := a.runSessionTasks(ctx, opts, gatewayClient, session.ID, endpoint.ID, identity.Fingerprint(), lease.Secret, lease)
+	processed, err := a.runSessionTasksWithEvents(ctx, opts, gatewayClient, session.ID, endpoint.ID, identity.Fingerprint(), lease.Secret, lease, routes, initialEvents)
 	if err != nil {
 		return err
 	}
@@ -460,7 +477,7 @@ func gatewayHTTPClient(opts serveOptions) (*http.Client, error) {
 		transport.TLSClientConfig = tlsConfig
 		base = transport
 	}
-	return &http.Client{Transport: retryingRoundTripper{Base: base, MaxRetries: 3}}, nil
+	return &http.Client{Transport: retryingRoundTripper{Base: base, MaxRetries: 3}, CheckRedirect: rejectGatewayRedirect}, nil
 }
 
 func gatewayTLSClientConfig(opts serveOptions) (*tls.Config, error) {
@@ -495,7 +512,7 @@ func gatewayTLSClientConfig(opts serveOptions) (*tls.Config, error) {
 func isLocalDevGatewayURL(value string) bool {
 	parsed, err := url.Parse(value)
 	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") &&
-		(parsed.Hostname() == "127.0.0.1" || parsed.Hostname() == "localhost") && parsed.Port() != ""
+		(parsed.Hostname() == "127.0.0.1" || parsed.Hostname() == "::1" || parsed.Hostname() == "localhost") && parsed.Port() != ""
 }
 
 func isSignedManifestGatewayURL(value string, manifestRootVerified bool) bool {
@@ -509,16 +526,7 @@ func isSignedManifestGatewayURL(value string, manifestRootVerified bool) bool {
 	if parsed.Scheme == "https" {
 		return true
 	}
-	return parsed.Scheme == "http" && isPrivateOrLANHost(parsed.Hostname()) && parsed.Port() != ""
-}
-
-func isPrivateOrLANHost(host string) bool {
-	normalized := strings.Trim(strings.ToLower(host), "[]")
-	if normalized == "localhost" || strings.HasSuffix(normalized, ".local") || strings.HasSuffix(normalized, ".lan") {
-		return true
-	}
-	ip := net.ParseIP(normalized)
-	return ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast())
+	return isLocalDevGatewayURL(value)
 }
 
 func readEnrollmentCertificateFile(path string) (model.HostEnrollmentCertificate, error) {
@@ -626,9 +634,21 @@ func isRetryableNetErr(err error) bool {
 
 func doGatewayRequest(client *http.Client, req *http.Request) (*http.Response, error) {
 	if client == nil {
-		client = &http.Client{Transport: retryingRoundTripper{Base: http.DefaultTransport, MaxRetries: 3}}
+		client = &http.Client{Transport: retryingRoundTripper{Base: http.DefaultTransport, MaxRetries: 3}, CheckRedirect: rejectGatewayRedirect}
+	} else {
+		guarded := *client
+		guarded.CheckRedirect = rejectGatewayRedirect
+		client = &guarded
 	}
 	return client.Do(req)
+}
+
+func rejectGatewayRedirect(_ *http.Request, _ []*http.Request) error {
+	return http.ErrUseLastResponse
+}
+
+func opaqueGatewayRouteError(operation string) error {
+	return fmt.Errorf("gateway route %s", operation)
 }
 
 func newIdempotencyKey(prefix string) string {
@@ -649,18 +669,18 @@ func joinSessionByCode(ctx context.Context, client *http.Client, gatewayURL, joi
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(gatewayURL, "/")+"/v1/session-joins", bytes.NewReader(body))
 	if err != nil {
-		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, err
+		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, opaqueGatewayRouteError("registration request is invalid")
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", newIdempotencyKey("session-join"))
 	resp, err := doGatewayRequest(client, req)
 	if err != nil {
-		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, err
+		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, opaqueGatewayRouteError("registration failed")
 	}
 	defer resp.Body.Close()
-	body, err = io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	body, err = readBoundedGatewayBody(resp.Body, 256*1024)
 	if err != nil {
-		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, err
+		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, opaqueGatewayRouteError("registration response failed")
 	}
 	var payload struct {
 		Session  controlplane.Session  `json:"session"`
@@ -677,10 +697,21 @@ func joinSessionByCode(ctx context.Context, client *http.Client, gatewayURL, joi
 	if payload.Session.ID == "" || payload.Endpoint.ID == "" || payload.Lease.Secret == "" {
 		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, fmt.Errorf("join session failed: incomplete session join response")
 	}
+	if err := validateLeaseBinding(controlplane.Lease{}, payload.Lease, payload.Session.ID, payload.Endpoint.ID); err != nil {
+		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, err
+	}
 	return payload.Session, payload.Endpoint, payload.Lease, payload.Events, nil
 }
 
-func (a App) runSessionTasks(ctx context.Context, opts serveOptions, client *http.Client, sessionID, endpointID, identityFingerprint, leaseSecret string, lease controlplane.Lease) (int, error) {
+func (a App) runSessionTasks(ctx context.Context, opts serveOptions, client *http.Client, sessionID, endpointID, identityFingerprint, leaseSecret string, lease controlplane.Lease, providedRoutes ...*gatewayCandidateSet) (int, error) {
+	var routes *gatewayCandidateSet
+	if len(providedRoutes) > 0 {
+		routes = providedRoutes[0]
+	}
+	return a.runSessionTasksWithEvents(ctx, opts, client, sessionID, endpointID, identityFingerprint, leaseSecret, lease, routes, nil)
+}
+
+func (a App) runSessionTasksWithEvents(ctx context.Context, opts serveOptions, client *http.Client, sessionID, endpointID, identityFingerprint, leaseSecret string, lease controlplane.Lease, providedRoutes *gatewayCandidateSet, initialEvents []controlplane.Event) (int, error) {
 	maxTasks := opts.MaxTasks
 	switch {
 	case maxTasks == 0:
@@ -692,30 +723,97 @@ func (a App) runSessionTasks(ctx context.Context, opts serveOptions, client *htt
 	if interval <= 0 {
 		interval = time.Second
 	}
-	routes := newGatewayCandidateSet(opts.GatewayURL, opts.ManifestGatewayCandidates)
+	routes := newGatewayCandidateSet(opts.GatewayURL, opts.ManifestGatewayCandidates, opts.Transport)
+	if providedRoutes != nil {
+		routes = providedRoutes
+	}
+	selectedRoute, err := routes.initialize(ctx, client, opts.TrustPin)
+	if err != nil {
+		return 0, err
+	}
+	opts.GatewayURL = selectedRoute.URL
+	opts.Transport = selectedRoute.Transport
 	for {
-		opts.GatewayURL = routes.current()
-		if _, err := fetchHostTrust(ctx, client, opts.GatewayURL, opts.TrustPin, opts.TrustStorePath); err == nil {
-			break
-		} else if !routes.rotate(ctx, client, opts.TrustPin) {
-			return 0, err
+		snapshot, ok := routes.currentSnapshot()
+		if !ok {
+			return 0, errNoHealthyRoutes
+		}
+		opts.GatewayURL = snapshot.Candidate.URL
+		opts.Transport = snapshot.Candidate.Transport
+		trustCtx, cancelTrust := routeRequestContext(ctx, snapshot, 2*time.Second)
+		_, trustErr := fetchHostTrust(trustCtx, client, opts.GatewayURL, opts.TrustPin, opts.TrustStorePath)
+		cancelTrust()
+		if trustErr == nil {
+			if routes.reportSuccess(snapshot) {
+				break
+			}
+			continue
+		} else if !routes.reportFailure(ctx, snapshot) {
+			return 0, opaqueGatewayRouteError("trust verification failed")
 		}
 	}
+	monitorCtx, stopMonitor := context.WithCancel(ctx)
+	monitorErrors := make(chan error, 1)
+	monitorDone := make(chan struct{})
+	go func() {
+		defer close(monitorDone)
+		monitorErrors <- routes.monitor(monitorCtx, time.Second)
+	}()
+	defer func() {
+		stopMonitor()
+		<-monitorDone
+	}()
 	processed := 0
 	afterSeq := uint64(0)
+	currentLease := lease
+	pendingInitialEvents := append([]controlplane.Event(nil), initialEvents...)
 	if lease.RetryAfterMS > 0 {
 		interval = time.Duration(lease.RetryAfterMS) * time.Millisecond
 	}
 pollLoop:
 	for processed < maxTasks {
-		opts.GatewayURL = routes.current()
-		events, nextLease, replay, err := fetchSessionEvents(ctx, client, opts.GatewayURL, sessionID, endpointID, leaseSecret, afterSeq, sessionEventLimit(opts.Transport))
+		select {
+		case monitorErr := <-monitorErrors:
+			if monitorErr != nil && !errors.Is(monitorErr, context.Canceled) {
+				return processed, monitorErr
+			}
+		default:
+		}
+		snapshot, ok := routes.currentSnapshot()
+		if !ok {
+			if _, err := routes.probe(ctx); err != nil {
+				return processed, err
+			}
+			snapshot, ok = routes.currentSnapshot()
+			if !ok {
+				if err := sleepOrDone(ctx, interval); err != nil {
+					return processed, err
+				}
+				continue
+			}
+		}
+		opts.GatewayURL = snapshot.Candidate.URL
+		opts.Transport = snapshot.Candidate.Transport
+		var events []controlplane.Event
+		var nextLease controlplane.Lease
+		var replay controlplane.EventReplayState
+		var err error
+		eventLimit := sessionEventLimit(opts.Transport)
+		eventsFromInitial := len(pendingInitialEvents) > 0
+		if eventsFromInitial {
+			events = append([]controlplane.Event(nil), pendingInitialEvents...)
+			pendingInitialEvents = nil
+		} else {
+			requestCtx, cancelRequest := routeRequestContext(ctx, snapshot, sessionRequestTimeout(opts))
+			events, nextLease, replay, err = fetchSessionEvents(requestCtx, client, opts.GatewayURL, sessionID, endpointID, leaseSecret, afterSeq, eventLimit, sessionLongPollWait(opts))
+			cancelRequest()
+		}
 		if err != nil {
 			if isTransientGatewayResponseError(err) {
-				if routes.rotate(ctx, client, opts.TrustPin) {
+				if routes.reportFailure(ctx, snapshot) {
 					continue pollLoop
 				}
-				_, _ = fmt.Fprintf(a.Stderr, "rdev-host: transient gateway response while polling session events: %v\n", err)
+				_, _ = fmt.Fprintln(a.Stderr, "rdev-host: transient gateway response while polling session events; retrying after backoff")
 				if err := sleepOrDone(ctx, interval); err != nil {
 					return processed, err
 				}
@@ -723,8 +821,29 @@ pollLoop:
 			}
 			return processed, err
 		}
+		if !eventsFromInitial {
+			if nextLease.Secret == "" {
+				if routes.reportFailure(ctx, snapshot) {
+					continue pollLoop
+				}
+				return processed, opaqueGatewayRouteError("returned an incomplete lease")
+			}
+			if err := validateLeaseBinding(currentLease, nextLease, sessionID, endpointID); err != nil {
+				if routes.reportFailure(ctx, snapshot) {
+					continue pollLoop
+				}
+				return processed, err
+			}
+		}
+		if !routes.reportSuccess(snapshot) {
+			if eventsFromInitial {
+				pendingInitialEvents = append([]controlplane.Event(nil), events...)
+			}
+			continue pollLoop
+		}
 		if nextLease.Secret != "" {
 			leaseSecret = nextLease.Secret
+			currentLease = nextLease
 			if nextLease.RetryAfterMS > 0 {
 				interval = time.Duration(nextLease.RetryAfterMS) * time.Millisecond
 			}
@@ -733,39 +852,55 @@ pollLoop:
 			return processed, fmt.Errorf("session event cursor is stale; restart host session to refresh snapshot")
 		}
 		foundTask := false
-		batchStartSeq := afterSeq
-		for _, event := range events {
-			if event.Seq > afterSeq {
-				afterSeq = event.Seq
+		for eventIndex, event := range events {
+			if event.Seq <= afterSeq {
+				continue
 			}
 			if event.Type != controlplane.EventTypeTask || event.TaskID == "" {
+				afterSeq = event.Seq
 				continue
 			}
 			action, _ := event.Payload["action"].(string)
 			if action != "offer" {
+				afterSeq = event.Seq
 				continue
 			}
-			task, err := fetchSessionTask(ctx, client, opts.GatewayURL, sessionID, event.TaskID)
+			taskSnapshot, ok := routes.currentSnapshot()
+			if !ok {
+				pendingInitialEvents = append([]controlplane.Event(nil), events[eventIndex:]...)
+				continue pollLoop
+			}
+			opts.GatewayURL = taskSnapshot.Candidate.URL
+			opts.Transport = taskSnapshot.Candidate.Transport
+			requestCtx, cancelRequest := routeRequestContext(ctx, taskSnapshot, sessionRequestTimeout(opts))
+			task, err := fetchSessionTask(requestCtx, client, opts.GatewayURL, sessionID, event.TaskID)
+			cancelRequest()
 			if err != nil {
-				if isTransientGatewayResponseError(err) && routes.rotate(ctx, client, opts.TrustPin) {
-					afterSeq = batchStartSeq
+				if isTransientGatewayResponseError(err) && routes.reportFailure(ctx, taskSnapshot) {
+					pendingInitialEvents = append([]controlplane.Event(nil), events[eventIndex:]...)
 					continue pollLoop
 				}
 				return processed, err
 			}
+			if !routes.reportSuccess(taskSnapshot) {
+				pendingInitialEvents = append([]controlplane.Event(nil), events[eventIndex:]...)
+				continue pollLoop
+			}
 			if task.TargetEndpointID != endpointID || task.Terminal() {
+				afterSeq = event.Seq
 				continue
 			}
 			foundTask = true
 			if err := a.runSessionTaskWithRoutes(ctx, opts, client, sessionID, endpointID, identityFingerprint, leaseSecret, task, routes); err != nil {
 				return processed, err
 			}
+			afterSeq = event.Seq
 			processed++
 			if processed >= maxTasks {
 				return processed, nil
 			}
 		}
-		if replay.LastSeq > afterSeq {
+		if len(events) < eventLimit && replay.LastSeq > afterSeq {
 			afterSeq = replay.LastSeq
 		}
 		if !foundTask {
@@ -812,10 +947,30 @@ func (a App) runSessionTaskWithRoutes(ctx context.Context, opts serveOptions, cl
 		payload["runtime_fixture_content"] = result.RuntimeFixtureContent
 	}
 	for {
-		opts.GatewayURL = routes.current()
-		if _, _, completeErr := completeSessionTask(ctx, client, opts.GatewayURL, sessionID, task.ID, leaseSecret, payload); completeErr == nil {
+		snapshot, pooled := routes.currentSnapshot()
+		if pooled {
+			opts.GatewayURL = snapshot.Candidate.URL
+			opts.Transport = snapshot.Candidate.Transport
+		} else {
+			if routes.pool != nil {
+				return errNoHealthyRoutes
+			}
+			opts.GatewayURL = routes.current()
+			opts.Transport = routes.currentTransport()
+		}
+		requestCtx := ctx
+		cancelRequest := func() {}
+		if pooled {
+			requestCtx, cancelRequest = routeRequestContext(ctx, snapshot, sessionRequestTimeout(opts))
+		}
+		_, _, completeErr := completeSessionTask(requestCtx, client, opts.GatewayURL, sessionID, task.ID, leaseSecret, payload)
+		cancelRequest()
+		if completeErr == nil {
+			if pooled {
+				_ = routes.reportSuccess(snapshot)
+			}
 			return nil
-		} else if !isTransientGatewayResponseError(completeErr) || !routes.rotate(ctx, client, opts.TrustPin) {
+		} else if !isTransientGatewayResponseError(completeErr) || (pooled && !routes.reportFailure(ctx, snapshot)) || (!pooled && !routes.rotate(ctx, client, opts.TrustPin)) {
 			if err != nil {
 				return fmt.Errorf("%v; additionally failed to report session task failure: %w", err, completeErr)
 			}
@@ -913,12 +1068,19 @@ func intValueFromAny(value any) int {
 	}
 }
 
-func fetchSessionEvents(ctx context.Context, client *http.Client, gatewayURL, sessionID, endpointID, leaseSecret string, afterSeq uint64, limit int) ([]controlplane.Event, controlplane.Lease, controlplane.EventReplayState, error) {
+func fetchSessionEvents(ctx context.Context, client *http.Client, gatewayURL, sessionID, endpointID, leaseSecret string, afterSeq uint64, limit int, wait ...time.Duration) ([]controlplane.Event, controlplane.Lease, controlplane.EventReplayState, error) {
 	values := url.Values{}
 	values.Set("endpoint_id", endpointID)
 	values.Set("after_seq", strconv.FormatUint(afterSeq, 10))
 	if limit > 0 {
 		values.Set("limit", strconv.Itoa(limit))
+	}
+	if len(wait) > 0 && wait[0] > 0 {
+		waitMS := wait[0].Milliseconds()
+		if waitMS > 60_000 {
+			waitMS = 60_000
+		}
+		values.Set("wait_ms", strconv.FormatInt(waitMS, 10))
 	}
 	endpoint := strings.TrimRight(gatewayURL, "/") + "/v1/sessions/" + url.PathEscape(sessionID) + "/events?" + values.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -933,7 +1095,7 @@ func fetchSessionEvents(ctx context.Context, client *http.Client, gatewayURL, se
 		return nil, controlplane.Lease{}, controlplane.EventReplayState{}, transientGatewayResponseError{Endpoint: endpoint, Cause: err}
 	}
 	defer resp.Body.Close()
-	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	body, readErr := readBoundedGatewayBody(resp.Body, 256*1024)
 	if readErr != nil {
 		return nil, controlplane.Lease{}, controlplane.EventReplayState{}, transientGatewayResponseError{Endpoint: endpoint, Status: resp.Status, Cause: readErr}
 	}
@@ -975,7 +1137,7 @@ func fetchSessionTask(ctx context.Context, client *http.Client, gatewayURL, sess
 		return controlplane.Task{}, transientGatewayResponseError{Endpoint: req.URL.String(), Cause: err}
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	body, err := readBoundedGatewayBody(resp.Body, 256*1024)
 	if err != nil {
 		return controlplane.Task{}, transientGatewayResponseError{Endpoint: req.URL.String(), Status: resp.Status, Cause: err}
 	}
@@ -1019,7 +1181,7 @@ func completeSessionTask(ctx context.Context, client *http.Client, gatewayURL, s
 		return controlplane.Task{}, controlplane.Event{}, transientGatewayResponseError{Endpoint: req.URL.String(), Cause: err}
 	}
 	defer resp.Body.Close()
-	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	responseBody, err := readBoundedGatewayBody(resp.Body, 256*1024)
 	if err != nil {
 		return controlplane.Task{}, controlplane.Event{}, transientGatewayResponseError{Endpoint: req.URL.String(), Status: resp.Status, Cause: err}
 	}
@@ -1043,6 +1205,40 @@ func sessionEventLimit(transport string) int {
 	return 64
 }
 
+func validateLeaseBinding(current, next controlplane.Lease, sessionID, endpointID string) error {
+	if next.Secret == "" {
+		return nil
+	}
+	if next.SessionID != sessionID || next.EndpointID != endpointID {
+		return fmt.Errorf("gateway lease binding does not match the registered session")
+	}
+	if next.Generation <= 0 || (current.Generation > 0 && next.Generation <= current.Generation) {
+		return fmt.Errorf("gateway lease generation did not advance")
+	}
+	return nil
+}
+
+func sessionRequestTimeout(opts serveOptions) time.Duration {
+	if opts.Transport == "long-poll" {
+		return sessionLongPollWait(opts) + 5*time.Second
+	}
+	return 30 * time.Second
+}
+
+func sessionLongPollWait(opts serveOptions) time.Duration {
+	if opts.Transport != "long-poll" {
+		return 0
+	}
+	wait := opts.LongPollTimeout
+	if wait <= 0 {
+		wait = 25 * time.Second
+	}
+	if wait > 60*time.Second {
+		wait = 60 * time.Second
+	}
+	return wait
+}
+
 func sleepOrDone(ctx context.Context, interval time.Duration) error {
 	if interval <= 0 {
 		interval = time.Second
@@ -1060,11 +1256,11 @@ func sleepOrDone(ctx context.Context, interval time.Duration) error {
 func fetchJoinManifest(ctx context.Context, client *http.Client, manifestURL, trustPin, manifestRootPublicKey string) (model.JoinManifest, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
 	if err != nil {
-		return model.JoinManifest{}, err
+		return model.JoinManifest{}, fmt.Errorf("join manifest request is invalid")
 	}
 	resp, err := doGatewayRequest(client, req)
 	if err != nil {
-		return model.JoinManifest{}, err
+		return model.JoinManifest{}, fmt.Errorf("join manifest request failed")
 	}
 	defer resp.Body.Close()
 	var payload struct {
@@ -1072,8 +1268,11 @@ func fetchJoinManifest(ctx context.Context, client *http.Client, manifestURL, tr
 		GatewayTimeProof model.GatewayTimeProof `json:"gateway_time_proof"`
 		Error            string                 `json:"error"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := decodeBoundedGatewayJSON(resp.Body, 256*1024, &payload); err != nil {
 		return model.JoinManifest{}, err
+	}
+	if len(payload.Manifest.GatewayCandidates) > maxManifestCandidates {
+		return model.JoinManifest{}, fmt.Errorf("join manifest contains too many gateway candidates")
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if payload.Error == "" {
@@ -1114,6 +1313,14 @@ func fetchJoinManifest(ctx context.Context, client *http.Client, manifestURL, tr
 	if err := payload.Manifest.Trust.VerifyPin(trustPin); err != nil {
 		return model.JoinManifest{}, err
 	}
+	if !safeRouteURL(payload.Manifest.GatewayURL) {
+		return model.JoinManifest{}, fmt.Errorf("join manifest contains an invalid gateway URL")
+	}
+	for _, candidate := range payload.Manifest.GatewayCandidates {
+		if !safeRouteURL(candidate.URL) {
+			return model.JoinManifest{}, fmt.Errorf("join manifest contains an invalid gateway candidate")
+		}
+	}
 	return payload.Manifest, nil
 }
 
@@ -1143,57 +1350,164 @@ func selectJoinManifestGatewayURL(ctx context.Context, client *http.Client, mani
 	return fallback
 }
 
-type gatewayCandidateSet struct {
-	urls  []string
-	index int
-}
-
-func newGatewayCandidateSet(current string, candidates []model.JoinManifestGatewayCandidate) *gatewayCandidateSet {
-	urls := make([]string, 0, len(candidates)+1)
-	add := func(value string) {
-		value = strings.TrimRight(strings.TrimSpace(value), "/")
-		if value == "" {
-			return
-		}
-		for _, existing := range urls {
-			if existing == value {
-				return
-			}
-		}
-		urls = append(urls, value)
-	}
-	add(current)
-	for _, candidate := range candidates {
-		add(candidate.URL)
-	}
-	return &gatewayCandidateSet{urls: urls}
-}
-
-func (s *gatewayCandidateSet) current() string {
-	if s == nil || len(s.urls) == 0 {
-		return ""
-	}
-	if s.index >= len(s.urls) {
-		s.index = 0
-	}
-	return s.urls[s.index]
-}
-
-func (s *gatewayCandidateSet) rotate(ctx context.Context, client *http.Client, trustPin string) bool {
-	if s == nil || len(s.urls) < 2 {
+func joinManifestContainsGateway(manifest model.JoinManifest, value string) bool {
+	value = strings.TrimRight(strings.TrimSpace(value), "/")
+	if value == "" || !safeRouteURL(value) {
 		return false
 	}
-	for step := 1; step < len(s.urls); step++ {
-		index := (s.index + step) % len(s.urls)
-		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		reachable := joinManifestGatewayReachable(probeCtx, client, s.urls[index], trustPin)
-		cancel()
-		if reachable {
-			s.index = index
+	if strings.TrimRight(strings.TrimSpace(manifest.GatewayURL), "/") == value {
+		return true
+	}
+	for _, candidate := range manifest.GatewayCandidates {
+		if strings.TrimRight(strings.TrimSpace(candidate.URL), "/") == value {
 			return true
 		}
 	}
 	return false
+}
+
+type gatewayCandidateSet struct {
+	routes    []routeCandidate
+	pool      *routePool
+	transport string
+}
+
+func newGatewayCandidateSet(current string, candidates []model.JoinManifestGatewayCandidate, transport ...string) *gatewayCandidateSet {
+	selectedTransport := "poll"
+	if len(transport) > 0 && strings.TrimSpace(transport[0]) != "" {
+		selectedTransport = transport[0]
+	}
+	return &gatewayCandidateSet{
+		routes:    routeCandidatesFromManifest(current, candidates, selectedTransport),
+		transport: selectedTransport,
+	}
+}
+
+func newGatewayCandidateSetWithPool(pool *routePool) *gatewayCandidateSet {
+	return &gatewayCandidateSet{pool: pool}
+}
+
+func validateGatewayCandidateSet(routes *gatewayCandidateSet, manifestRootVerified bool) error {
+	if routes == nil || len(routes.routes) == 0 {
+		return errNoHealthyRoutes
+	}
+	for _, route := range routes.routes {
+		if !isLocalDevGatewayURL(route.URL) && !isSignedManifestGatewayURL(route.URL, manifestRootVerified) {
+			return fmt.Errorf("gateway route is outside the verified manifest trust boundary")
+		}
+	}
+	return nil
+}
+
+func (s *gatewayCandidateSet) ensurePool(client *http.Client, trustPin string) *routePool {
+	if s == nil {
+		return nil
+	}
+	if s.pool != nil {
+		return s.pool
+	}
+	probe := func(ctx context.Context, route routeCandidate) routeProbeResult {
+		started := time.Now()
+		_, err := fetchHostTrust(ctx, client, route.URL, trustPin, "")
+		return routeProbeResult{Healthy: err == nil, Latency: time.Since(started), Err: err}
+	}
+	s.pool = newRoutePool(s.routes, routePoolConfig{Probe: probe, ReprobeInterval: 5 * time.Second, ShareGatewayHealth: true})
+	return s.pool
+}
+
+func (s *gatewayCandidateSet) current() string {
+	if s == nil {
+		return ""
+	}
+	if route, ok := s.poolCurrent(); ok {
+		return route.URL
+	}
+	if len(s.routes) > 0 {
+		return s.routes[0].URL
+	}
+	return ""
+}
+
+func (s *gatewayCandidateSet) currentTransport() string {
+	if s == nil {
+		return "poll"
+	}
+	if route, ok := s.poolCurrent(); ok {
+		return route.Transport
+	}
+	if len(s.routes) > 0 {
+		return s.routes[0].Transport
+	}
+	return normalizeRouteTransport(s.transport)
+}
+
+func (s *gatewayCandidateSet) poolCurrent() (routeCandidate, bool) {
+	if s == nil || s.pool == nil {
+		return routeCandidate{}, false
+	}
+	return s.pool.current()
+}
+
+func (s *gatewayCandidateSet) currentSnapshot() (routeSnapshot, bool) {
+	if s == nil || s.pool == nil {
+		return routeSnapshot{}, false
+	}
+	return s.pool.currentSnapshot()
+}
+
+func (s *gatewayCandidateSet) reportSuccess(snapshot routeSnapshot) bool {
+	if s == nil || s.pool == nil {
+		return false
+	}
+	return s.pool.reportSnapshotSuccess(snapshot)
+}
+
+func (s *gatewayCandidateSet) reportFailure(ctx context.Context, snapshot routeSnapshot) bool {
+	if s == nil || s.pool == nil {
+		return false
+	}
+	_, ok := s.pool.reportSnapshotFailure(ctx, snapshot)
+	return ok
+}
+
+func (s *gatewayCandidateSet) initialize(ctx context.Context, client *http.Client, trustPin string) (routeCandidate, error) {
+	pool := s.ensurePool(client, trustPin)
+	if pool == nil {
+		return routeCandidate{}, errNoHealthyRoutes
+	}
+	return pool.initialize(ctx)
+}
+
+func (s *gatewayCandidateSet) rotate(ctx context.Context, client *http.Client, trustPin string) bool {
+	pool := s.ensurePool(client, trustPin)
+	if pool == nil {
+		return false
+	}
+	before, beforeOK := pool.current()
+	if !beforeOK {
+		_, err := pool.initialize(ctx)
+		return err == nil
+	}
+	_, afterOK := pool.reportFailure(ctx, before)
+	if !afterOK {
+		return false
+	}
+	after, currentOK := pool.current()
+	return currentOK && after != before
+}
+
+func (s *gatewayCandidateSet) probe(ctx context.Context) (bool, error) {
+	if s == nil || s.pool == nil {
+		return false, nil
+	}
+	return s.pool.probe(ctx)
+}
+
+func (s *gatewayCandidateSet) monitor(ctx context.Context, interval time.Duration) error {
+	if s == nil || s.pool == nil {
+		return errNoHealthyRoutes
+	}
+	return s.pool.monitor(ctx, interval)
 }
 
 func joinManifestGatewayReachable(ctx context.Context, client *http.Client, gatewayURL, trustPin string) bool {
@@ -1206,6 +1520,19 @@ func joinManifestGatewayReachable(ctx context.Context, client *http.Client, gate
 type hostTrust struct {
 	Legacy       *model.TrustBundle
 	SignedBundle *model.SignedTrustBundle
+}
+
+type signedTrustHTTPError struct {
+	status int
+}
+
+func (e signedTrustHTTPError) Error() string {
+	return fmt.Sprintf("signed trust endpoint returned status class %d", e.status/100)
+}
+
+func signedTrustEndpointUnsupported(err error) bool {
+	var statusErr signedTrustHTTPError
+	return errors.As(err, &statusErr) && statusErr.status == http.StatusNotFound
 }
 
 func fetchHostTrust(ctx context.Context, client *http.Client, gatewayURL, trustPin, trustStorePath string) (hostTrust, error) {
@@ -1226,14 +1553,21 @@ func fetchHostTrust(ctx context.Context, client *http.Client, gatewayURL, trustP
 		}
 		return hostTrust{SignedBundle: &signed}, nil
 	}
+	if !signedTrustEndpointUnsupported(err) {
+		return hostTrust{}, fmt.Errorf("signed trust verification failed")
+	}
 	if stored, ok, storeErr := store.Load(); storeErr != nil {
 		return hostTrust{}, storeErr
 	} else if ok {
+		root, rootErr := activeSigningRoot(stored)
+		if rootErr != nil || stored.Verify(root, time.Now()) != nil || root.VerifyPin(trustPin) != nil {
+			return hostTrust{}, fmt.Errorf("stored signed trust verification failed")
+		}
 		return hostTrust{SignedBundle: &stored}, nil
 	}
 	legacy, legacyErr := fetchTrustBundle(ctx, client, gatewayURL, trustPin)
 	if legacyErr != nil {
-		return hostTrust{}, fmt.Errorf("fetch signed trust bundle failed: %v; fallback legacy trust failed: %w", err, legacyErr)
+		return hostTrust{}, fmt.Errorf("legacy trust verification failed")
 	}
 	return hostTrust{Legacy: &legacy}, nil
 }
@@ -1257,21 +1591,19 @@ func fetchSignedTrustBundle(ctx context.Context, client *http.Client, gatewayURL
 	}
 	resp, err := doGatewayRequest(client, req)
 	if err != nil {
-		return model.SignedTrustBundle{}, err
+		return model.SignedTrustBundle{}, fmt.Errorf("signed trust request failed")
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, _ = io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+		return model.SignedTrustBundle{}, signedTrustHTTPError{status: resp.StatusCode}
+	}
 	var payload struct {
 		TrustBundle model.SignedTrustBundle `json:"trust_bundle"`
 		Error       string                  `json:"error"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := decodeBoundedGatewayJSON(resp.Body, 256*1024, &payload); err != nil {
 		return model.SignedTrustBundle{}, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if payload.Error == "" {
-			payload.Error = resp.Status
-		}
-		return model.SignedTrustBundle{}, fmt.Errorf("fetch signed trust bundle failed: %s", payload.Error)
 	}
 	root, err := activeSigningRoot(payload.TrustBundle)
 	if err != nil {
@@ -1293,21 +1625,19 @@ func fetchTrustBundle(ctx context.Context, client *http.Client, gatewayURL, trus
 	}
 	resp, err := doGatewayRequest(client, req)
 	if err != nil {
-		return model.TrustBundle{}, err
+		return model.TrustBundle{}, fmt.Errorf("legacy trust request failed")
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		_, _ = io.ReadAll(io.LimitReader(resp.Body, 64*1024))
+		return model.TrustBundle{}, fmt.Errorf("legacy trust endpoint returned status class %d", resp.StatusCode/100)
+	}
 	var payload struct {
 		Trust model.TrustBundle `json:"trust"`
 		Error string            `json:"error"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+	if err := decodeBoundedGatewayJSON(resp.Body, 64*1024, &payload); err != nil {
 		return model.TrustBundle{}, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if payload.Error == "" {
-			payload.Error = resp.Status
-		}
-		return model.TrustBundle{}, fmt.Errorf("fetch trust bundle failed: %s", payload.Error)
 	}
 	if _, err := payload.Trust.Ed25519PublicKey(); err != nil {
 		return model.TrustBundle{}, err
@@ -1333,11 +1663,7 @@ func gatewayResponseError(operation, endpoint string, resp *http.Response, body 
 			Cause:    cause,
 		}
 	}
-	status := "gateway response unavailable"
-	if resp != nil {
-		status = resp.Status
-	}
-	return fmt.Errorf("%s: %s", operation, gatewayErrorMessage(status, body, cause))
+	return fmt.Errorf("%s: gateway response rejected", operation)
 }
 
 func gatewayRouteFailure(statusCode int, body []byte) bool {
@@ -1355,17 +1681,7 @@ func gatewayRouteFailure(statusCode int, body []byte) bool {
 }
 
 func (e transientGatewayResponseError) Error() string {
-	parts := []string{"unexpected gateway response"}
-	if e.Status != "" {
-		parts = append(parts, "status="+e.Status)
-	}
-	if e.Body != "" {
-		parts = append(parts, "body="+e.Body)
-	}
-	if e.Cause != nil {
-		parts = append(parts, "cause="+e.Cause.Error())
-	}
-	return strings.Join(parts, " ")
+	return "transient gateway response"
 }
 
 func isTransientGatewayResponseError(err error) bool {
@@ -1374,18 +1690,11 @@ func isTransientGatewayResponseError(err error) bool {
 }
 
 func gatewayErrorMessage(status string, body []byte, cause error) string {
-	var payload map[string]any
-	if err := json.Unmarshal(body, &payload); err == nil {
-		if message, _ := payload["error"].(string); strings.TrimSpace(message) != "" {
-			return message
-		}
-	}
-	message := strings.TrimSpace(bodyPreview(body))
+	_ = body
+	_ = cause
+	message := strings.TrimSpace(status)
 	if message == "" {
-		message = status
-	}
-	if cause != nil {
-		return message + " (" + cause.Error() + ")"
+		message = "gateway response rejected"
 	}
 	return message
 }
@@ -1397,6 +1706,31 @@ func bodyPreview(body []byte) string {
 		value = value[:240] + "..."
 	}
 	return value
+}
+
+func decodeBoundedGatewayJSON(body io.Reader, maxBytes int64, destination any) error {
+	content, err := readBoundedGatewayBody(body, maxBytes)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(content, destination); err != nil {
+		return fmt.Errorf("decode gateway response: %w", err)
+	}
+	return nil
+}
+
+func readBoundedGatewayBody(body io.Reader, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("gateway response size limit is invalid")
+	}
+	content, err := io.ReadAll(io.LimitReader(body, maxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read gateway response: %w", err)
+	}
+	if int64(len(content)) > maxBytes {
+		return nil, fmt.Errorf("gateway response exceeds the size limit")
+	}
+	return content, nil
 }
 
 func splitCommaList(value string) []string {

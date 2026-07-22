@@ -95,8 +95,8 @@ func TestRunFreshAgentSupportSessionGatesBootstrapFirstConnectEvidence(t *testin
 
 	for _, name := range []string{
 		"bootstrap_first_connect_scripts_under_budget",
-		"bootstrap_first_connect_preconnect_does_not_grant_host_access",
-		"bootstrap_first_connect_requires_verified_full_helper_upgrade",
+		"bootstrap_first_connect_bootstrap_does_not_grant_host_access",
+		"bootstrap_first_connect_uses_verified_core_handoff",
 	} {
 		check, ok := checkByName(report.Checks, name)
 		if !ok {
@@ -112,14 +112,14 @@ func TestRunFreshAgentSupportSessionGatesBootstrapFirstConnectEvidence(t *testin
 	if bootstrap["schema_version"] != "rdev.acceptance.bootstrap-first-connect.v1" ||
 		bootstrap["windows_within_budget"] != true ||
 		bootstrap["shell_within_budget"] != true ||
-		bootstrap["default_first_connect_surface"] != "script-preconnect" ||
-		bootstrap["publishes_native_first_connect_asset"] != false ||
-		bootstrap["preconnect_grants_host_access"] != false ||
+		bootstrap["default_first_connect_surface"] != "signed-native-bootstrap" ||
+		bootstrap["publishes_native_first_connect_asset"] != true ||
+		bootstrap["bootstrap_grants_host_access"] != false ||
 		bootstrap["can_run_session_tasks_before_full_runner"] != false ||
-		!strings.Contains(stringFromAny(bootstrap["staged_upgrade_rule"]), "SHA-256") ||
-		nativeBootstrap["availability"] != "optional-if-rdev-bootstrap-is-already-installed-or-published" ||
-		nativeBootstrap["published_by_support_session_assets"] != false ||
-		nativeBootstrap["default_first_connect_surface"] != "script-preconnect" {
+		!strings.Contains(stringFromAny(bootstrap["staged_upgrade_rule"]), "signed release metadata") ||
+		nativeBootstrap["availability"] != "published-first-connect-asset" ||
+		nativeBootstrap["published_by_support_session_assets"] != true ||
+		nativeBootstrap["default_first_connect_surface"] != "signed-native-bootstrap" {
 		t.Fatalf("expected bootstrap first-connect evidence, got %#v", bootstrap)
 	}
 }

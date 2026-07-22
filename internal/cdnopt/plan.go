@@ -58,10 +58,10 @@ func BuildPlan(opts Options) Plan {
 			"do not install services, drivers, or hidden persistence",
 		},
 		SafetyRules: []string{
-			"optimizer is for helper asset downloads only",
+			"optimizer is for verified core asset downloads only and is initiated by rdev-bootstrap",
 			"keep TLS SNI and HTTP Host bound to the original signed asset host",
 			"use low bounded concurrency and small byte-range samples",
-			"record selected candidate and timing evidence in preconnect status before downloading the full helper",
+			"record selected candidate and timing evidence in preconnect status before rdev-bootstrap downloads the signed core runtime",
 			"fall back to normal signed mirror order when optimization fails",
 		},
 		AgentRule: "Treat this as a future explicit optimizer gate, not permission to mutate system networking or bypass local policy.",

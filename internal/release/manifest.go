@@ -1,3 +1,5 @@
+//go:build !rdev_bootstrap_focused
+
 package release
 
 import (
@@ -28,6 +30,8 @@ type Manifest struct {
 	ArtifactName   string    `json:"artifact_name"`
 	ArtifactSHA256 string    `json:"artifact_sha256"`
 	ArtifactSize   int64     `json:"artifact_size"`
+	ReleaseVersion string    `json:"release_version,omitempty"`
+	TargetPlatform string    `json:"target_platform,omitempty"`
 	IssuedAt       time.Time `json:"issued_at"`
 	SigningAlg     string    `json:"signing_alg"`
 	SigningKeyID   string    `json:"signing_key_id"`
@@ -35,6 +39,10 @@ type Manifest struct {
 }
 
 func SignArtifact(path string, key signing.Key, now time.Time) (Manifest, error) {
+	return SignArtifactForRelease(path, key, now, "", "")
+}
+
+func SignArtifactForRelease(path string, key signing.Key, now time.Time, releaseVersion, targetPlatform string) (Manifest, error) {
 	digest, size, err := fileDigest(path)
 	if err != nil {
 		return Manifest{}, err
@@ -44,6 +52,8 @@ func SignArtifact(path string, key signing.Key, now time.Time) (Manifest, error)
 		ArtifactName:   filepath.Base(path),
 		ArtifactSHA256: digest,
 		ArtifactSize:   size,
+		ReleaseVersion: releaseVersion,
+		TargetPlatform: targetPlatform,
 		IssuedAt:       now.UTC(),
 		SigningAlg:     model.SigningAlgEd25519,
 		SigningKeyID:   key.ID,

@@ -2,16 +2,42 @@ package connectionentry
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/agentinvite"
+	"github.com/EitanWong/remote-dev-skillkit/internal/connectionrunner"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
+
+func TestConnectionEntryExecutableSelectorsAreBootstrapOnly(t *testing.T) {
+	allOptions := map[string]reflect.Type{
+		"agent invite options":          reflect.TypeOf(agentinvite.Options{}),
+		"connection entry plan options": reflect.TypeOf(Options{}),
+		"runner build options":          reflect.TypeOf(connectionrunner.Options{}),
+		"runner run options":            reflect.TypeOf(connectionrunner.RunOptions{}),
+	}
+	for name, typ := range allOptions {
+		if _, ok := typ.FieldByName("RdevCommand"); ok {
+			t.Fatalf("%s retains legacy RdevCommand selector", name)
+		}
+	}
+	for name, typ := range map[string]reflect.Type{
+		"connection entry plan options": allOptions["connection entry plan options"],
+		"runner build options":          allOptions["runner build options"],
+		"runner run options":            allOptions["runner run options"],
+	} {
+		if _, ok := typ.FieldByName("BootstrapCommand"); !ok {
+			t.Fatalf("%s must expose BootstrapCommand", name)
+		}
+	}
+}
 
 func TestFromInviteReportsMissingWindowsReleaseInputs(t *testing.T) {
 	invite := testInvite(t, model.HostModeAttendedTemporary)
@@ -40,8 +66,10 @@ func TestFromInviteReportsMissingWindowsReleaseInputs(t *testing.T) {
 	if !strings.Contains(plan.EntryCommand, "powershell") || !strings.Contains(plan.EntryCommand, "bootstrap.ps1") {
 		t.Fatalf("expected Windows entry command, got %q", plan.EntryCommand)
 	}
-	if len(plan.MissingInputs) == 0 || !slices.Contains(plan.MissingInputs, "release_bundle_url") {
-		t.Fatalf("expected release input gaps, got %#v", plan.MissingInputs)
+	if len(plan.MissingInputs) == 0 ||
+		!slices.Contains(plan.MissingInputs, "windows_bootstrap_binary") ||
+		!slices.Contains(plan.MissingInputs, "layered_assets_manifest_url") {
+		t.Fatalf("expected layered bootstrap input gaps, got %#v", plan.MissingInputs)
 	}
 	if plan.ModeDecision == "" || !strings.Contains(plan.ModeDecision, "attended-temporary") {
 		t.Fatalf("expected attended temporary mode decision, got %#v", plan)
@@ -63,26 +91,104 @@ func TestFromInviteReportsMissingWindowsReleaseInputs(t *testing.T) {
 	}
 }
 
-func TestFromInviteGeneratesWindowsTemporaryMaterialization(t *testing.T) {
-	bootstrap := filepath.Join(t.TempDir(), "windows-temporary.ps1")
-	if err := os.WriteFile(bootstrap, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
-		t.Fatal(err)
+func TestBuildChecksRedactsPrivateInviteDetails(t *testing.T) {
+	invite := testInvite(t, model.HostModeAttendedTemporary)
+	plan := Plan{
+		TargetOS:    "windows",
+		SessionMode: string(model.HostModeAttendedTemporary),
+		Ownership:   "third-party",
 	}
-	out := filepath.Join(t.TempDir(), "entry")
-	plan, err := FromInvite(Options{
-		InviteJSON:                    mustJSON(t, testInvite(t, model.HostModeAttendedTemporary)),
-		OutDir:                        out,
-		TargetOS:                      "windows",
-		Ownership:                     "third-party",
-		WindowsBootstrapScriptPath:    bootstrap,
-		WindowsHostDownloadURL:        "https://agent.example.com/rdev-host.exe",
-		WindowsHostExpectedSHA256:     strings.Repeat("a", 64),
-		ReleaseBundleURL:              "https://agent.example.com/release-bundle.json",
-		ReleaseRootPublicKey:          "release-root:" + strings.Repeat("b", 43),
-		WindowsVerifierDownloadURL:    "https://agent.example.com/rdev-verify.exe",
-		WindowsVerifierExpectedSHA256: strings.Repeat("c", 64),
-		Now:                           time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
-	})
+	checks := buildChecks(invite, plan, "powershell.exe -File entry.ps1")
+	sensitive := []string{
+		invite.ConnectionEntry.EntryURL,
+		invite.ManifestURL,
+		invite.ManifestRootPublicKey,
+		invite.Ticket.Code,
+		invite.GatewayURL,
+	}
+	for _, check := range checks {
+		for _, value := range sensitive {
+			if value != "" && strings.Contains(check.Detail, value) {
+				t.Fatalf("top-level check %q leaked private value %q in detail %q", check.Name, value, check.Detail)
+			}
+		}
+	}
+	for _, name := range []string{"entry_url", "manifest_url", "manifest_root_public_key", "ticket_code"} {
+		var found bool
+		for _, check := range checks {
+			if check.Name != name {
+				continue
+			}
+			found = true
+			if !slices.Contains([]string{"missing", "invalid", "present", "valid"}, check.Detail) {
+				t.Fatalf("check %q must expose only a status detail, got %q", name, check.Detail)
+			}
+		}
+		if !found {
+			t.Fatalf("expected check %q", name)
+		}
+	}
+}
+
+func TestPrivateCheckStatusDetails(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		value string
+		valid bool
+		want  string
+	}{
+		{name: "missing validation value", want: "missing"},
+		{name: "invalid validation value", value: "not-a-url", want: "invalid"},
+		{name: "valid validation value", value: "https://example.com", valid: true, want: "valid"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := validationStatusDetail(test.value, test.valid); got != test.want {
+				t.Fatalf("validationStatusDetail(%q, %t) = %q, want %q", test.value, test.valid, got, test.want)
+			}
+		})
+	}
+	if got := presenceStatusDetail(" \t"); got != "missing" {
+		t.Fatalf("presenceStatusDetail(blank) = %q, want missing", got)
+	}
+	if got := presenceStatusDetail("private-value"); got != "present" {
+		t.Fatalf("presenceStatusDetail(value) = %q, want present", got)
+	}
+	if got := planArtifactStatus(false); got != "failed" {
+		t.Fatalf("planArtifactStatus(false) = %q, want failed", got)
+	}
+}
+
+func TestConnectionEntryPlanSelectionEdges(t *testing.T) {
+	if got := normalizeTargetOS("Solaris"); got != "solaris" {
+		t.Fatalf("normalizeTargetOS(Solaris) = %q", got)
+	}
+	if got := normalizeOwnership("inventory"); got != "inventory" {
+		t.Fatalf("normalizeOwnership(inventory) = %q", got)
+	}
+	if got := inferOwnership(testInvite(t, model.HostModeManaged)); got != "owned" {
+		t.Fatalf("managed invite ownership = %q", got)
+	}
+	if got := inferOwnership(testInvite(t, model.HostModeAttendedTemporary)); got != "third-party" {
+		t.Fatalf("temporary invite ownership = %q", got)
+	}
+	if got := commandForOS(nil, "windows"); got != "" {
+		t.Fatalf("nil command map = %q", got)
+	}
+	if _, err := selectSessionMode(testInvite(t, model.HostModeAttendedTemporary), "third-party", "invalid-mode"); err == nil {
+		t.Fatal("invalid requested session mode must be rejected")
+	}
+	if allAcceptanceChecksPassed(nil) {
+		t.Fatal("empty acceptance checks must not pass")
+	}
+	if got := firstNonEmpty("", ""); got != "" {
+		t.Fatalf("firstNonEmpty blanks = %q", got)
+	}
+}
+
+func TestFromInviteGeneratesWindowsLayeredMaterialization(t *testing.T) {
+	fixture := newWindowsLayeredFixture(t)
+	out := fixture.options.OutDir
+	plan, err := FromInvite(fixture.options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +198,7 @@ func TestFromInviteGeneratesWindowsTemporaryMaterialization(t *testing.T) {
 	if plan.HumanMessagePath == "" || !fileExists(plan.HumanMessagePath) {
 		t.Fatalf("expected human message file: %#v", plan)
 	}
-	if plan.EntryPackagePlan == nil || !plan.EntryPackagePlan.OK || !fileExists(plan.EntryPackagePlan.LauncherPath) {
+	if plan.EntryPackagePlan == nil || !plan.EntryPackagePlan.OK {
 		t.Fatalf("expected generated entry package plan: %#v", plan.EntryPackagePlan)
 	}
 	if plan.RunnerPlan == nil ||
@@ -108,19 +214,25 @@ func TestFromInviteGeneratesWindowsTemporaryMaterialization(t *testing.T) {
 	}
 	if plan.EntryPackagePlan.SchemaVersion != EntryPackagePlanSchemaVersion ||
 		plan.EntryPackagePlan.TargetOS != "windows" ||
-		plan.EntryPackagePlan.PlatformPlanKind != "windows-temporary-acceptance-plan" {
-		t.Fatalf("expected generic entry package wrapper around Windows plan: %#v", plan.EntryPackagePlan)
+		plan.EntryPackagePlan.PlatformPlanKind != "windows-layered-handoff" {
+		t.Fatalf("expected generic entry package wrapper around Windows layered handoff: %#v", plan.EntryPackagePlan)
 	}
 	if !slices.Contains(plan.EntryPackagePlan.AgentOnlyParameters, "manifest_root_public_key") ||
-		!slices.Contains(plan.EntryPackagePlan.AgentOnlyParameters, "ticket_code") {
+		!slices.Contains(plan.EntryPackagePlan.AgentOnlyParameters, "layered_assets_manifest_url") {
 		t.Fatalf("expected raw connection parameters to stay agent-only: %#v", plan.EntryPackagePlan.AgentOnlyParameters)
 	}
-	launcher, err := os.ReadFile(plan.EntryPackagePlan.LauncherPath)
+	launcherPath := plan.EntryPackagePlan.LauncherPath
+	if !filepath.IsAbs(launcherPath) {
+		launcherPath = filepath.Join(out, filepath.FromSlash(launcherPath))
+	}
+	launcher, err := os.ReadFile(launcherPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(launcher), "-ManifestRootPublicKey") || strings.Contains(string(launcher), "ticket, root, gateway") {
-		t.Fatalf("launcher should carry manifest root and avoid human flag assembly text:\n%s", string(launcher))
+	if !strings.Contains(string(launcher), "--manifest-root-public-key") ||
+		!strings.Contains(string(launcher), "rdev-bootstrap") ||
+		strings.Contains(string(launcher), "ticket, root, gateway") {
+		t.Fatalf("launcher should use bootstrap with pinned manifest metadata and avoid human flag assembly text:\n%s", string(launcher))
 	}
 	if !fileExists(filepath.Join(out, "connection-entry-plan.json")) {
 		t.Fatalf("expected materialization plan JSON in out dir")
@@ -254,6 +366,261 @@ func TestFromInviteRejectsManagedEntryForThirdParty(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "ownership=owned") {
 		t.Fatalf("expected managed third-party rejection, got %v", err)
+	}
+}
+
+func TestFromInviteMaterializationFailureLeavesNoPrivateOutput(t *testing.T) {
+	tests := []struct {
+		name              string
+		failurePhase      string
+		createEmptyOutDir bool
+	}{
+		{name: "before top-level files", failurePhase: "before_top_level_files"},
+		{name: "after top-level files", failurePhase: "after_top_level_files", createEmptyOutDir: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newWindowsLayeredFixture(t)
+			parentDir := t.TempDir()
+			outDir := filepath.Join(parentDir, "entry")
+			if test.createEmptyOutDir {
+				if err := os.Mkdir(outDir, 0o700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			fixture.options.OutDir = outDir
+
+			sentinel := errors.New("injected materialization failure")
+			previousHook := connectionEntryMaterializationFailureHook
+			connectionEntryMaterializationFailureHook = func(phase string) error {
+				if phase == test.failurePhase {
+					return sentinel
+				}
+				return nil
+			}
+			t.Cleanup(func() { connectionEntryMaterializationFailureHook = previousHook })
+
+			if _, err := FromInvite(fixture.options); !errors.Is(err, sentinel) {
+				t.Fatalf("expected injected failure, got %v", err)
+			}
+			assertConnectionEntryOutputAbsentOrEmpty(t, outDir)
+			assertNoConnectionEntryStagingDirs(t, parentDir, filepath.Base(outDir))
+		})
+	}
+}
+
+func TestFromInviteRejectsPendingArchiveReplacementAndRestoresEmptyOutput(t *testing.T) {
+	fixture := newWindowsLayeredFixture(t)
+	parentDir := t.TempDir()
+	outDir := filepath.Join(parentDir, "entry")
+	if err := os.Mkdir(outDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	originalOutDir, err := os.Stat(outDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture.options.OutDir = outDir
+
+	var movedArchivePath string
+	previousHook := connectionEntryMaterializationFailureHook
+	connectionEntryMaterializationFailureHook = func(phase string) error {
+		if phase != "before_windows_layered_archive_publish" {
+			return nil
+		}
+		if !fileExists(filepath.Join(outDir, "connection-entry-plan.json")) {
+			return errors.New("final materialization directory was not published before archive publication")
+		}
+		if fileExists(filepath.Join(outDir, windowsLayeredArchiveName)) {
+			return errors.New("archive was published before the prepublication hook")
+		}
+		matches, err := filepath.Glob(filepath.Join(parentDir, "."+windowsLayeredArchiveName+".tmp-*"))
+		if err != nil {
+			return err
+		}
+		if len(matches) != 1 {
+			return errors.New("expected one validated sibling archive temporary file")
+		}
+		movedArchivePath = matches[0] + ".moved"
+		if err := os.Rename(matches[0], movedArchivePath); err != nil {
+			return err
+		}
+		return os.WriteFile(matches[0], []byte("replacement archive must not publish\n"), 0o600)
+	}
+	t.Cleanup(func() { connectionEntryMaterializationFailureHook = previousHook })
+
+	if _, err := FromInvite(fixture.options); err == nil {
+		t.Fatal("expected pending archive identity replacement to fail materialization")
+	}
+	restoredOutDir, err := os.Stat(outDir)
+	if err != nil {
+		t.Fatalf("preexisting empty output directory was not restored: %v", err)
+	}
+	if !os.SameFile(originalOutDir, restoredOutDir) {
+		t.Fatal("materialization rollback did not restore the preexisting output directory")
+	}
+	assertConnectionEntryOutputAbsentOrEmpty(t, outDir)
+	assertNoConnectionEntryStagingDirs(t, parentDir, filepath.Base(outDir))
+	if movedArchivePath == "" {
+		t.Fatal("pending archive prepublication hook did not run")
+	}
+	if content, err := os.ReadFile(movedArchivePath); err == nil && len(content) != 0 {
+		t.Fatalf("pending archive replacement failure left %d sensitive bytes on the original handle", len(content))
+	} else if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("inspect moved pending archive: %v", err)
+	}
+}
+
+func TestFromInviteMaterializationPublishesOnlyFinalPaths(t *testing.T) {
+	fixture := newWindowsLayeredFixture(t)
+	parentDir := t.TempDir()
+	outDir := filepath.Join(parentDir, "entry")
+	if err := os.Mkdir(outDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fixture.options.OutDir = outDir
+
+	plan, err := FromInvite(fixture.options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertConnectionEntryPlanUsesFinalPaths(t, plan, outDir)
+	assertNoConnectionEntryStagingDirs(t, parentDir, filepath.Base(outDir))
+
+	planJSONPath := filepath.Join(outDir, "connection-entry-plan.json")
+	content, err := os.ReadFile(planJSONPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(content), ".entry.staging-") {
+		t.Fatalf("persisted materialization plan leaked a staging path:\n%s", content)
+	}
+	var persisted Plan
+	if err := json.Unmarshal(content, &persisted); err != nil {
+		t.Fatal(err)
+	}
+	assertConnectionEntryPlanUsesFinalPaths(t, persisted, outDir)
+
+	err = filepath.WalkDir(outDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(path), ".json") {
+			return nil
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(content), ".entry.staging-") {
+			t.Errorf("persisted JSON %s leaked a staging path:\n%s", path, content)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFromInviteRejectsNonEmptyOutputWithoutCreatingStaging(t *testing.T) {
+	fixture := newWindowsLayeredFixture(t)
+	parentDir := t.TempDir()
+	outDir := filepath.Join(parentDir, "entry")
+	if err := os.Mkdir(outDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	markerPath := filepath.Join(outDir, "keep.txt")
+	if err := os.WriteFile(markerPath, []byte("keep\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fixture.options.OutDir = outDir
+
+	if _, err := FromInvite(fixture.options); err == nil || !strings.Contains(err.Error(), "out directory must be empty") {
+		t.Fatalf("expected non-empty output rejection, got %v", err)
+	}
+	if !fileExists(markerPath) {
+		t.Fatal("non-empty output rejection removed the existing file")
+	}
+	assertNoConnectionEntryStagingDirs(t, parentDir, filepath.Base(outDir))
+}
+
+func assertConnectionEntryOutputAbsentOrEmpty(t *testing.T, outDir string) {
+	t.Helper()
+	entries, err := os.ReadDir(outDir)
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("failed materialization left private output in %s: %#v", outDir, entries)
+	}
+}
+
+func assertNoConnectionEntryStagingDirs(t *testing.T, parentDir, outBase string) {
+	t.Helper()
+	entries, err := os.ReadDir(parentDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefixes := []string{"." + outBase + ".staging-", "." + outBase + ".empty-"}
+	for _, entry := range entries {
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(entry.Name(), prefix) {
+				t.Fatalf("materialization left temporary directory %s", filepath.Join(parentDir, entry.Name()))
+			}
+		}
+	}
+}
+
+func assertConnectionEntryPlanUsesFinalPaths(t *testing.T, plan Plan, outDir string) {
+	t.Helper()
+	finalDir, err := filepath.Abs(outDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.OutDir != finalDir {
+		t.Fatalf("plan out_dir = %q, want %q", plan.OutDir, finalDir)
+	}
+	paths := map[string]string{
+		"human_message": plan.HumanMessagePath,
+	}
+	if plan.RunnerPlan == nil {
+		t.Fatal("expected runner plan")
+	}
+	paths["runner_manifest"] = plan.RunnerPlan.ManifestPath
+	paths["runner_launcher"] = plan.RunnerPlan.LauncherPath
+	paths["runner_plan"] = plan.RunnerPlan.PlanPath
+	if plan.EntryPackagePlan == nil {
+		t.Fatal("expected entry package plan")
+	}
+	paths["entry_plan"] = filepath.Join(finalDir, filepath.FromSlash(plan.EntryPackagePlan.PlanPath))
+	paths["entry_launcher"] = filepath.Join(finalDir, filepath.FromSlash(plan.EntryPackagePlan.LauncherPath))
+	if plan.EntryPackagePlan.ArchivePath != "" {
+		paths["entry_archive"] = filepath.Join(finalDir, filepath.FromSlash(plan.EntryPackagePlan.ArchivePath))
+	}
+	for _, file := range plan.GeneratedFiles {
+		paths["generated:"+file.Path] = file.Path
+	}
+	for name, path := range paths {
+		if path == "" {
+			t.Fatalf("%s path is empty", name)
+		}
+		relative, err := filepath.Rel(finalDir, path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || filepath.IsAbs(relative) {
+			t.Fatalf("%s path %q is outside final out dir %q", name, path, finalDir)
+		}
+		if strings.Contains(path, ".entry.staging-") {
+			t.Fatalf("%s path leaked staging directory: %q", name, path)
+		}
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("%s final path is not published: %v", name, err)
+		}
 	}
 }
 

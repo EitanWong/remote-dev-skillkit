@@ -287,14 +287,14 @@ echo "fake wg helper started" >&2
 sleep 1
 SH
 chmod +x "$fake_bin/wg"
-cat > "$fake_bin/rdev-host-smoke" <<'SH'
+cat > "$fake_bin/rdev-bootstrap" <<'SH'
 #!/bin/sh
 if [ -n "${RDEV_FAKE_RDEV_TRANSCRIPT:-}" ]; then
-  printf 'fake rdev host serve %s\n' "$*" >> "$RDEV_FAKE_RDEV_TRANSCRIPT"
+  printf 'fake rdev-bootstrap %s\n' "$*" >> "$RDEV_FAKE_RDEV_TRANSCRIPT"
 fi
 exit 0
 SH
-chmod +x "$fake_bin/rdev-host-smoke"
+chmod +x "$fake_bin/rdev-bootstrap"
 PATH="$fake_bin:$PATH" \
 HTTP_PROXY= \
 HTTPS_PROXY= \
@@ -309,7 +309,7 @@ RDEV_VPN_START_ARGV_JSON='["wg","show"]' \
 RDEV_FAKE_RDEV_TRANSCRIPT="$relay_acceptance_input/fake-rdev-transcript.txt" \
 go run ./cmd/rdev connection-entry run \
 	--runner-manifest "$relay_acceptance_input/connection-entry/connection-entry-runner/connection-entry-runner.json" \
-	--rdev-command "$fake_bin/rdev-host-smoke" \
+	--bootstrap-command "$fake_bin/rdev-bootstrap" \
 	--probe-timeout 1s \
 	--evidence-dir "$relay_acceptance_input" \
 	> "$relay_acceptance_input/runner-output.json"
@@ -360,7 +360,7 @@ scripts/release/build-artifacts.sh \
   --out "$work_dir/artifacts" \
   --version "$version" \
   --targets linux/amd64,windows/amd64 \
-  --commands rdev,rdev-host,rdev-verify \
+  --commands rdev,rdev-host,rdev-verify,rdev-bootstrap \
   > "$work_dir/build.json"
 
 platform_candidates_dir="$work_dir/platform-candidates"
@@ -653,7 +653,9 @@ assert build["ok"] is True, build
 build_manifest = json.loads(pathlib.Path(build["manifest"]).read_text())
 assert build_manifest["schema_version"] == "rdev.build-artifacts.v1", build_manifest
 assert build_manifest["out_dir"] == ".", build_manifest
-assert len(build_manifest["artifacts"]) == 6, build_manifest["artifacts"]
+assert len(build_manifest["artifacts"]) == 7, build_manifest["artifacts"]
+assert any(artifact["command"] == "rdev-bootstrap" and artifact["target"] == "windows/amd64" for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
+assert not any(artifact["command"] == "rdev-bootstrap" and artifact["target"] != "windows/amd64" for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
 assert all(artifact["size_bytes"] > 0 for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
 assert all(artifact["cgo_enabled"] is False for artifact in build_manifest["artifacts"]), build_manifest["artifacts"]
 build_sbom_path = pathlib.Path(build["sbom"])
@@ -684,12 +686,19 @@ assert all(candidate["candidate_schema"] == "rdev.release-candidate.v1" for cand
 assert all(candidate["verification_schema"] == "rdev.release-candidate-verification.v1" for candidate in platform_manifest["candidates"]), platform_manifest["candidates"]
 for candidate in platform_manifest["candidates"]:
     candidate_json = json.loads((pathlib.Path(candidate["candidate_dir"]) / "release-candidate.json").read_text())
+    assert candidate_json["target_platform"] == candidate["target"], candidate_json
     assert candidate_json["out_dir"] == ".", candidate_json
     assert candidate_json["provenance_path"] == "provenance.json", candidate_json
     assert candidate_json["connection_entry_path"] == "connection-entry-release.zip", candidate_json
     assert any(file["path"] == "provenance.json" and file["kind"] == "provenance" for file in candidate_json["files"]), candidate_json["files"]
     assert any(file["path"] == "sbom.spdx.json" and file["kind"] == "sbom" for file in candidate_json["files"]), candidate_json["files"]
     assert any(file["path"] == "connection-entry-release.zip" and file["kind"] == "connection-entry-release-archive" for file in candidate_json["files"]), candidate_json["files"]
+    if candidate["target"] == "windows/amd64":
+        assert candidate_json["layered_asset_manifest_path"] == "layered-assets.json", candidate_json
+        assert any(file["path"] == "assets/rdev-host-windows-amd64.exe" and file["kind"] == "layered-asset" for file in candidate_json["files"]), candidate_json["files"]
+        assert any(artifact["name"] == "rdev-bootstrap.exe" for artifact in candidate_json["artifacts"]), candidate_json["artifacts"]
+    else:
+        assert not candidate_json.get("layered_asset_manifest_path"), candidate_json
     entry_archive_path = pathlib.Path(candidate["candidate_dir"]) / "connection-entry-release.zip"
     assert entry_archive_path.is_file(), candidate_json
     with zipfile.ZipFile(entry_archive_path) as archive:
@@ -699,7 +708,7 @@ for candidate in platform_manifest["candidates"]:
             "connection-entry-release.json",
             "connection-entry-runner.template.json",
             "connection-entry-checksums.txt",
-            "release/release-bundle.json",
+            "bin/release-bundle.json",
             "release/sbom.spdx.json",
             "release/provenance.json",
         }
@@ -719,7 +728,7 @@ for candidate in platform_manifest["candidates"]:
         launcher_paths = [path for path in names if path.startswith("launchers/")]
         launcher_text = "\n".join(archive.read(path).decode() for path in launcher_paths)
         assert "rdev-verify" in launcher_text, launcher_text
-        assert "--bundle" in launcher_text and ("release/release-bundle.json" in launcher_text or "release\\release-bundle.json" in launcher_text), launcher_text
+        assert "--bundle" in launcher_text and ("bin/release-bundle.json" in launcher_text or "bin\\release-bundle.json" in launcher_text), launcher_text
         assert "--root-public-key" in launcher_text and candidate_json["root_public_key"] in launcher_text, launcher_text
         assert "--require-artifacts" in launcher_text and required_artifacts in launcher_text, launcher_text
         for artifact in candidate_json["artifacts"]:

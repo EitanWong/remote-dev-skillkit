@@ -50,8 +50,32 @@ func TestSupportSessionRdevBuildArgsStripDebugInfo(t *testing.T) {
 	if !slices.Contains(args, "-trimpath") ||
 		!slices.Contains(args, "-ldflags=-s -w") ||
 		!strings.Contains(joined, "-o /tmp/rdev") ||
-		args[len(args)-1] != "./cmd/rdev-host" {
-		t.Fatalf("expected stripped reproducible rdev build args, got %#v", args)
+		args[len(args)-1] != "./cmd/rdev-bootstrap" {
+		t.Fatalf("expected stripped reproducible bootstrap build args, got %#v", args)
+	}
+}
+
+func TestSupportSessionAssetSpecsCoverBootstrapTargets(t *testing.T) {
+	binDir := t.TempDir()
+	specs := supportSessionAssetSpecs(binDir)
+	got := make(map[string]supportSessionAssetSpec, len(specs))
+	for _, spec := range specs {
+		got[spec.GOOS+"/"+spec.GOARCH] = spec
+	}
+	for _, platform := range []string{
+		"windows/amd64",
+		"windows/arm64",
+		"darwin/amd64",
+		"darwin/arm64",
+		"linux/amd64",
+		"linux/arm64",
+	} {
+		if _, ok := got[platform]; !ok {
+			t.Fatalf("support-session assets omitted bootstrap target %q: %#v", platform, specs)
+		}
+	}
+	if len(got) != 6 {
+		t.Fatalf("support-session assets contain unexpected bootstrap targets: %#v", specs)
 	}
 }
 
@@ -82,13 +106,14 @@ func TestPrepareReportsCompressedAssetBudgetEvidence(t *testing.T) {
 		int64FromAny(t, report["bootstrap_target_bytes"]) != supportSessionBootstrapTargetBytes ||
 		report["all_gzip_within_budget"] != true ||
 		report["bootstrap_connector_recommended"] != false ||
-		!strings.Contains(report["first_connect_size_strategy"].(string), "gzip") ||
-		!strings.Contains(report["first_connect_size_strategy"].(string), "rdev-bootstrap") {
+		!strings.Contains(report["first_connect_size_strategy"].(string), "1 MiB") ||
+		!strings.Contains(report["first_connect_size_strategy"].(string), "rdev-bootstrap") ||
+		report["publishes_native_first_connect_asset"] != true {
 		t.Fatalf("expected aggregate compressed download budget evidence, got %#v", report)
 	}
 	assets := report["assets"].([]map[string]any)
-	if len(assets) != 5 {
-		t.Fatalf("expected five assets, got %#v", assets)
+	if len(assets) != 6 {
+		t.Fatalf("expected six assets, got %#v", assets)
 	}
 	for _, asset := range assets {
 		gzipURL, ok := asset["gzip_asset_url"].(string)
@@ -132,33 +157,33 @@ func TestPrepareReportsDefaultFirstConnectAssetReality(t *testing.T) {
 		t.Fatal(err)
 	}
 	report := prepare["asset_report"].(map[string]any)
-	if report["default_first_connect_surface"] != "script-preconnect" ||
-		report["default_runner_download_kind"] != "gzip-full-helper" ||
-		report["first_task_requires_full_helper"] != true ||
+	if report["default_first_connect_surface"] != "signed-native-bootstrap" ||
+		report["default_runner_download_kind"] != "signed-layered-core" ||
+		report["first_task_requires_verified_core"] != true ||
 		report["publishes_native_first_connect_asset"] != false {
 		t.Fatalf("expected asset report to state default first-connect reality, got %#v", report)
 	}
-	if maxBytes := int64FromAny(t, report["default_full_helper_gzip_estimated_max_bytes"]); maxBytes <= supportSessionBootstrapTargetBytes {
-		t.Fatalf("expected default full helper gzip max to exceed bootstrap target, got %d", maxBytes)
+	if maxBytes := int64FromAny(t, report["default_bootstrap_gzip_estimated_max_bytes"]); maxBytes <= supportSessionBootstrapTargetBytes {
+		t.Fatalf("expected oversized bootstrap gzip max to exceed target, got %d", maxBytes)
 	}
-	if report["default_full_helper_meets_bootstrap_target"] != false {
-		t.Fatalf("expected default full helper path not to be reported as bootstrap-target compliant, got %#v", report)
+	if report["default_bootstrap_meets_first_connect_target"] != false {
+		t.Fatalf("expected oversized bootstrap not to pass the first-connect gate, got %#v", report)
 	}
 	nativeBootstrap := report["native_first_connect_asset"].(map[string]any)
 	if nativeBootstrap["name"] != "rdev-bootstrap" ||
 		nativeBootstrap["published"] != false ||
-		nativeBootstrap["measured"] != false ||
+		nativeBootstrap["measured"] != true ||
 		int64FromAny(t, nativeBootstrap["target_bytes"]) != supportSessionBootstrapTargetBytes ||
 		nativeBootstrap["target_met"] != false ||
-		!strings.Contains(nativeBootstrap["reason"].(string), "not published") {
+		!strings.Contains(nativeBootstrap["reason"].(string), "gate passes") {
 		t.Fatalf("expected native bootstrap publication status, got %#v", nativeBootstrap)
 	}
 	assets := report["assets"].([]map[string]any)
 	for _, asset := range assets {
-		if asset["asset_role"] != "full-helper" ||
+		if asset["asset_role"] != "bootstrap" ||
 			asset["used_by_default_first_connect"] != true ||
-			asset["native_bootstrap_asset"] != false {
-			t.Fatalf("expected full-helper asset role evidence, got %#v", asset)
+			asset["native_bootstrap_asset"] != true {
+			t.Fatalf("expected bootstrap asset role evidence, got %#v", asset)
 		}
 	}
 }
@@ -320,10 +345,10 @@ func TestBuildPlanStandardizesVisibleSupportSession(t *testing.T) {
 	}
 	commands := plan["commands"].(map[string]any)
 	startGateway := strings.Join(anyStrings(commands["start_gateway"].([]string)), "\x00")
-	if !strings.Contains(startGateway, "--rdev-windows-amd64") ||
-		!strings.Contains(startGateway, "--rdev-darwin-amd64") ||
-		!strings.Contains(startGateway, "--rdev-linux-arm64") {
-		t.Fatalf("expected all helper asset flags, got %s", startGateway)
+	if !strings.Contains(startGateway, "--rdev-bootstrap-windows-amd64") ||
+		!strings.Contains(startGateway, "--rdev-bootstrap-darwin-amd64") ||
+		!strings.Contains(startGateway, "--rdev-bootstrap-linux-arm64") {
+		t.Fatalf("expected all bootstrap asset flags, got %s", startGateway)
 	}
 	createInvite := strings.Join(anyStrings(commands["create_invite_cli"].([]string)), "\x00")
 	if !strings.Contains(createInvite, "--auto-activate") {
@@ -665,7 +690,7 @@ func TestBuildStartedRequiresReadyAssetsToSend(t *testing.T) {
 	blockedEnvelope := blocked["target_handoff_envelope"].(map[string]any)
 	if blocked["ready_to_send"] != false || blocked["ready_to_send_to_human"] != false || blockedReadiness.ReadyToSend ||
 		blockedEnvelope["ready_to_forward"] != false ||
-		!strings.Contains(strings.ToLower(blocked["handoff_blocked_reason"].(string)), "helper assets") {
+		!strings.Contains(strings.ToLower(blocked["handoff_blocked_reason"].(string)), "bootstrap assets") {
 		t.Fatalf("missing asset report must block sending: %#v", blocked)
 	}
 
@@ -794,32 +819,30 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 	}
 	if bootstrap["schema_version"] != "rdev.support-session-bootstrap-connector.v1" ||
 		int64FromAny(t, bootstrap["first_connect_target_bytes"]) != supportSessionBootstrapTargetBytes ||
-		bootstrap["default_first_connect_surface"] != "script-preconnect" ||
-		bootstrap["publishes_native_first_connect_asset"] != false ||
-		bootstrap["preconnect_endpoint"] != "/v1/support-session/preconnect" ||
-		bootstrap["preconnect_phase_before_full_helper"] != "downloading-helper" ||
-		bootstrap["source"] != "rdev-bootstrap-preconnect" ||
+		bootstrap["default_first_connect_surface"] != "signed-native-bootstrap" ||
+		bootstrap["publishes_native_first_connect_asset"] != true ||
+		bootstrap["source"] != "rdev-bootstrap" ||
 		bootstrap["grants_host_access"] != false ||
 		bootstrap["can_run_session_tasks"] != false ||
-		bootstrap["full_runner_phase"] != "download-verified-rdev-host" ||
+		bootstrap["full_runner_phase"] != "download-signed-core-after-registration" ||
+		bootstrap["must_not_skip_core_verification"] != true ||
 		!slices.Contains(bootstrap["status_fields"].([]string), "target_preconnects") ||
 		!slices.Contains(bootstrap["status_fields"].([]string), "target_preconnect_count") ||
-		!strings.Contains(strings.Join(bootstrap["upgrade_required_for"].([]string), "\n"), "desktop") ||
-		!strings.Contains(bootstrap["agent_rule"].(string), "not as a connected executable host") {
+		!strings.Contains(bootstrap["agent_rule"].(string), "connected=true") {
 		t.Fatalf("expected bounded bootstrap connector contract, got %#v", bootstrap)
 	}
 	nativeBootstrap := bootstrap["native_connector"].(map[string]any)
 	nativeCommand := nativeBootstrap["command"].([]string)
 	if nativeBootstrap["schema_version"] != "rdev.bootstrap-native-connector.v1" ||
 		nativeBootstrap["source"] != "rdev-bootstrap-native" ||
-		nativeBootstrap["availability"] != "optional-if-rdev-bootstrap-is-already-installed-or-published" ||
-		nativeBootstrap["published_by_support_session_assets"] != false ||
-		nativeBootstrap["default_first_connect_surface"] != "script-preconnect" ||
+		nativeBootstrap["availability"] != "published-first-connect-asset" ||
+		nativeBootstrap["published_by_support_session_assets"] != true ||
+		nativeBootstrap["default_first_connect_surface"] != "signed-native-bootstrap" ||
 		!slices.Contains(nativeCommand, "rdev-bootstrap") ||
-		!slices.Contains(nativeCommand, "upgrade") ||
-		!strings.Contains(strings.Join(nativeBootstrap["capabilities"].([]string), "\n"), "download verified full helper") ||
+		!slices.Contains(nativeCommand, "layered-run") ||
+		!strings.Contains(strings.Join(nativeBootstrap["capabilities"].([]string), "\n"), "download verified core") ||
 		nativeBootstrap["can_run_session_tasks_before_full_runner"] != false {
-		t.Fatalf("expected native rdev-bootstrap staged-upgrade contract, got %#v", nativeBootstrap)
+		t.Fatalf("expected native rdev-bootstrap layered contract, got %#v", nativeBootstrap)
 	}
 	optimizer := bootstrap["cdn_download_optimizer"].(map[string]any)
 	if optimizer["schema_version"] != "rdev.cdn-optimizer-plan.v1" ||
@@ -904,7 +927,7 @@ func TestBuildCreatedReturnsReadyCommandsWithoutPlaceholders(t *testing.T) {
 		t.Fatalf("expected Agent connection runbook, got %#v", runbook)
 	}
 	if failurePrevention["schema_version"] != FreshAgentFailurePreventionSchemaVersion ||
-		!strings.Contains(strings.Join(failurePrevention["known_failure_pattern"].([]string), "\n"), "rdev is required") ||
+		!strings.Contains(strings.Join(failurePrevention["known_failure_pattern"].([]string), "\n"), "bootstrap assets") ||
 		!strings.Contains(strings.Join(failurePrevention["required_standard_path"].([]string), "\n"), "cli_start_now_command") ||
 		!strings.Contains(strings.Join(failurePrevention["forbidden_agent_generated_workarounds"].([]string), "\n"), "ExecutionPolicy Bypass") {
 		t.Fatalf("expected fresh-Agent failure-prevention contract, got %#v", failurePrevention)
@@ -990,8 +1013,8 @@ func TestBuildCreatedKeepsTargetInvitePortableWhenAgentRdevCommandIsAbsolute(t *
 		t.Fatalf("expected valid invite JSON: %v", err)
 	}
 	hostCommand, _ := invite["host_command"].(string)
-	if !strings.HasPrefix(hostCommand, "rdev host serve ") {
-		t.Fatalf("expected portable target-side host command, got %q", hostCommand)
+	if !strings.Contains(hostCommand, "/bootstrap.sh") || !strings.Contains(hostCommand, "rdev-bootstrap") || strings.Contains(hostCommand, "/Users/example") {
+		t.Fatalf("expected portable bootstrap-only target command, got %q", hostCommand)
 	}
 }
 
@@ -1176,15 +1199,15 @@ func TestBuildStartedWrapsForegroundGatewayAndSession(t *testing.T) {
 	}
 }
 
-func TestPrepareReportsHelperAssetsAndRecovery(t *testing.T) {
+func TestPrepareReportsBootstrapAssetsAndRecovery(t *testing.T) {
 	repoRoot := filepath.Join(t.TempDir(), "repo")
-	if err := os.MkdirAll(filepath.Join(repoRoot, "cmd", "rdev-host"), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Join(repoRoot, "cmd", "rdev-bootstrap"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(repoRoot, "go.mod"), []byte("module example.com/rdevtest\n\ngo 1.22\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(repoRoot, "cmd", "rdev-host", "main.go"), []byte("package main\nfunc main() {}\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(repoRoot, "cmd", "rdev-bootstrap", "main.go"), []byte("package main\nfunc main() {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	workDir := filepath.Join(t.TempDir(), "support")
@@ -1243,16 +1266,29 @@ func TestPrepareReportsHelperAssetsAndRecovery(t *testing.T) {
 	}
 	assets := prepare["asset_report"].(map[string]any)
 	if assets["all_ready"] != true || assets["build_assets"] != true {
-		t.Fatalf("expected built helper assets, got %#v", assets)
+		t.Fatalf("expected built bootstrap assets, got %#v", assets)
 	}
 	for _, asset := range assets["assets"].([]map[string]any) {
 		if asset["present"] != true || asset["sha256"] == "" {
-			t.Fatalf("expected present hashed helper asset, got %#v", asset)
+			t.Fatalf("expected present hashed bootstrap asset, got %#v", asset)
 		}
 	}
 	recovery := strings.Join(prepare["standard_recovery"].([]string), "\n")
 	if !strings.Contains(recovery, "do not write custom PowerShell") {
 		t.Fatalf("expected standard recovery guardrail, got %s", recovery)
+	}
+	encoded, err := json.Marshal(prepare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	if !strings.Contains(text, "bootstrap assets") {
+		t.Fatalf("prepare report omitted bootstrap asset language: %s", text)
+	}
+	for _, forbidden := range []string{"helper assets", "platform rdev helper", "rdev is required", "rdev host serve"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("prepare report contains legacy connection language %q: %s", forbidden, text)
+		}
 	}
 }
 
@@ -1533,12 +1569,12 @@ func TestBuildStatusReportsTargetDownloadingFromPreconnect(t *testing.T) {
 			{
 				ID:         "pre_download",
 				TicketCode: "WAIT-1234",
-				Phase:      "downloading-helper",
+				Phase:      "downloading-core",
 				OS:         "windows",
 				Arch:       "amd64",
-				Asset:      "rdev-windows-amd64.exe.gz",
+				Asset:      "rdev-host-windows-amd64.exe",
 				Source:     "bootstrap.ps1",
-				Message:    "downloading 18MB helper",
+				Message:    "downloading verified core runtime",
 				CreatedAt:  now.Add(-1 * time.Minute),
 				LastSeenAt: now,
 				SeenCount:  3,
@@ -1550,6 +1586,8 @@ func TestBuildStatusReportsTargetDownloadingFromPreconnect(t *testing.T) {
 		status["waiting"] != false ||
 		status["connected"] != false ||
 		!strings.Contains(status["feedback"].(string), "正在下载") ||
+		!strings.Contains(status["feedback"].(string), "core runtime") ||
+		strings.Contains(strings.ToLower(status["feedback"].(string)), "helper") ||
 		!strings.Contains(status["next_action"].(string), "继续等待") {
 		t.Fatalf("expected target downloading status, got %#v", status)
 	}
@@ -1557,10 +1595,10 @@ func TestBuildStatusReportsTargetDownloadingFromPreconnect(t *testing.T) {
 	latest := summary["latest"].(model.SupportSessionPreconnect)
 	countByPhase := summary["count_by_phase"].(map[string]int)
 	if summary["status"] != "target-downloading" ||
-		summary["phase"] != "downloading-helper" ||
+		summary["phase"] != "downloading-core" ||
 		latest.ID != "pre_download" ||
 		countByPhase["started"] != 1 ||
-		countByPhase["downloading-helper"] != 1 ||
+		countByPhase["downloading-core"] != 1 ||
 		!strings.Contains(summary["agent_interpretation"].(string), "not disconnected") {
 		t.Fatalf("expected target preconnect summary, got %#v", summary)
 	}

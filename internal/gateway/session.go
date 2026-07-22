@@ -87,6 +87,10 @@ func (g *MemoryGateway) SessionEventsAfter(sessionID string, cursor controlplane
 	return g.controlPlane().EventsAfter(sessionID, cursor, limit)
 }
 
+func (g *MemoryGateway) PeekSessionEventsAfter(sessionID string, cursor controlplane.EventCursor, limit int) ([]controlplane.Event, controlplane.Lease, controlplane.EventReplayState, error) {
+	return g.controlPlane().PeekEventsAfter(sessionID, cursor, limit)
+}
+
 func (g *MemoryGateway) SessionEventsAfterForAgent(sessionID string, afterSeq uint64, limit int) ([]controlplane.Event, controlplane.EventReplayState, error) {
 	return g.controlPlane().EventsAfterForAgent(sessionID, afterSeq, limit)
 }

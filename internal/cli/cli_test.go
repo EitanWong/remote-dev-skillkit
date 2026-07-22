@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -33,6 +34,7 @@ import (
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/audit"
+	"github.com/EitanWong/remote-dev-skillkit/internal/bootstrapcmd"
 	"github.com/EitanWong/remote-dev-skillkit/internal/connectionrunner"
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
@@ -44,6 +46,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
 	"github.com/EitanWong/remote-dev-skillkit/internal/policy"
 	"github.com/EitanWong/remote-dev-skillkit/internal/protectedstore"
+	"github.com/EitanWong/remote-dev-skillkit/internal/release"
 	"github.com/EitanWong/remote-dev-skillkit/internal/signing"
 	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
 	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
@@ -2125,8 +2128,8 @@ func TestSupportSessionStatusTimeoutKeepsDownloadGuidance(t *testing.T) {
 			"next_action":"Keep waiting for the download to finish; do not misdiagnose this as the target command not running.",
 			"target_preconnect_summary":{
 				"status":"target-downloading",
-				"phase":"downloading-helper",
-				"agent_interpretation":"The target command reached the gateway and is downloading the helper; this is not disconnected or user inaction."
+				"phase":"downloading-core",
+				"agent_interpretation":"The target command reached the gateway and rdev-bootstrap is downloading the verified core runtime; this is not disconnected or user inaction."
 			}
 		}` + "\n"))
 	}))
@@ -2265,7 +2268,7 @@ func TestSupportSessionPlanStandardizesOneCommandConnection(t *testing.T) {
 		t.Fatalf("auto authorization should be scoped and minimal: %#v", payload.AutoActivate)
 	}
 	startGateway := strings.Join(payload.Commands["start_gateway"], "\x00")
-	if !strings.Contains(startGateway, "--rdev-windows-amd64") ||
+	if !strings.Contains(startGateway, "--rdev-bootstrap-windows-amd64") ||
 		!strings.Contains(startGateway, "--manifest-signing-key") ||
 		!strings.Contains(startGateway, "--state") {
 		t.Fatalf("gateway plan should carry assets and durable state: %#v", payload.Commands["start_gateway"])
@@ -2669,7 +2672,7 @@ func TestSupportSessionPlanDefaultGatewayDoesNotUseWildcardURL(t *testing.T) {
 	}
 }
 
-func TestSupportSessionPrepareBuildsHelperAssetsForOneCommandTargets(t *testing.T) {
+func TestSupportSessionPrepareBuildsBootstrapAssetsForOneCommandTargets(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	app := NewApp(&stdout, &stderr)
@@ -2762,9 +2765,9 @@ func TestSupportSessionPrepareBuildsHelperAssetsForOneCommandTargets(t *testing.
 		payload.AssetReport.DownloadBudgetBytes <= 0 ||
 		!payload.AssetReport.AllGzipWithinBudget ||
 		payload.AssetReport.BootstrapTargetBytes <= 0 ||
-		!strings.Contains(payload.AssetReport.FirstConnectSizeStrategy, "gzip") ||
+		!strings.Contains(payload.AssetReport.FirstConnectSizeStrategy, "1 MiB") ||
 		!strings.Contains(payload.AssetReport.FirstConnectSizeStrategy, "rdev-bootstrap") ||
-		len(payload.AssetReport.Assets) != 5 {
+		len(payload.AssetReport.Assets) != 6 {
 		t.Fatalf("unexpected prepare payload: %#v", payload)
 	}
 	for _, asset := range payload.AssetReport.Assets {
@@ -2912,7 +2915,7 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 		t.Fatalf("expected configured relay continuity policy, got %#v", payload.ConnectionContinuityPolicy)
 	}
 	if payload.TargetBootstrapRequirements.SchemaVersion != "rdev.support-session-target-bootstrap-requirements.v1" ||
-		!slices.Contains(payload.TargetBootstrapRequirements.RequiredAssets, "rdev-windows-amd64.exe") ||
+		!slices.Contains(payload.TargetBootstrapRequirements.RequiredAssets, "rdev-bootstrap-windows-amd64.exe") ||
 		!slices.Contains(payload.TargetBootstrapRequirements.StandardFix, "rdev support-session connect --start") ||
 		!slices.Contains(payload.TargetBootstrapRequirements.Forbidden, "using ExecutionPolicy Bypass") {
 		t.Fatalf("expected Windows bootstrap requirements and standard recovery, got %#v", payload.TargetBootstrapRequirements)
@@ -2920,7 +2923,7 @@ func TestSupportSessionCreateReturnsReadyTargetCommandAndWatcher(t *testing.T) {
 	if payload.TargetBootstrapReadiness.SchemaVersion != "rdev.support-session-target-bootstrap-readiness.v1" ||
 		payload.TargetBootstrapReadiness.AllReady ||
 		!strings.Contains(payload.TargetBootstrapReadiness.AgentRule, "support-session connect --start") {
-		t.Fatalf("expected create to report missing gateway helper assets, got %#v", payload.TargetBootstrapReadiness)
+		t.Fatalf("expected create to report missing gateway bootstrap assets, got %#v", payload.TargetBootstrapReadiness)
 	}
 	if payload.UserHandoff.SchemaVersion != "rdev.support-session-user-handoff.v1" ||
 		payload.UserHandoff.CopyPasteKind != "windows" ||
@@ -4463,19 +4466,276 @@ func TestWriteJSONFile0600TightensExistingFilePermissions(t *testing.T) {
 
 func TestGatewayAssetConfigUsesDirectoryWithExplicitOverrides(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bin")
-	override := filepath.Join(t.TempDir(), "custom-rdev.exe")
+	override := filepath.Join(t.TempDir(), "custom-rdev-bootstrap.exe")
 	assets := gatewayAssetConfig(gatewayServeOptions{
-		RdevAssetsDir:        dir,
-		RdevWindowsAMD64Path: override,
+		RdevAssetsDir:                 dir,
+		RdevBootstrapWindowsAMD64Path: override,
 	})
-	if assets.RdevWindowsAMD64Path != override {
-		t.Fatalf("explicit Windows helper should override assets dir: %#v", assets)
+	if assets.RdevBootstrapWindowsAMD64Path != override {
+		t.Fatalf("explicit Windows bootstrap should override assets dir: %#v", assets)
 	}
-	if assets.RdevDarwinARM64Path != filepath.Join(dir, "rdev-darwin-arm64") ||
-		assets.RdevDarwinAMD64Path != filepath.Join(dir, "rdev-darwin-amd64") ||
-		assets.RdevLinuxAMD64Path != filepath.Join(dir, "rdev-linux-amd64") ||
-		assets.RdevLinuxARM64Path != filepath.Join(dir, "rdev-linux-arm64") {
-		t.Fatalf("assets dir should populate platform helper paths: %#v", assets)
+	if assets.RdevHostWindowsAMD64Path != filepath.Join(dir, "rdev-host-windows-amd64.exe") ||
+		assets.RdevBootstrapDarwinARM64Path != filepath.Join(dir, "rdev-bootstrap-darwin-arm64") ||
+		assets.RdevBootstrapDarwinAMD64Path != filepath.Join(dir, "rdev-bootstrap-darwin-amd64") ||
+		assets.RdevBootstrapLinuxAMD64Path != filepath.Join(dir, "rdev-bootstrap-linux-amd64") ||
+		assets.RdevBootstrapLinuxARM64Path != filepath.Join(dir, "rdev-bootstrap-linux-arm64") {
+		t.Fatalf("assets dir should populate platform bootstrap paths: %#v", assets)
+	}
+}
+
+func TestGatewayServeHelpListsBootstrapOnlyConnectionAssets(t *testing.T) {
+	var stderr bytes.Buffer
+	app := NewApp(io.Discard, &stderr)
+	if err := app.Run(context.Background(), []string{"gateway", "serve", "-h"}); err == nil {
+		t.Fatal("gateway serve help did not stop after printing flags")
+	}
+	help := stderr.String()
+	for _, required := range []string{
+		"-rdev-bootstrap-windows-amd64",
+		"-rdev-bootstrap-windows-arm64",
+		"-rdev-bootstrap-darwin-amd64",
+		"-rdev-bootstrap-darwin-arm64",
+		"-rdev-bootstrap-linux-amd64",
+		"-rdev-bootstrap-linux-arm64",
+	} {
+		if !strings.Contains(help, required) {
+			t.Fatalf("gateway serve help omitted bootstrap asset flag %q:\n%s", required, help)
+		}
+	}
+	for _, forbidden := range []string{
+		"-rdev-windows-amd64",
+		"-rdev-darwin-amd64",
+		"-rdev-darwin-arm64",
+		"-rdev-linux-amd64",
+		"-rdev-linux-arm64",
+	} {
+		if strings.Contains(help, forbidden) {
+			t.Fatalf("gateway serve help still exposes legacy full-helper asset flag %q:\n%s", forbidden, help)
+		}
+	}
+}
+
+func TestConnectionEntryHelpExposesBootstrapCommandOnly(t *testing.T) {
+	for _, subcommand := range []string{"plan", "run"} {
+		var stderr bytes.Buffer
+		app := NewApp(io.Discard, &stderr)
+		_ = app.Run(context.Background(), []string{"connection-entry", subcommand, "-h"})
+		help := stderr.String()
+		if !strings.Contains(help, "-bootstrap-command") {
+			t.Fatalf("connection-entry %s help omitted bootstrap command:\n%s", subcommand, help)
+		}
+		for _, forbidden := range []string{"-rdev-command", "host serve"} {
+			if strings.Contains(help, forbidden) {
+				t.Fatalf("connection-entry %s help contains legacy path %q:\n%s", subcommand, forbidden, help)
+			}
+		}
+	}
+	var inviteHelp bytes.Buffer
+	app := NewApp(io.Discard, &inviteHelp)
+	_ = app.Run(context.Background(), []string{"invite", "create", "-h"})
+	if strings.Contains(inviteHelp.String(), "-rdev-command") {
+		t.Fatalf("invite create help exposes legacy target executable selector:\n%s", inviteHelp.String())
+	}
+}
+
+func TestGatewayServeConfiguresLayeredCandidateAssets(t *testing.T) {
+	candidateDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(candidateDir, "assets"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeFileForCLITest(t, filepath.Join(candidateDir, "layered-assets.json"), "{}\n")
+	writeFileForCLITest(t, filepath.Join(candidateDir, "assets", "rdev-host-windows-amd64.exe"), "host\n")
+	override := filepath.Join(t.TempDir(), "layered-assets.json")
+
+	assets := gatewayAssetConfig(gatewayServeOptions{RdevAssetsDir: candidateDir})
+	if assets.LayeredAssetManifestPath != filepath.Join(candidateDir, "layered-assets.json") {
+		t.Fatalf("candidate assets dir should configure layered manifest: %#v", assets)
+	}
+	if assets.RdevHostWindowsAMD64Path != filepath.Join(candidateDir, "assets", "rdev-host-windows-amd64.exe") {
+		t.Fatalf("candidate assets dir should configure staged Windows core runtime: %#v", assets)
+	}
+
+	assets = gatewayAssetConfig(gatewayServeOptions{
+		RdevAssetsDir:            candidateDir,
+		LayeredAssetManifestPath: override,
+	})
+	if assets.LayeredAssetManifestPath != override {
+		t.Fatalf("explicit layered manifest should override candidate assets dir: %#v", assets)
+	}
+
+	legacyCandidateDir := t.TempDir()
+	writeFileForCLITest(t, filepath.Join(legacyCandidateDir, "layered-assets.json"), "{}\n")
+	writeFileForCLITest(t, filepath.Join(legacyCandidateDir, "rdev-host-windows-amd64.exe"), "host\n")
+	assets = gatewayAssetConfig(gatewayServeOptions{RdevAssetsDir: legacyCandidateDir})
+	if assets.LayeredAssetManifestPath != filepath.Join(legacyCandidateDir, "layered-assets.json") ||
+		assets.RdevHostWindowsAMD64Path != filepath.Join(legacyCandidateDir, "rdev-host-windows-amd64.exe") {
+		t.Fatalf("explicit canonical candidate layout should retain the flat core and configure its manifest: %#v", assets)
+	}
+
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	err := app.Run(context.Background(), []string{
+		"gateway", "serve",
+		"--dev",
+		"--state", filepath.Join(t.TempDir(), "state.json"),
+		"--rdev-assets-dir", candidateDir,
+		"--layered-assets-manifest", override,
+	})
+	if err == nil || !strings.Contains(err.Error(), "persistent storage requires --signing-key") {
+		t.Fatalf("gateway serve did not accept layered candidate asset flags: %v", err)
+	}
+}
+
+func TestSupportSessionAssetConfigServesVerifiedPreSignedWindowsCore(t *testing.T) {
+	fixture := newSupportSessionLayeredCandidateFixture(t)
+	workDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workDir, "bin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	assets, err := supportSessionAssetConfig(workDir, supportSessionLayeredCandidateOptions{
+		AssetsDir:       fixture.dir,
+		RootPublicKey:   fixture.rootPublicKey,
+		ExpectedVersion: fixture.version,
+	}, fixture.now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidateDir, err := canonicalPathThroughExistingAncestor(fixture.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if assets.LayeredAssetManifestPath != filepath.Join(candidateDir, "layered-assets.json") ||
+		assets.RdevHostWindowsAMD64Path != filepath.Join(candidateDir, "assets", "rdev-host-windows-amd64.exe") ||
+		assets.RdevBootstrapWindowsARM64Path != filepath.Join(workDir, "bin", "rdev-bootstrap-windows-arm64.exe") {
+		t.Fatalf("layered support-session asset config = %#v", assets)
+	}
+	if _, err := os.Stat(filepath.Join(workDir, "bin", "layered-assets.json")); !os.IsNotExist(err) {
+		t.Fatalf("support session unexpectedly synthesized a layered manifest: %v", err)
+	}
+
+	server := httpapi.NewServer(gateway.NewMemoryGateway())
+	server.Assets = assets
+	for requestPath, want := range map[string][]byte{
+		"/layered-assets.json":                fixture.manifestContent,
+		"/assets/rdev-host-windows-amd64.exe": fixture.coreContent,
+	} {
+		rec := httptest.NewRecorder()
+		server.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, requestPath, nil))
+		if rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), want) {
+			t.Fatalf("served layered asset %q = %d %q, want 200 and %q", requestPath, rec.Code, rec.Body.Bytes(), want)
+		}
+	}
+}
+
+func TestSupportSessionAssetConfigRejectsTamperedPreSignedWindowsCore(t *testing.T) {
+	fixture := newSupportSessionLayeredCandidateFixture(t)
+	if err := os.WriteFile(fixture.corePath, []byte("tampered runtime\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := supportSessionAssetConfig(t.TempDir(), supportSessionLayeredCandidateOptions{
+		AssetsDir:       fixture.dir,
+		RootPublicKey:   fixture.rootPublicKey,
+		ExpectedVersion: fixture.version,
+	}, fixture.now.Add(time.Minute))
+	if err == nil || !strings.Contains(err.Error(), "does not match signed manifest") {
+		t.Fatalf("tampered Windows core runtime error = %v", err)
+	}
+}
+
+type supportSessionLayeredCandidateFixture struct {
+	dir             string
+	manifestPath    string
+	corePath        string
+	rootPublicKey   string
+	version         string
+	now             time.Time
+	manifestContent []byte
+	coreContent     []byte
+}
+
+func newSupportSessionLayeredCandidateFixture(t *testing.T) supportSessionLayeredCandidateFixture {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	assetsDir := filepath.Join(dir, "assets")
+	if err := os.MkdirAll(assetsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	coreContent := []byte("pre-signed Windows core runtime\n")
+	corePath := filepath.Join(assetsDir, "rdev-host-windows-amd64.exe")
+	if err := os.WriteFile(corePath, coreContent, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	key, err := signing.Generate("support-session-release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.July, 16, 10, 0, 0, 0, time.UTC)
+	version := "v0.2.0-support-session-test"
+	sum := sha256.Sum256(coreContent)
+	manifest, err := release.SignLayeredAssetManifest(release.LayeredAssetManifest{
+		SchemaVersion: release.LayeredAssetManifestSchemaVersion,
+		Version:       version,
+		GeneratedAt:   now,
+		ExpiresAt:     now.Add(time.Hour),
+		Assets: []release.LayeredAsset{{
+			ID:           "rdev-host-windows-amd64",
+			Platform:     "windows/amd64",
+			Kind:         "core-runtime",
+			RelativePath: "assets/rdev-host-windows-amd64.exe",
+			SHA256:       "sha256:" + hex.EncodeToString(sum[:]),
+			SizeBytes:    int64(len(coreContent)),
+		}},
+	}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestContent, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifestContent = append(manifestContent, '\n')
+	manifestPath := filepath.Join(dir, "layered-assets.json")
+	if err := os.WriteFile(manifestPath, manifestContent, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return supportSessionLayeredCandidateFixture{
+		dir:             dir,
+		manifestPath:    manifestPath,
+		corePath:        corePath,
+		rootPublicKey:   encodeRootPublicKey(key.ID, key.PublicKey),
+		version:         version,
+		now:             now,
+		manifestContent: manifestContent,
+		coreContent:     coreContent,
+	}
+}
+
+func TestGatewayServeConfiguresRdevHostWindowsAMD64Asset(t *testing.T) {
+	coreRuntime := filepath.Join(t.TempDir(), "rdev-host-windows-amd64.exe")
+	opts := gatewayServeOptions{RdevHostWindowsAMD64Path: coreRuntime}
+	assets := gatewayAssetConfig(opts)
+	if assets.RdevHostWindowsAMD64Path != coreRuntime {
+		t.Fatalf("gateway did not configure Windows host core runtime: %#v", assets)
+	}
+	if !gatewayHasExplicitAssetConfig(opts) {
+		t.Fatal("Windows host core runtime should count as explicit gateway asset configuration")
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	err := app.Run(context.Background(), []string{
+		"gateway", "serve",
+		"--dev",
+		"--state", filepath.Join(t.TempDir(), "state.json"),
+		"--rdev-host-windows-amd64", coreRuntime,
+	})
+	if err == nil || !strings.Contains(err.Error(), "persistent storage requires --signing-key") {
+		t.Fatalf("gateway serve did not recognize Windows host runtime flag: %v", err)
 	}
 }
 
@@ -4485,18 +4745,18 @@ func TestGatewayServeDevAutoBuildsRdevAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !ready {
-		t.Fatalf("expected gateway helper assets to be ready in %s", assetsDir)
+		t.Fatalf("expected gateway bootstrap assets to be ready in %s", assetsDir)
 	}
 	assets := gatewayAssetConfig(gatewayServeOptions{RdevAssetsDir: assetsDir})
-	if assets.RdevWindowsAMD64Path == "" {
-		t.Fatalf("expected auto-built Windows helper asset path, got %#v", assets)
+	if assets.RdevBootstrapWindowsAMD64Path == "" {
+		t.Fatalf("expected auto-built Windows bootstrap asset path, got %#v", assets)
 	}
-	info, err := os.Stat(assets.RdevWindowsAMD64Path)
+	info, err := os.Stat(assets.RdevBootstrapWindowsAMD64Path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if info.IsDir() || info.Size() == 0 {
-		t.Fatalf("expected non-empty Windows helper asset, got %#v", info)
+		t.Fatalf("expected non-empty Windows bootstrap asset, got %#v", info)
 	}
 }
 
@@ -4920,14 +5180,14 @@ func TestInviteCreateUsesGatewayAndOutputsAgentPlan(t *testing.T) {
 	if payload.Transport != "wss" || payload.TransportPlan.Mode != "wss" || len(payload.TransportPlan.Candidates) != 1 {
 		t.Fatalf("explicit WSS invite should keep WSS-only plan: %#v", payload.TransportPlan)
 	}
-	if !strings.Contains(payload.ManifestURL, "/v1/tickets/") || !strings.Contains(payload.HostCommand, "host serve --manifest-url") || !strings.Contains(payload.HostCommand, "--transport wss") {
-		t.Fatalf("invite should include manifest URL and WSS host command: %#v", payload)
+	if !strings.Contains(payload.ManifestURL, "/v1/tickets/") || !strings.Contains(payload.HostCommand, "/bootstrap.sh") || !strings.Contains(payload.HostCommand, "rdev-bootstrap") || strings.Contains(payload.HostCommand, "host serve") {
+		t.Fatalf("invite should include manifest URL and bootstrap-only host command: %#v", payload)
 	}
-	if payload.ManifestRootPublicKey == "" || !strings.Contains(payload.HostCommand, "--manifest-root-public-key") {
-		t.Fatalf("invite should carry the manifest root in host_command: %#v", payload)
+	if payload.ManifestRootPublicKey == "" {
+		t.Fatalf("invite should carry the signed manifest root: %#v", payload)
 	}
-	if len(payload.TransportPlan.Candidates) == 0 || !strings.Contains(payload.TransportPlan.Candidates[0].HostCommand, "--manifest-root-public-key") {
-		t.Fatalf("transport candidates should carry manifest root: %#v", payload.TransportPlan.Candidates)
+	if len(payload.TransportPlan.Candidates) == 0 || payload.TransportPlan.Candidates[0].HostCommand != payload.HostCommand {
+		t.Fatalf("transport candidates should share the bootstrap attempt command: %#v", payload.TransportPlan.Candidates)
 	}
 	if len(payload.HumanNextActions) == 0 || len(payload.AgentNextActions) == 0 || len(payload.ConnectivityChecks) == 0 {
 		t.Fatalf("invite should split human and agent actions: %#v", payload)
@@ -5085,18 +5345,19 @@ func TestInviteCreateDefaultsToAutoTransportPlan(t *testing.T) {
 		TransportPlan         struct {
 			Mode       string `json:"mode"`
 			Candidates []struct {
-				Transport string `json:"transport"`
+				Transport   string `json:"transport"`
+				HostCommand string `json:"host_command"`
 			} `json:"candidates"`
 		} `json:"transport_plan"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("invalid invite JSON: %v\n%s", err, stdout.String())
 	}
-	if payload.Transport != "auto" || !strings.Contains(payload.HostCommand, "--transport auto") {
-		t.Fatalf("expected auto host command, got %#v", payload)
+	if payload.Transport != "auto" || !strings.Contains(payload.HostCommand, "rdev-bootstrap") || !strings.Contains(payload.HostCommand, "/bootstrap.sh") {
+		t.Fatalf("expected auto bootstrap command, got %#v", payload)
 	}
-	if payload.ManifestRootPublicKey == "" || !strings.Contains(payload.HostCommand, "--manifest-root-public-key") {
-		t.Fatalf("expected auto host command to include manifest root, got %#v", payload)
+	if payload.ManifestRootPublicKey == "" {
+		t.Fatalf("expected invite to include manifest root, got %#v", payload)
 	}
 	if payload.TransportPlan.Mode != "auto" || len(payload.TransportPlan.Candidates) != 3 {
 		t.Fatalf("expected three transport candidates, got %#v", payload.TransportPlan)
@@ -5104,8 +5365,13 @@ func TestInviteCreateDefaultsToAutoTransportPlan(t *testing.T) {
 	if payload.TransportPlan.Candidates[0].Transport != "wss" || payload.TransportPlan.Candidates[1].Transport != "long-poll" || payload.TransportPlan.Candidates[2].Transport != "poll" {
 		t.Fatalf("unexpected transport fallback order: %#v", payload.TransportPlan.Candidates)
 	}
-	if len(payload.FallbackCommands) != 2 || !strings.Contains(payload.FallbackCommands[0], "--transport long-poll") || !strings.Contains(payload.FallbackCommands[1], "--transport poll") || !strings.Contains(payload.FallbackCommands[0], "--manifest-root-public-key") {
-		t.Fatalf("expected long-poll and poll fallback commands, got %#v", payload.FallbackCommands)
+	if len(payload.FallbackCommands) != 0 {
+		t.Fatalf("bootstrap attempt must own transport fallback, got %#v", payload.FallbackCommands)
+	}
+	for _, candidate := range payload.TransportPlan.Candidates {
+		if candidate.HostCommand != payload.HostCommand {
+			t.Fatalf("transport candidates must share one bootstrap command: %#v", payload.TransportPlan.Candidates)
+		}
 	}
 }
 
@@ -5161,8 +5427,20 @@ func TestConnectionEntryPlanMaterializesGenericPackagePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bootstrap := filepath.Join(t.TempDir(), "windows-temporary.ps1")
-	if err := os.WriteFile(bootstrap, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
+	releaseDir := t.TempDir()
+	keyPath := filepath.Join(releaseDir, "release-root.json")
+	releaseRoot := signReleaseArtifactWithCLIForTest(t, releaseDir, keyPath, "rdev-bootstrap.exe", "bootstrap-binary")
+	bootstrapPath := filepath.Join(releaseDir, "rdev-bootstrap.exe")
+	bootstrapManifestPath := bootstrapPath + ".rdev-release.json"
+	releaseKey, _, err := signing.LoadOrCreate(keyPath, "release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrapManifest, err := release.SignArtifactForRelease(bootstrapPath, releaseKey, time.Now(), "v0.2.0", "windows/amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := release.WriteManifest(bootstrapManifestPath, bootstrapManifest); err != nil {
 		t.Fatal(err)
 	}
 	outDir := filepath.Join(t.TempDir(), "entry")
@@ -5173,14 +5451,13 @@ func TestConnectionEntryPlanMaterializesGenericPackagePlan(t *testing.T) {
 		"--invite-json", inviteOut.String(),
 		"--out", outDir,
 		"--target-os", "windows",
+		"--target-arch", "amd64",
 		"--ownership", "third-party",
-		"--windows-bootstrap-script", bootstrap,
-		"--windows-host-download-url", "https://agent.example.com/rdev-host.exe",
-		"--windows-host-sha256", strings.Repeat("a", 64),
-		"--release-bundle-url", "https://agent.example.com/release-bundle.json",
-		"--release-root-public-key", "release-root:" + strings.Repeat("b", 43),
-		"--windows-verifier-download-url", "https://agent.example.com/rdev-verify.exe",
-		"--windows-verifier-sha256", strings.Repeat("c", 64),
+		"--windows-bootstrap-binary", bootstrapPath,
+		"--windows-bootstrap-release-manifest", bootstrapManifestPath,
+		"--layered-assets-manifest-url", "https://agent.example.com/layered-assets.json",
+		"--layered-release-version", "v0.2.0",
+		"--release-root-public-key", releaseRoot,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -5210,15 +5487,20 @@ func TestConnectionEntryPlanMaterializesGenericPackagePlan(t *testing.T) {
 	if !payload.OK {
 		t.Fatalf("expected connection entry plan ok, got %s", stdout.String())
 	}
+	launcherPath := payload.EntryPackagePlan.LauncherPath
+	if !filepath.IsAbs(launcherPath) {
+		launcherPath = filepath.Join(outDir, filepath.FromSlash(launcherPath))
+	}
 	if payload.EntryPackagePlan.SchemaVersion != "rdev.connection-entry.package-plan.v1" ||
 		payload.EntryPackagePlan.TargetOS != "windows" ||
 		payload.EntryPackagePlan.SessionMode != string(model.HostModeAttendedTemporary) ||
-		payload.EntryPackagePlan.PlatformPlanKind != "windows-temporary-acceptance-plan" ||
-		!fileExistsForCLITest(payload.EntryPackagePlan.LauncherPath) {
-		t.Fatalf("expected generic entry package plan wrapping Windows temporary plan, got %#v", payload.EntryPackagePlan)
+		payload.EntryPackagePlan.PlatformPlanKind != "windows-layered-handoff" ||
+		!fileExistsForCLITest(launcherPath) {
+		t.Fatalf("expected generic entry package plan wrapping the Windows layered handoff, got %#v", payload.EntryPackagePlan)
 	}
-	if !slices.Contains(payload.EntryPackagePlan.AgentOnlyParameters, "ticket_code") ||
-		!slices.Contains(payload.EntryPackagePlan.AgentOnlyParameters, "manifest_root_public_key") {
+	if !slices.Contains(payload.EntryPackagePlan.AgentOnlyParameters, "manifest_url") ||
+		!slices.Contains(payload.EntryPackagePlan.AgentOnlyParameters, "manifest_root_public_key") ||
+		!slices.Contains(payload.EntryPackagePlan.AgentOnlyParameters, "layered_assets_manifest_url") {
 		t.Fatalf("expected raw connection parameters to be agent-only, got %#v", payload.EntryPackagePlan.AgentOnlyParameters)
 	}
 	if payload.Plan.ConnectionEntryName != "Connection Entry" ||
@@ -5233,6 +5515,121 @@ func TestConnectionEntryPlanMaterializesGenericPackagePlan(t *testing.T) {
 		strings.Contains(stdout.String(), "connector_package_plan") {
 		t.Fatalf("connection entry output should not use legacy customer/connector names: %s", stdout.String())
 	}
+}
+
+func TestWindowsConnectionEntryRequiresLayeredBootstrapHandoff(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+
+	var inviteOut bytes.Buffer
+	if err := NewApp(&inviteOut, &bytes.Buffer{}).Run(context.Background(), []string{
+		"invite", "create",
+		"--gateway", server.URL,
+		"--reason", "repair target host",
+		"--transport", "long-poll",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	releaseDir := t.TempDir()
+	keyPath := filepath.Join(releaseDir, "release-root.json")
+	releaseRoot := signReleaseArtifactWithCLIForTest(t, releaseDir, keyPath, "rdev-bootstrap.exe", "bootstrap-binary")
+	bootstrapPath := filepath.Join(releaseDir, "rdev-bootstrap.exe")
+	bootstrapManifestPath := bootstrapPath + ".rdev-release.json"
+	releaseKey, _, err := signing.LoadOrCreate(keyPath, "release-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bootstrapManifest, err := release.SignArtifactForRelease(bootstrapPath, releaseKey, time.Now(), "v0.2.0", "windows/amd64")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := release.WriteManifest(bootstrapManifestPath, bootstrapManifest); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("layered prerequisites", func(t *testing.T) {
+		outDir := filepath.Join(t.TempDir(), "entry")
+		var stdout bytes.Buffer
+		err := NewApp(&stdout, &bytes.Buffer{}).Run(context.Background(), []string{
+			"connection-entry", "plan",
+			"--invite-json", inviteOut.String(),
+			"--out", outDir,
+			"--target-os", "windows",
+			"--target-arch", "amd64",
+			"--ownership", "third-party",
+			"--windows-bootstrap-binary", bootstrapPath,
+			"--windows-bootstrap-release-manifest", bootstrapManifestPath,
+			"--layered-assets-manifest-url", "https://downloads.example.com/layered-assets.json",
+			"--layered-release-version", "v0.2.0",
+			"--release-root-public-key", releaseRoot,
+		})
+		if err != nil {
+			t.Fatalf("expected valid layered inputs to materialize: %v\n%s", err, stdout.String())
+		}
+		var payload struct {
+			OK               bool `json:"ok"`
+			EntryPackagePlan struct {
+				PackageMode      string `json:"package_mode"`
+				PlatformPlanKind string `json:"platform_plan_kind"`
+				LauncherPath     string `json:"launcher_path"`
+			} `json:"entry_package_plan"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+			t.Fatalf("invalid layered connection entry output: %v\n%s", err, stdout.String())
+		}
+		launcherPath := payload.EntryPackagePlan.LauncherPath
+		if !filepath.IsAbs(launcherPath) {
+			launcherPath = filepath.Join(outDir, filepath.FromSlash(launcherPath))
+		}
+		if !payload.OK ||
+			!strings.Contains(payload.EntryPackagePlan.PackageMode, "layered") ||
+			!strings.Contains(payload.EntryPackagePlan.PlatformPlanKind, "layered") ||
+			!fileExistsForCLITest(launcherPath) {
+			t.Fatalf("expected layered Windows handoff selection, got %#v\n%s", payload.EntryPackagePlan, stdout.String())
+		}
+		launcher, err := os.ReadFile(launcherPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(launcher), "--expected-release-version") || !strings.Contains(string(launcher), "v0.2.0") {
+			t.Fatalf("layered launcher did not pin the expected release version:\n%s", launcher)
+		}
+	})
+
+	t.Run("missing layered prerequisites", func(t *testing.T) {
+		outDir := filepath.Join(t.TempDir(), "entry")
+		var stdout bytes.Buffer
+		err := NewApp(&stdout, &bytes.Buffer{}).Run(context.Background(), []string{
+			"connection-entry", "plan",
+			"--invite-json", inviteOut.String(),
+			"--out", outDir,
+			"--target-os", "windows",
+			"--target-arch", "amd64",
+			"--ownership", "third-party",
+			"--release-root-public-key", releaseRoot,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload struct {
+			OK               bool `json:"ok"`
+			EntryPackagePlan struct {
+				PlatformPlanKind string `json:"platform_plan_kind"`
+				LauncherPath     string `json:"launcher_path"`
+			} `json:"entry_package_plan"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+			t.Fatalf("invalid legacy connection entry output: %v\n%s", err, stdout.String())
+		}
+		if payload.OK || payload.EntryPackagePlan.PlatformPlanKind != "connection-entry-runner" {
+			t.Fatalf("expected missing layered inputs to retain only the failed bootstrap runner plan, got %#v\n%s", payload.EntryPackagePlan, stdout.String())
+		}
+		if fileExistsForCLITest(filepath.Join(outDir, "windows-temporary")) || strings.Contains(stdout.String(), "windows-temporary") {
+			t.Fatalf("missing layered inputs generated a legacy Windows helper path:\n%s", stdout.String())
+		}
+	})
 }
 
 func TestConnectionEntryRunWritesRunnerResultEvidence(t *testing.T) {
@@ -5260,6 +5657,9 @@ func TestConnectionEntryRunWritesRunnerResultEvidence(t *testing.T) {
 		"--out", outDir,
 		"--target-os", "linux",
 		"--ownership", "third-party",
+		"--release-root-public-key", "release-root:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+		"--layered-assets-manifest-url", "https://api.example.com/layered-assets.json",
+		"--layered-release-version", "v2.0.0-test",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -5297,7 +5697,7 @@ func TestConnectionEntryRunWritesRunnerResultEvidence(t *testing.T) {
 	}
 	if result.SchemaVersion != "rdev.connection-entry.runner-result.v1" ||
 		result.SelectedPath != "native-direct-gateway" ||
-		len(result.HostServeArgs) == 0 ||
+		len(result.BootstrapArgs) == 0 ||
 		result.Executed {
 		t.Fatalf("unexpected runner evidence: %#v\ncli output: %s", result, runOut.String())
 	}
@@ -5349,6 +5749,8 @@ func TestConnectionEntryPlanMaterializesManagedLinuxPackagePlan(t *testing.T) {
 		"--managed-binary", "/opt/rdev/rdev",
 		"--release-bundle", "/opt/rdev/release-bundle.json",
 		"--release-root-public-key", "release-root:" + strings.Repeat("b", 43),
+		"--layered-assets-manifest-url", "https://api.example.com/layered-assets.json",
+		"--layered-release-version", "v2.0.0-test",
 		"--release-bundle-required-artifacts", "rdev,rdev-host,rdev-verify",
 	}); err != nil {
 		t.Fatal(err)
@@ -9775,6 +10177,7 @@ func TestReleasePrepareCandidateStagesBundleAndSkillkit(t *testing.T) {
 	}
 	rdev := writeCLIArtifactForTest(t, artifactsDir, "rdev", "cli-binary")
 	host := writeCLIArtifactForTest(t, artifactsDir, "rdev-host.exe", "host-binary")
+	bootstrap := writeCLIArtifactForTest(t, artifactsDir, "rdev-bootstrap.exe", "bootstrap-binary")
 	verifier := writeCLIArtifactForTest(t, artifactsDir, "rdev-verify.exe", "verify-binary")
 	out := filepath.Join(dir, "candidate")
 	keyPath := filepath.Join(dir, "release-root.json")
@@ -9787,7 +10190,7 @@ func TestReleasePrepareCandidateStagesBundleAndSkillkit(t *testing.T) {
 		"--out", out,
 		"--version", "v0.1.0",
 		"--gateway-url", "https://api.example.com/v1",
-		"--artifacts", strings.Join([]string{rdev, host, verifier}, ","),
+		"--artifacts", strings.Join([]string{rdev, host, bootstrap, verifier}, ","),
 		"--require-artifacts", "rdev-host.exe,rdev-verify.exe",
 		"--key", keyPath,
 		"--key-id", "release-root",
@@ -9815,6 +10218,44 @@ func TestReleasePrepareCandidateStagesBundleAndSkillkit(t *testing.T) {
 	}
 }
 
+func TestReleasePrepareCandidateStagesLayeredWindowsCoreForTargetPlatform(t *testing.T) {
+	dir := t.TempDir()
+	artifactsDir := filepath.Join(dir, "artifacts")
+	if err := os.MkdirAll(artifactsDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	hostBytes := "windows-host-binary"
+	host := writeCLIArtifactForTest(t, artifactsDir, "rdev-host.exe", hostBytes)
+	bootstrap := writeCLIArtifactForTest(t, artifactsDir, "rdev-bootstrap.exe", "bootstrap-binary")
+	verifier := writeCLIArtifactForTest(t, artifactsDir, "rdev-verify.exe", "verify-binary")
+	out := filepath.Join(dir, "candidate")
+	var stdout bytes.Buffer
+	err := NewApp(&stdout, &bytes.Buffer{}).Run(context.Background(), []string{
+		"release", "prepare-candidate",
+		"--source-root", filepath.Join("..", ".."),
+		"--out", out,
+		"--version", "v0.2.0",
+		"--artifacts", strings.Join([]string{host, bootstrap, verifier}, ","),
+		"--target-platform", "windows/amd64",
+		"--key", filepath.Join(dir, "release-root.json"),
+	})
+	if err != nil {
+		t.Fatalf("expected target platform to reach candidate preparation: %v\n%s", err, stdout.String())
+	}
+	stagedPath := filepath.Join(out, "assets", "rdev-host-windows-amd64.exe")
+	staged, err := os.ReadFile(stagedPath)
+	if err != nil {
+		t.Fatalf("expected staged Windows core runtime: %v", err)
+	}
+	if string(staged) != hostBytes {
+		t.Fatalf("staged Windows core runtime changed bytes: got %q", staged)
+	}
+	if !fileExistsForCLITest(filepath.Join(out, "layered-assets.json")) ||
+		!fileExistsForCLITest(filepath.Join(out, "connection-entry-release.zip")) {
+		t.Fatalf("expected layered candidate plus archive fallback in %s", out)
+	}
+}
+
 func TestReleaseVerifyCandidateChecksPreparedCandidate(t *testing.T) {
 	dir := t.TempDir()
 	artifactsDir := filepath.Join(dir, "artifacts")
@@ -9823,6 +10264,7 @@ func TestReleaseVerifyCandidateChecksPreparedCandidate(t *testing.T) {
 	}
 	rdev := writeCLIArtifactForTest(t, artifactsDir, "rdev", "cli-binary")
 	host := writeCLIArtifactForTest(t, artifactsDir, "rdev-host.exe", "host-binary")
+	bootstrap := writeCLIArtifactForTest(t, artifactsDir, "rdev-bootstrap.exe", "bootstrap-binary")
 	verifier := writeCLIArtifactForTest(t, artifactsDir, "rdev-verify.exe", "verify-binary")
 	out := filepath.Join(dir, "candidate")
 	keyPath := filepath.Join(dir, "release-root.json")
@@ -9833,7 +10275,7 @@ func TestReleaseVerifyCandidateChecksPreparedCandidate(t *testing.T) {
 		"--out", out,
 		"--version", "v0.1.0",
 		"--gateway-url", "https://api.example.com/v1",
-		"--artifacts", strings.Join([]string{rdev, host, verifier}, ","),
+		"--artifacts", strings.Join([]string{rdev, host, bootstrap, verifier}, ","),
 		"--require-artifacts", "rdev-host.exe,rdev-verify.exe",
 		"--key", keyPath,
 		"--key-id", "release-root",
@@ -10415,35 +10857,22 @@ func main() {
 
 func TestAcceptanceWindowsTemporaryPlan(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "windows-temporary")
-	script := filepath.Join(t.TempDir(), "windows-temporary.ps1")
-	if err := os.WriteFile(script, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	archivePath := writeLayeredHandoffArchiveForCLITest(t)
 	var stdout bytes.Buffer
 	app := NewApp(&stdout, &bytes.Buffer{})
 	if err := app.Run(context.Background(), []string{
 		"acceptance", "windows-temporary",
 		"--out", out,
-		"--gateway", "https://api.example.com/v1",
-		"--ticket-code", "ABCD-1234",
-		"--download-url", "https://agent.example.com/rdev-host.exe",
-		"--expected-sha256", strings.Repeat("a", 64),
-		"--bootstrap-script", script,
-		"--manifest-url", "https://agent.example.com/j/ABCD-1234/manifest",
-		"--manifest-root-public-key", "manifest-root:abc",
-		"--release-manifest-url", "https://agent.example.com/rdev-host.exe.rdev-release.json",
-		"--release-root-public-key", "release-root:abc",
-		"--verifier-download-url", "https://agent.example.com/rdev-verify.exe",
-		"--verifier-sha256", strings.Repeat("b", 64),
+		"--handoff-archive", archivePath,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	var payload struct {
-		OK       bool   `json:"ok"`
-		Schema   string `json:"schema"`
-		Plan     string `json:"plan"`
-		Launcher string `json:"launcher"`
-		Commands []struct {
+		OK             bool   `json:"ok"`
+		Schema         string `json:"schema"`
+		Plan           string `json:"plan"`
+		HandoffArchive string `json:"handoff_archive"`
+		Commands       []struct {
 			Name  string `json:"name"`
 			Shell string `json:"shell"`
 		} `json:"commands"`
@@ -10461,7 +10890,7 @@ func TestAcceptanceWindowsTemporaryPlan(t *testing.T) {
 	if payload.Schema != "rdev.acceptance.windows-temporary-plan.v1" {
 		t.Fatalf("unexpected schema %q", payload.Schema)
 	}
-	for _, path := range []string{payload.Plan, payload.Launcher} {
+	for _, path := range []string{filepath.Join(out, payload.Plan), filepath.Join(out, payload.HandoffArchive)} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected generated path %s: %v", path, err)
 		}
@@ -10470,40 +10899,28 @@ func TestAcceptanceWindowsTemporaryPlan(t *testing.T) {
 	if !strings.Contains(output, "run_foreground_temporary_host") || !strings.Contains(output, "Get-ScheduledTask") {
 		t.Fatalf("expected foreground and no-persistence commands, got %s", output)
 	}
-	launcher := readFileForTest(t, payload.Launcher)
-	if strings.Contains(launcher, "-ReleaseBundleRequiredArtifacts") {
-		t.Fatalf("manifest-only launcher should not contain bundle args: %s", launcher)
+	if strings.Contains(strings.ToLower(stdout.String()), "rdev-host.exe") || !strings.Contains(stdout.String(), "rdev-bootstrap layered-run") {
+		t.Fatalf("acceptance output must remain bootstrap-only: %s", stdout.String())
 	}
 }
 
 func TestAcceptanceWindowsTemporaryBundlePlan(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "windows-temporary")
-	script := filepath.Join(t.TempDir(), "windows-temporary.ps1")
-	if err := os.WriteFile(script, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	archivePath := writeLayeredHandoffArchiveForCLITest(t)
 	var stdout bytes.Buffer
 	app := NewApp(&stdout, &bytes.Buffer{})
 	if err := app.Run(context.Background(), []string{
 		"acceptance", "windows-temporary",
 		"--out", out,
-		"--gateway", "https://api.example.com/v1",
-		"--ticket-code", "ABCD-1234",
-		"--download-url", "https://agent.example.com/rdev-host.exe",
-		"--expected-sha256", strings.Repeat("a", 64),
-		"--bootstrap-script", script,
-		"--release-bundle-url", "https://agent.example.com/release-bundle.json",
-		"--release-root-public-key", "release-root:abc",
-		"--verifier-download-url", "https://agent.example.com/rdev-verify.exe",
-		"--verifier-sha256", strings.Repeat("b", 64),
+		"--handoff-archive", archivePath,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	var payload struct {
-		OK       bool   `json:"ok"`
-		Schema   string `json:"schema"`
-		Plan     string `json:"plan"`
-		Launcher string `json:"launcher"`
+		OK             bool   `json:"ok"`
+		Schema         string `json:"schema"`
+		Plan           string `json:"plan"`
+		HandoffArchive string `json:"handoff_archive"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
@@ -10514,15 +10931,14 @@ func TestAcceptanceWindowsTemporaryBundlePlan(t *testing.T) {
 	if payload.Schema != "rdev.acceptance.windows-temporary-plan.v1" {
 		t.Fatalf("unexpected schema %q", payload.Schema)
 	}
-	launcher := readFileForTest(t, payload.Launcher)
-	if !strings.Contains(launcher, "-ReleaseBundleUrl 'https://agent.example.com/release-bundle.json'") {
-		t.Fatalf("expected release bundle launcher arg, got %s", launcher)
+	if payload.HandoffArchive != "Windows-ConnectionEntry.zip" {
+		t.Fatalf("unexpected handoff archive %q", payload.HandoffArchive)
 	}
 	var verifyStdout bytes.Buffer
 	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
 	if err := verifyApp.Run(context.Background(), []string{
 		"acceptance", "verify-windows-temporary",
-		"--plan", payload.Plan,
+		"--plan", filepath.Join(out, payload.Plan),
 	}); err != nil {
 		t.Fatalf("expected bundle verification to pass: %v\n%s", err, verifyStdout.String())
 	}
@@ -10774,30 +11190,19 @@ func TestAcceptanceVerifyLinuxManagedServicePlanRejectsTampering(t *testing.T) {
 
 func TestAcceptanceVerifyWindowsTemporaryPlan(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "windows-temporary")
-	script := filepath.Join(t.TempDir(), "windows-temporary.ps1")
-	if err := os.WriteFile(script, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	archivePath := writeLayeredHandoffArchiveForCLITest(t)
 	var stdout bytes.Buffer
 	app := NewApp(&stdout, &bytes.Buffer{})
 	if err := app.Run(context.Background(), []string{
 		"acceptance", "windows-temporary",
 		"--out", out,
-		"--gateway", "https://api.example.com/v1",
-		"--ticket-code", "ABCD-1234",
-		"--download-url", "https://agent.example.com/rdev-host.exe",
-		"--expected-sha256", strings.Repeat("a", 64),
-		"--bootstrap-script", script,
-		"--release-manifest-url", "https://agent.example.com/rdev-host.exe.rdev-release.json",
-		"--release-root-public-key", "release-root:abc",
-		"--verifier-download-url", "https://agent.example.com/rdev-verify.exe",
-		"--verifier-sha256", strings.Repeat("b", 64),
+		"--handoff-archive", archivePath,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	var payload struct {
-		Plan     string `json:"plan"`
-		Launcher string `json:"launcher"`
+		Plan           string `json:"plan"`
+		HandoffArchive string `json:"handoff_archive"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
@@ -10807,7 +11212,7 @@ func TestAcceptanceVerifyWindowsTemporaryPlan(t *testing.T) {
 	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
 	if err := verifyApp.Run(context.Background(), []string{
 		"acceptance", "verify-windows-temporary",
-		"--plan", payload.Plan,
+		"--plan", filepath.Join(out, payload.Plan),
 	}); err != nil {
 		t.Fatalf("expected verification to pass: %v\n%s", err, verifyStdout.String())
 	}
@@ -10815,19 +11220,19 @@ func TestAcceptanceVerifyWindowsTemporaryPlan(t *testing.T) {
 		t.Fatalf("expected ok verification, got %s", verifyStdout.String())
 	}
 
-	if err := os.WriteFile(payload.Launcher, []byte("Set-ExecutionPolicy Bypass\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(out, payload.HandoffArchive), []byte("tampered\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var tamperedStdout bytes.Buffer
 	tamperedApp := NewApp(&tamperedStdout, &bytes.Buffer{})
 	err := tamperedApp.Run(context.Background(), []string{
 		"acceptance", "verify-windows-temporary",
-		"--plan", payload.Plan,
+		"--plan", filepath.Join(out, payload.Plan),
 	})
 	if err == nil {
 		t.Fatalf("expected tampered verification to fail: %s", tamperedStdout.String())
 	}
-	if !strings.Contains(tamperedStdout.String(), `"ok": false`) || !strings.Contains(tamperedStdout.String(), "launcher_has_no_forbidden_side_effects") {
+	if !strings.Contains(tamperedStdout.String(), `"ok": false`) || !strings.Contains(tamperedStdout.String(), "handoff_archive") {
 		t.Fatalf("expected structured tampered failure, got %s", tamperedStdout.String())
 	}
 }
@@ -10835,24 +11240,13 @@ func TestAcceptanceVerifyWindowsTemporaryPlan(t *testing.T) {
 func TestAcceptancePackageWindowsTemporary(t *testing.T) {
 	root := t.TempDir()
 	planOut := filepath.Join(root, "windows-temporary")
-	script := filepath.Join(root, "windows-temporary.ps1")
-	if err := os.WriteFile(script, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	archivePath := writeLayeredHandoffArchiveForCLITest(t)
 	var planStdout bytes.Buffer
 	planApp := NewApp(&planStdout, &bytes.Buffer{})
 	if err := planApp.Run(context.Background(), []string{
 		"acceptance", "windows-temporary",
 		"--out", planOut,
-		"--gateway", "https://api.example.com/v1",
-		"--ticket-code", "ABCD-1234",
-		"--download-url", "https://agent.example.com/rdev-host.exe",
-		"--expected-sha256", strings.Repeat("a", 64),
-		"--bootstrap-script", script,
-		"--release-bundle-url", "https://agent.example.com/release-bundle.json",
-		"--release-root-public-key", "release-root:abc",
-		"--verifier-download-url", "https://agent.example.com/rdev-verify.exe",
-		"--verifier-sha256", strings.Repeat("b", 64),
+		"--handoff-archive", archivePath,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -10862,47 +11256,111 @@ func TestAcceptancePackageWindowsTemporary(t *testing.T) {
 	if err := json.Unmarshal(planStdout.Bytes(), &planPayload); err != nil {
 		t.Fatalf("invalid plan json: %v\n%s", err, planStdout.String())
 	}
+	planPayload.Plan = filepath.Join(planOut, planPayload.Plan)
 	fakeGitHubToken := "ghp_" + "abcdefghijklmnopqrstuvwx"
 	transcriptPath, releaseVerificationPath, auditPath, noPersistenceDir, denialProbesDir := writeWindowsPackageEvidenceForCLITest(t, root, `{"ok": true, "token": "`+fakeGitHubToken+`"}`)
+	coldLayeredRunPath := writeLayeredRunReportForCLITest(t, root, "cold-layered-run.json", false)
+	warmLayeredRunPath := writeLayeredRunReportForCLITest(t, root, "warm-layered-run.json", true)
+	layeredEntryEvidencePath := writeLayeredEntryEvidenceForCLITest(t, root, planPayload.Plan)
+	packageArgs := func(out, coldLayeredRun, warmLayeredRun string) []string {
+		args := []string{
+			"acceptance", "package-windows-temporary",
+			"--plan", planPayload.Plan,
+			"--out", out,
+			"--transcript", transcriptPath,
+			"--release-verification", releaseVerificationPath,
+			"--audit", auditPath,
+			"--no-persistence-dir", noPersistenceDir,
+			"--denial-probes-dir", denialProbesDir,
+			"--layered-entry-evidence", layeredEntryEvidencePath,
+		}
+		if coldLayeredRun != "" {
+			args = append(args, "--cold-layered-run", coldLayeredRun)
+		}
+		if warmLayeredRun != "" {
+			args = append(args, "--warm-layered-run", warmLayeredRun)
+		}
+		return args
+	}
 
-	var stdout bytes.Buffer
-	app := NewApp(&stdout, &bytes.Buffer{})
-	if err := app.Run(context.Background(), []string{
-		"acceptance", "package-windows-temporary",
-		"--plan", planPayload.Plan,
-		"--out", filepath.Join(root, "windows-evidence"),
-		"--transcript", transcriptPath,
-		"--release-verification", releaseVerificationPath,
-		"--audit", auditPath,
-		"--no-persistence-dir", noPersistenceDir,
-		"--denial-probes-dir", denialProbesDir,
-	}); err != nil {
-		t.Fatalf("expected package command to pass: %v\n%s", err, stdout.String())
-	}
-	var payload struct {
-		OK      bool   `json:"ok"`
-		Schema  string `json:"schema"`
-		Package string `json:"package"`
-		Files   []struct {
-			Path string `json:"path"`
-			Kind string `json:"kind"`
-		} `json:"files"`
-		RedactionRuleCounts map[string]int `json:"redaction_rule_counts"`
-	}
-	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
-		t.Fatalf("invalid package json: %v\n%s", err, stdout.String())
-	}
-	if !payload.OK {
-		t.Fatalf("expected package ok, got %s", stdout.String())
-	}
-	if payload.Schema != "rdev.acceptance-package.windows-temporary.v1" {
-		t.Fatalf("unexpected schema %q", payload.Schema)
-	}
-	if _, err := os.Stat(payload.Package); err != nil {
-		t.Fatalf("expected package manifest: %v", err)
-	}
-	if payload.RedactionRuleCounts["github_token"] != 1 {
-		t.Fatalf("expected github_token redaction count, got %#v", payload.RedactionRuleCounts)
+	t.Run("packages cold and warm layered run evidence", func(t *testing.T) {
+		out := filepath.Join(root, "windows-evidence")
+		var stdout bytes.Buffer
+		app := NewApp(&stdout, &bytes.Buffer{})
+		if err := app.Run(context.Background(), packageArgs(out, coldLayeredRunPath, warmLayeredRunPath)); err != nil {
+			t.Fatalf("expected package command to pass: %v\n%s", err, stdout.String())
+		}
+		var payload struct {
+			OK      bool   `json:"ok"`
+			Schema  string `json:"schema"`
+			Package string `json:"package"`
+			Files   []struct {
+				Path string `json:"path"`
+				Kind string `json:"kind"`
+			} `json:"files"`
+			RedactionRuleCounts map[string]int `json:"redaction_rule_counts"`
+		}
+		if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+			t.Fatalf("invalid package json: %v\n%s", err, stdout.String())
+		}
+		if !payload.OK {
+			t.Fatalf("expected package ok, got %s", stdout.String())
+		}
+		if payload.Schema != "rdev.acceptance-package.windows-temporary.v1" {
+			t.Fatalf("unexpected schema %q", payload.Schema)
+		}
+		if filepath.IsAbs(payload.Package) {
+			t.Fatalf("public package output leaked an absolute path: %q", payload.Package)
+		}
+		if _, err := os.Stat(filepath.Join(out, payload.Package)); err != nil {
+			t.Fatalf("expected package manifest: %v", err)
+		}
+		if payload.RedactionRuleCounts["github_token"] != 1 {
+			t.Fatalf("expected github_token redaction count, got %#v", payload.RedactionRuleCounts)
+		}
+		filesByKind := make(map[string]string, len(payload.Files))
+		for _, file := range payload.Files {
+			filesByKind[file.Kind] = file.Path
+		}
+		for kind, wantPath := range map[string]string{
+			"cold-layered-run": "evidence/cold-layered-run.json",
+			"warm-layered-run": "evidence/warm-layered-run.json",
+		} {
+			if got := filesByKind[kind]; got != wantPath {
+				t.Fatalf("packaged %s path = %q, want %q; files = %#v", kind, got, wantPath, payload.Files)
+			}
+			if _, err := os.Stat(filepath.Join(out, filepath.FromSlash(wantPath))); err != nil {
+				t.Fatalf("expected packaged %s evidence: %v", kind, err)
+			}
+		}
+	})
+
+	for _, tc := range []struct {
+		name            string
+		missingEvidence string
+		coldLayeredRun  string
+		warmLayeredRun  string
+	}{
+		{name: "requires cold layered run evidence", missingEvidence: "cold", warmLayeredRun: warmLayeredRunPath},
+		{name: "requires warm layered run evidence", missingEvidence: "warm", coldLayeredRun: coldLayeredRunPath},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			app := NewApp(&stdout, &stderr)
+			err := app.Run(context.Background(), packageArgs(
+				filepath.Join(root, "windows-evidence-missing-"+tc.missingEvidence),
+				tc.coldLayeredRun,
+				tc.warmLayeredRun,
+			))
+			if err == nil {
+				t.Fatalf("expected package command to reject missing %s layered run evidence", tc.missingEvidence)
+			}
+			failure := strings.ToLower(err.Error() + "\n" + stdout.String() + "\n" + stderr.String())
+			if !strings.Contains(failure, tc.missingEvidence) {
+				t.Fatalf("expected missing %s evidence failure, got %s", tc.missingEvidence, failure)
+			}
+		})
 	}
 }
 
@@ -11651,6 +12109,49 @@ func copyFileForCLITest(t *testing.T, source, dest string) {
 	writeFileForCLITest(t, dest, string(content))
 }
 
+func writeLayeredHandoffArchiveForCLITest(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "Windows-ConnectionEntry.zip")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := zip.NewWriter(file)
+	files := map[string]string{
+		"Start-ConnectionEntry.ps1":            "& $PSScriptRoot\\rdev-bootstrap.exe layered-run\n",
+		"Start-ConnectionEntry.cmd":            "@echo off\r\n%~dp0rdev-bootstrap.exe layered-run\r\n",
+		"rdev-bootstrap.exe":                   "bootstrap fixture",
+		"rdev-bootstrap.exe.rdev-release.json": "{}",
+		"rdev-bootstrap.exe.sha256":            strings.Repeat("a", 64),
+		"windows-layered-verification.json":    "{}",
+		"ARCHIVE-RECOVERY.txt":                 "rdev-bootstrap.exe layered-run\n",
+	}
+	for _, name := range []string{
+		"Start-ConnectionEntry.ps1",
+		"Start-ConnectionEntry.cmd",
+		"rdev-bootstrap.exe",
+		"rdev-bootstrap.exe.rdev-release.json",
+		"rdev-bootstrap.exe.sha256",
+		"windows-layered-verification.json",
+		"ARCHIVE-RECOVERY.txt",
+	} {
+		entry, err := writer.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write([]byte(files[name])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func signReleaseArtifactWithCLIForTest(t *testing.T, dir, keyPath, name, content string) string {
 	t.Helper()
 	artifactPath := filepath.Join(dir, name)
@@ -11788,6 +12289,85 @@ func writeWindowsPackageEvidenceForCLITest(t *testing.T, root, releaseVerificati
 		"credential.change.txt",
 	})
 	return transcriptPath, releaseVerificationPath, auditPath, noPersistenceDir, denialProbesDir
+}
+
+func writeLayeredRunReportForCLITest(t *testing.T, root, name string, fromCache bool) string {
+	t.Helper()
+	report := bootstrapcmd.LayeredRunReport{
+		SchemaVersion: bootstrapcmd.LayeredRunReportSchemaVersion,
+		AssetID:       "rdev-host-windows-amd64",
+		FromCache:     fromCache,
+		Resumed:       false,
+		Bytes:         4096,
+		Stages: []bootstrapcmd.LayeredRunStage{
+			{Name: "manifest-fetch", DurationMS: 12},
+			{Name: "signature-verification", DurationMS: 3},
+			{Name: "runtime-download", DurationMS: 24},
+			{Name: "runtime-launch-preparation", DurationMS: 2},
+		},
+	}
+	content, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, name)
+	if err := os.WriteFile(path, append(content, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func writeLayeredEntryEvidenceForCLITest(t *testing.T, root, planPath string) string {
+	t.Helper()
+	content, err := os.ReadFile(planPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan struct {
+		HandoffZIPSizeBytes int64  `json:"handoff_archive_size_bytes"`
+		HandoffZIPSHA256    string `json:"handoff_archive_sha256"`
+	}
+	if err := json.Unmarshal(content, &plan); err != nil {
+		t.Fatal(err)
+	}
+	evidence := map[string]any{
+		"schema_version":            "rdev.acceptance.windows-layered-entry-evidence.v1",
+		"windows_release":           "11",
+		"architecture":              "amd64",
+		"handoff_zip_size_bytes":    plan.HandoffZIPSizeBytes,
+		"handoff_zip_sha256":        plan.HandoffZIPSHA256,
+		"selected_launcher":         "powershell",
+		"fallback_attempts":         []string{"powershell"},
+		"core_start_count":          1,
+		"network_bytes":             4096,
+		"registration_duration_ms":  750,
+		"cache_hit":                 false,
+		"range_interrupted":         true,
+		"range_resumed":             true,
+		"range_bytes":               2048,
+		"private_acl":               true,
+		"unc_rejected":              true,
+		"reparse_rejected":          true,
+		"defender_lock_verified":    true,
+		"active_route_failed":       true,
+		"route_reselected":          true,
+		"registration_count":        1,
+		"session_identity_stable":   true,
+		"event_cursor_stable":       true,
+		"archive_recovery_executed": false,
+		"bootstrap_only":            true,
+		"persistence_residue":       []string{},
+		"cleanup_complete":          true,
+	}
+	evidenceContent, err := json.MarshalIndent(evidence, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "layered-entry-evidence.json")
+	if err := os.WriteFile(path, append(evidenceContent, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 func writeNamedFilesForTest(t *testing.T, dir string, names []string) {

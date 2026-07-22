@@ -41,10 +41,10 @@ gateway URLs, transports, release roots, checksums, or helper commands.
 1. Operator creates a ticket.
 2. Remote user opens the join URL.
 3. Join page displays operator, server, mode, capabilities, and expiration.
-4. User runs the visible PowerShell bootstrap or a signed self-contained
-   connection entry package.
-5. Bootstrap downloads or unpacks the signed `rdev-host` binary.
-6. Bootstrap verifies checksum/signature and the signed release evidence.
+4. User runs the visible PowerShell launcher from the signed layered handoff.
+5. `rdev-bootstrap` verifies the signed layered manifest and downloads the
+   minimal core after registration inputs are available.
+6. The bootstrap verifies version, checksum, signed size, and release root.
 7. Host generates a keypair.
 8. Host joins a Control Plane session using the one-time ticket.
 9. Gateway records the target endpoint.
@@ -53,36 +53,14 @@ gateway URLs, transports, release roots, checksums, or helper commands.
 
 During development, `rdev host serve --trust-pin sha256:<hex>` can pin the gateway signing public key from `GET /v1/trust`. Production bootstrap should derive this trust pin from the signed join manifest or a pinned trust root, not from unauthenticated chat text.
 
-## Draft Script
+## Windows Layered Handoff
 
-The repository includes a visible foreground bootstrap draft:
-
-```text
-scripts/bootstrap/windows-temporary.ps1
-```
-
-It accepts:
-
-- `GatewayUrl`
-- `TicketCode`
-- `DownloadUrl`
-- `ExpectedSha256`
-- optional `ManifestUrl`
-- optional `ManifestRootPublicKey`
-- optional `ReleaseManifestUrl`
-- optional `ReleaseBundleUrl`
-- optional `ReleaseBundleRequiredArtifacts`
-- optional `ReleaseRootPublicKey`
-- optional `VerifierDownloadUrl`
-- optional `VerifierExpectedSha256`
-- optional `TrustPin`
-- optional `HostName`
-
-The script downloads `rdev-host.exe` into a temp directory, verifies SHA-256, and runs:
-
-```powershell
-rdev-host.exe host serve --mode temporary --manifest-url <manifest-url>
-```
+The controller materializes `Windows-ConnectionEntry.zip` with visible
+`Start-ConnectionEntry.ps1` and `Start-ConnectionEntry.cmd` launchers plus the
+signed focused bootstrap. PowerShell is preferred; the CMD broker retries with
+a process-scoped policy argument and then uses native CMD while sharing one
+attempt state. All three paths invoke `rdev-bootstrap layered-run` and start at
+most one core.
 
 It does not install a Windows Service, write registry persistence, weaken execution policy, or bypass UAC.
 
@@ -170,7 +148,7 @@ For ordinary "connect this computer" requests, Agents should start with
 through the CLI. That high-level path either returns the ready
 `target_handoff_envelope.full_text` to forward to the human, or the visible
 foreground `rdev support-session connect --start` command that creates the
-gateway, verified helper assets, ready files, status files, auto-authorization
+gateway, verified bootstrap assets, ready files, status files, auto-authorization
 metadata, and recovery guidance together.
 
 Low-level invite creation is CLI-only and reserved for explicit package materialization,
@@ -308,37 +286,35 @@ The development gateway serves:
 /join/<ticket>/bootstrap.ps1
 ```
 
-These helpers use an existing `rdev` when one is available. When `rdev` is
-missing and the gateway was started with configured helper assets, they download
-the platform helper from `/assets`, verify its SHA-256 through the matching
-`.sha256` endpoint, and then run a visible attended host session:
+These launchers download the platform `rdev-bootstrap` from `/assets`, verify
+its SHA-256 through the matching `.sha256` endpoint, and invoke only:
 
 ```bash
-rdev host serve --manifest-url <manifest-url> --transport long-poll --once=false
+rdev-bootstrap layered-run --manifest-url <layered-assets-url> --platform <os>/<arch> --transport auto
 ```
 
-This is the one-link connection entry path for support and debugging. It is an attended
+`rdev-bootstrap` verifies the signed layered manifest, version, asset size, and
+SHA-256 before starting exactly one core. The core owns WSS, long-poll, and poll
+route changes without another registration or process. This is an attended
 temporary session: no background service is installed, no persistent execution
-policy is changed, and no persistence is created by the temporary bootstrap.
-The Windows one-line command does not use `-ExecutionPolicy Bypass`, does not
-call `Set-ExecutionPolicy`, and does not change machine/user policy. The
-bootstrap script now carries the pinned
-`--manifest-root-public-key`, so target-side users do not need to copy trust
-roots, ticket codes, gateway URLs, or transport flags from chat.
+policy is changed, and no persistence is created. The Windows broker prefers
+normal PowerShell, retries PowerShell with a process-scoped policy argument, and
+uses native CMD only after both PowerShell paths fail; every launcher shares one
+attempt state. Target-side users do not copy trust roots, ticket codes, gateway
+URLs, or transport flags from chat.
 
 For new target-host connections, agents should prefer the invite's
 `connection_entry.package_catalog` and the signed join manifest's
 `package_catalog` before choosing a target package. The connection entry package
 is the no-prerequisite path when release assets are published: one
-platform-specific bundle with `rdev`/`rdev-host`, signed release-bundle
-evidence, the join manifest URL, the pinned manifest root, visible stop/revoke
-instructions, and the selected attended/managed transport. If package assets are not
-published or release inputs are missing, the Agent should use the catalog's
-visible `/bootstrap.sh` or `/bootstrap.ps1` fallback rather than asking the
-target-side human to assemble raw values. It should prefer the generated
-attended bootstrap's HTTPS long-poll path unless an explicit managed/advanced
-entry validates WSS/auto fallback. It should probe HTTPS long-poll, short-poll,
-LAN/private gateway reachability, and already configured
+platform-specific `rdev-bootstrap`, signed release evidence, the join manifest
+URL, the pinned roots, visible stop/revoke instructions, and the selected mode.
+The signed core remains a post-registration download and is not embedded in the
+first handoff. If package assets are not published or release inputs are
+missing, the Agent should use the catalog's visible `/bootstrap.sh` or
+`/bootstrap.ps1` path rather than asking the target-side human to assemble raw
+values. The core selects among WSS, HTTPS long-poll, short-poll, LAN/private
+gateway reachability, and already configured
 proxy/relay/mesh/SSH paths before asking the human for more network details.
 Elevation is allowed only through normal UAC/sudo/system prompts for a signed
 session task that needs it, and the authorization must be recorded as evidence.

@@ -48,7 +48,9 @@ func TestPlanNormalizesUnsafeInputsToSafeBounds(t *testing.T) {
 		t.Fatalf("expected timeout capped at 30 seconds, got %d", plan.TimeoutSeconds)
 	}
 	if !containsText(plan.SafetyRules, "asset downloads only") ||
-		!containsText(plan.SafetyRules, "SNI") {
+		!containsText(plan.SafetyRules, "SNI") ||
+		!containsText(plan.SafetyRules, "rdev-bootstrap") ||
+		containsText(plan.SafetyRules, "full helper") {
 		t.Fatalf("expected asset-only and SNI safety rules, got %#v", plan.SafetyRules)
 	}
 }

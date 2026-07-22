@@ -11,14 +11,13 @@ polling, long polling, and WSS; WSS reuses the same TLS/mTLS client settings as
 the HTTPS API.
 
 For Connection Entry bootstraps, the dev gateway defaults
-`--auto-build-rdev-assets=true`. When no explicit `--rdev-assets-dir` or
-platform-specific helper flag is set, and the command is run from a valid
-checkout with Go available, it builds the Windows/macOS/Linux `rdev` helpers
-and serves them from `/assets`. This keeps accidental low-level
-`gateway serve` plus `invite create` flows from giving clean targets a
-bootstrap that fails with "rdev is required". Operators can disable the
-behavior with `--auto-build-rdev-assets=false` or override it with reviewed
-explicit asset paths.
+`--auto-build-rdev-assets=true`. When no explicit `--rdev-assets-dir` is set,
+and the command is run from a valid checkout with Go available, it builds the
+Windows/macOS/Linux `rdev-bootstrap` binaries and serves them from `/assets`.
+The join launchers still require a verified signed layered manifest, pinned
+release root, and expected version; missing release metadata fails closed.
+Operators can disable automatic bootstrap builds with
+`--auto-build-rdev-assets=false` or provide reviewed explicit asset paths.
 
 ## Operator Auth
 
@@ -1231,25 +1230,20 @@ verifier supports the same bundle check for target-host or bootstrap contexts
 after the verifier binary itself has been hash-pinned.
 Generated `connection-entry-release.zip` archives also embed this startup gate:
 their visible launchers call the packaged `rdev-verify --bundle
-release/release-bundle.json --root-public-key <pinned-root>
---require-artifacts <packaged-artifacts>` before running packaged `rdev
-connection-entry run`.
+bin/release-bundle.json --root-public-key <pinned-root>
+--require-artifacts <packaged-artifacts>` before invoking packaged
+`rdev-bootstrap layered-run`.
 
-For Windows bootstrap, publish a tiny verifier binary alongside the host binary:
+For Windows acceptance, validate the complete private handoff:
 
-```powershell
-.\windows-temporary.ps1 `
-  -GatewayUrl https://agent.example.com `
-  -TicketCode ABCD-1234 `
-  -DownloadUrl https://example/rdev-host.exe `
-  -ExpectedSha256 <host_sha256> `
-  -ReleaseBundleUrl https://example/release-bundle.json `
-  -ReleaseRootPublicKey release-root:<base64url_ed25519_public_key> `
-  -VerifierDownloadUrl https://example/rdev-verify.exe `
-  -VerifierExpectedSha256 <verifier_sha256>
+```bash
+rdev acceptance windows-temporary \
+  --out .rdev/acceptance/windows-temporary \
+  --handoff-archive ./Windows-ConnectionEntry.zip
 ```
 
-The script hash-pins `rdev-verify.exe` before using it to verify the signed release evidence. Single-artifact `-ReleaseManifestUrl` remains supported for compatibility.
+The acceptance plan records only the archive digest, size, launcher order, and
+bootstrap boundary. It excludes the private ZIP from public evidence packages.
 
 ## Limitations
 

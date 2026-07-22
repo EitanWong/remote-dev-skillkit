@@ -440,14 +440,14 @@ func TestCLIGatewayConfigurationCoverage(t *testing.T) {
 		t.Fatal("incomplete TLS configuration was accepted")
 	}
 	assets := gatewayAssetConfig(gatewayServeOptions{
-		RdevAssetsDir:        "/assets",
-		RdevWindowsAMD64Path: "/custom/windows.exe",
-		RdevDarwinARM64Path:  "/custom/darwin-arm64",
-		RdevDarwinAMD64Path:  "/custom/darwin-amd64",
-		RdevLinuxAMD64Path:   "/custom/linux-amd64",
-		RdevLinuxARM64Path:   "/custom/linux-arm64",
+		RdevAssetsDir:                 "/assets",
+		RdevBootstrapWindowsAMD64Path: "/custom/windows.exe",
+		RdevBootstrapDarwinARM64Path:  "/custom/darwin-arm64",
+		RdevBootstrapDarwinAMD64Path:  "/custom/darwin-amd64",
+		RdevBootstrapLinuxAMD64Path:   "/custom/linux-amd64",
+		RdevBootstrapLinuxARM64Path:   "/custom/linux-arm64",
 	})
-	if assets.RdevWindowsAMD64Path != "/custom/windows.exe" || assets.RdevDarwinARM64Path != "/custom/darwin-arm64" || assets.RdevLinuxARM64Path != "/custom/linux-arm64" {
+	if assets.RdevBootstrapWindowsAMD64Path != "/custom/windows.exe" || assets.RdevBootstrapDarwinARM64Path != "/custom/darwin-arm64" || assets.RdevBootstrapLinuxARM64Path != "/custom/linux-arm64" {
 		t.Fatalf("gateway asset config = %#v", assets)
 	}
 	ctx, cancel := context.WithCancel(context.Background())

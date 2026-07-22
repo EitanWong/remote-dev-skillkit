@@ -4,7 +4,7 @@ set -euo pipefail
 out_dir="dist/artifacts"
 version="${RDEV_BUILD_VERSION:-0.0.1-dev}"
 targets="${RDEV_BUILD_TARGETS:-$(go env GOOS)/$(go env GOARCH)}"
-commands="rdev,rdev-host,rdev-gateway,rdev-mcp,rdev-verify"
+commands="rdev,rdev-host,rdev-bootstrap,rdev-gateway,rdev-mcp,rdev-verify"
 clean=false
 
 usage() {
@@ -17,7 +17,7 @@ Options:
   --out DIR             Output directory. Default: dist/artifacts
   --version VERSION     Version embedded in binaries. Default: RDEV_BUILD_VERSION or 0.0.1-dev
   --targets LIST        Comma-separated GOOS/GOARCH list. Default: current Go target
-  --commands LIST       Comma-separated command list. Default: rdev,rdev-host,rdev-gateway,rdev-mcp,rdev-verify
+  --commands LIST       Comma-separated command list. Default: rdev,rdev-host,rdev-bootstrap,rdev-gateway,rdev-mcp,rdev-verify. rdev-bootstrap is emitted for every requested target.
   --clean               Remove output directory before building
   -h, --help            Show this help
 
@@ -110,10 +110,25 @@ for target in "${target_list[@]}"; do
     fi
     artifact="$target_dir/$command$suffix"
     echo "building $command for $goos/$goarch cgo=$cgo_enabled -> $artifact" >&2
-    CGO_ENABLED="$cgo_enabled" GOOS="$goos" GOARCH="$goarch" go build \
-      -trimpath \
-      -ldflags "-s -w -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Name=$command -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Version=$version -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Commit=$source_commit -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.BuildTime=$generated_at" \
-      -o "$artifact" "$package"
+    build_gcflags=()
+    build_tags=()
+    ldflags="-s -w -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Name=$command -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Version=$version -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Commit=$source_commit -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.BuildTime=$generated_at"
+    if [[ "$command" == "rdev-bootstrap" && "$target" == "windows/amd64" ]]; then
+      build_gcflags=(-gcflags=all=-l)
+      build_tags=(-tags=rdev_bootstrap_focused)
+      # Focused bootstrap delivery is size-gated; reduced function padding does
+      # not change the ABI or runtime behavior and keeps the closed ZIP bounded.
+      ldflags="-s -w -buildid= -funcalign=1 -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Name=$command -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Version=$version -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.Commit=$source_commit -X github.com/EitanWong/remote-dev-skillkit/internal/buildinfo.BuildTime=$generated_at"
+    fi
+    build_args=(-trimpath)
+    if (( ${#build_gcflags[@]} > 0 )); then
+      build_args+=("${build_gcflags[@]}")
+    fi
+    if (( ${#build_tags[@]} > 0 )); then
+      build_args+=("${build_tags[@]}")
+    fi
+    build_args+=(-ldflags "$ldflags" -o "$artifact" "$package")
+    CGO_ENABLED="$cgo_enabled" GOOS="$goos" GOARCH="$goarch" go build "${build_args[@]}"
     sha="$(shasum -a 256 "$artifact" | awk '{print $1}')"
     size="$(wc -c < "$artifact" | tr -d ' ')"
     rel="${artifact#"$out_dir"/}"

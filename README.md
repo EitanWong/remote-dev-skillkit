@@ -138,6 +138,72 @@ session-scoped ID. The relay still observes normal network and HTTP tunnel
 traffic. These statements are pinned to that v0.5.1 source commit and must not
 be generalized to other releases.
 
+#### Windows Temporary Layered Entry
+
+For Windows amd64 attended sessions, a trusted Agent can verify the signed
+`rdev-bootstrap.exe` release artifact and materialize a private layered handoff.
+The bootstrap fetches an HTTPS `layered-assets.json`, verifies its Ed25519
+release-root signature, selects only the Windows core `rdev-host` runtime, and
+uses the shared resumable content-addressed downloader. The controller pins the
+expected release version and `windows/amd64` in signed bootstrap metadata; the
+bootstrap requires the downloaded manifest to match that version before it
+requests the runtime. Ticket and gateway values remain in the separately
+signed join manifest.
+
+The first run downloads and SHA-256 verifies the core runtime. A warm run
+revalidates and reuses the digest cache without fetching the runtime again.
+The user-scoped cache is rooted below
+`%LOCALAPPDATA%\RemoteDevSkillkit\cache`; managed directories and files use
+private `0700`/`0600` permissions. On Windows, the primary visible launcher is
+`Start-ConnectionEntry.ps1`. The visible `Start-ConnectionEntry.cmd` broker
+tries that launcher under the current policy, retries with a process-scoped
+`-ExecutionPolicy Bypass`, and then uses its native CMD path. The retry changes
+no registry or machine policy. All paths share one private attempt directory;
+once its state reaches `core_started`, no launcher starts another core. Both
+launchers restrict handoff, attempt, and cache ACLs to the current user,
+SYSTEM, and Administrators; reject reparse or UNC paths; recheck bootstrap size
+and SHA-256; and keep the verified bootstrap in the foreground.
+
+Temporary mode runs the selected host in the foreground. It does not install a
+service, create a scheduled task or registry persistence, or start a background
+updater. If layered prerequisites were not published, Connection Entry retains
+the visible `Start-ConnectionEntry.ps1` archive-compatible fallback. Signature,
+digest, origin, path, or verification failures never execute the downloaded
+asset or automatically downgrade. The launcher prints the separately verified
+self-contained archive fallback as an explicit recovery command instead.
+
+The layered run report contains `from_cache`, `resumed`, `bytes`, and ordered
+stage durations for manifest fetch, signature verification, runtime resolution,
+and launch preparation. `bytes` is the verified runtime size, not measured
+network transfer volume. No performance target is claimed until real Windows
+cold and warm acceptance evidence is collected.
+
+For acceptance, save the first standalone JSON report emitted by each run as
+`cold-layered-run.json` and `warm-layered-run.json`; do not include subsequent
+foreground host output in either file. Package both reports with the other real
+Windows evidence:
+
+```bash
+rdev acceptance package-windows-temporary \
+  --plan windows-plan/windows-temporary-plan.json \
+  --out windows-evidence \
+  --transcript transcript.txt \
+  --release-verification rdev-verify.json \
+  --audit audit.jsonl \
+  --no-persistence-dir no-persistence \
+  --denial-probes-dir denial-probes \
+  --cold-layered-run cold-layered-run.json \
+  --warm-layered-run warm-layered-run.json
+```
+
+The packager requires a cache miss in the cold report, a cache hit in the warm
+report, the complete ordered verification stages, and nonnegative durations.
+Reports containing ticket, gateway, token, redaction-marker, or private-path
+content are rejected before copying. Synthetic fixture reports are
+non-production and do not satisfy the formal release gate or replace a real
+Windows run. Keep the complete session-bound Windows evidence package private;
+review any report separately before publication.
+
 ### 2. Run Scoped Work
 
 The agent creates signed tasks for specific capabilities: shell, PowerShell,
