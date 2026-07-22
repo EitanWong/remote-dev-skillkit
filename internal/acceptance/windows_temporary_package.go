@@ -13,23 +13,25 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/bootstrapcmd/windowsentry"
 	"github.com/EitanWong/remote-dev-skillkit/internal/shelladapter"
 )
 
 const WindowsTemporaryPackageSchemaVersion = "rdev.acceptance-package.windows-temporary.v1"
 
 type WindowsTemporaryPackageOptions struct {
-	PlanPath                string
-	OutDir                  string
-	TranscriptPath          string
-	ReleaseVerificationPath string
-	AuditPath               string
-	NoPersistenceDir        string
-	DenialProbesDir         string
-	NotesPath               string
-	ColdLayeredRunPath      string
-	WarmLayeredRunPath      string
-	Now                     time.Time
+	PlanPath                 string
+	OutDir                   string
+	TranscriptPath           string
+	ReleaseVerificationPath  string
+	AuditPath                string
+	NoPersistenceDir         string
+	DenialProbesDir          string
+	NotesPath                string
+	ColdLayeredRunPath       string
+	WarmLayeredRunPath       string
+	LayeredEntryEvidencePath string
+	Now                      time.Time
 }
 
 type WindowsTemporaryPackage struct {
@@ -77,9 +79,6 @@ func PackageWindowsTemporaryEvidence(opts WindowsTemporaryPackageOptions) (Windo
 	if err != nil {
 		return WindowsTemporaryPackage{}, err
 	}
-	if err := prepareAcceptanceOut(outDir); err != nil {
-		return WindowsTemporaryPackage{}, err
-	}
 	planPath, err := filepath.Abs(opts.PlanPath)
 	if err != nil {
 		return WindowsTemporaryPackage{}, err
@@ -92,6 +91,12 @@ func PackageWindowsTemporaryEvidence(opts WindowsTemporaryPackageOptions) (Windo
 	if err != nil {
 		return WindowsTemporaryPackage{}, err
 	}
+	if !verification.OK() {
+		return WindowsTemporaryPackage{}, fmt.Errorf("Windows temporary plan verification failed")
+	}
+	if err := prepareAcceptanceOut(outDir); err != nil {
+		return WindowsTemporaryPackage{}, err
+	}
 	now := opts.Now
 	if now.IsZero() {
 		now = time.Now()
@@ -99,12 +104,13 @@ func PackageWindowsTemporaryEvidence(opts WindowsTemporaryPackageOptions) (Windo
 	pkg := WindowsTemporaryPackage{
 		SchemaVersion:    WindowsTemporaryPackageSchemaVersion,
 		GeneratedAt:      now.UTC(),
-		OutDir:           outDir,
-		PlanPath:         planPath,
+		OutDir:           ".",
+		PlanPath:         "plan/windows-temporary-plan.json",
 		PlanSchema:       plan.SchemaVersion,
 		PlanVerification: verification,
 		RequiredEvidence: plan.RequiredEvidence,
 	}
+	pkg.PlanVerification.PlanPath = pkg.PlanPath
 	add := func(name string, passed bool, detail string) {
 		pkg.Checks = append(pkg.Checks, Check{Name: name, Passed: passed, Detail: detail})
 	}
@@ -113,34 +119,34 @@ func PackageWindowsTemporaryEvidence(opts WindowsTemporaryPackageOptions) (Windo
 
 	var files []WindowsTemporaryPackageFile
 	if entry, err := copyPackageFile(outDir, "plan/windows-temporary-plan.json", "plan", planPath, nil); err != nil {
-		return WindowsTemporaryPackage{}, err
+		return WindowsTemporaryPackage{}, fmt.Errorf("copy Windows temporary plan")
 	} else {
 		files = append(files, entry)
 	}
-	launcherPath := resolvePlanPath(filepath.Dir(planPath), plan.LauncherPath, "run-windows-temporary.ps1")
-	if entry, err := copyPackageFile(outDir, "plan/run-windows-temporary.ps1", "launcher", launcherPath, nil); err != nil {
-		add("launcher_copied", false, err.Error())
-	} else {
-		files = append(files, entry)
-		add("launcher_copied", true, entry.Path)
-	}
+	archivePath := filepath.Join(filepath.Dir(planPath), "Windows-ConnectionEntry.zip")
+	_, _, archiveSHA256, archiveSize, archiveErr := inspectWindowsLayeredAcceptanceArchive(archivePath)
+	add("handoff_archive_verified_not_packaged",
+		archiveErr == nil && strings.EqualFold(archiveSHA256, plan.HandoffArchiveSHA256) && archiveSize == plan.HandoffArchiveSizeBytes,
+		filepath.Base(archivePath),
+	)
 
 	files = append(files, copyOptionalEvidence(outDir, "evidence/transcript.txt", "transcript", opts.TranscriptPath, redactor, add)...)
 	files = append(files, copyOptionalEvidence(outDir, "evidence/release-verification.txt", "release-verification", opts.ReleaseVerificationPath, redactor, add)...)
 	files = append(files, copyOptionalEvidence(outDir, "evidence/audit.txt", "audit", opts.AuditPath, redactor, add)...)
 	files = append(files, copyNotesEvidence(outDir, opts.NotesPath, redactor, add)...)
 	files = append(files, copyWindowsLayeredRunEvidencePair(outDir, opts.ColdLayeredRunPath, opts.WarmLayeredRunPath, add)...)
+	files = append(files, copyWindowsLayeredEntryEvidence(outDir, opts.LayeredEntryEvidencePath, plan, add)...)
 
 	noPersistenceFiles, noPersistenceNames := copyEvidenceDir(outDir, "evidence/no-persistence", "no-persistence", opts.NoPersistenceDir, redactor, add)
 	files = append(files, noPersistenceFiles...)
 	denialFiles, denialNames := copyEvidenceDir(outDir, "evidence/denial-probes", "denial-probe", opts.DenialProbesDir, redactor, add)
 	files = append(files, denialFiles...)
 
-	add("transcript_present", fileEntryKindPresent(files, "transcript"), opts.TranscriptPath)
+	add("transcript_present", fileEntryKindPresent(files, "transcript"), layeredRunPresenceDetail(strings.TrimSpace(opts.TranscriptPath) != ""))
 	releaseOK := releaseVerificationOK(outDir, "evidence/release-verification.txt")
-	add("release_verification_present", fileEntryKindPresent(files, "release-verification"), opts.ReleaseVerificationPath)
-	add("release_verification_ok", releaseOK, opts.ReleaseVerificationPath)
-	add("audit_present", fileEntryKindPresent(files, "audit"), opts.AuditPath)
+	add("release_verification_present", fileEntryKindPresent(files, "release-verification"), layeredRunPresenceDetail(strings.TrimSpace(opts.ReleaseVerificationPath) != ""))
+	add("release_verification_ok", releaseOK, layeredRunPresenceDetail(strings.TrimSpace(opts.ReleaseVerificationPath) != ""))
+	add("audit_present", fileEntryKindPresent(files, "audit"), layeredRunPresenceDetail(strings.TrimSpace(opts.AuditPath) != ""))
 	add("no_persistence_evidence_complete", namesCoverWindowsCommands(noPersistenceNames, plan.NoPersistenceChecks), missingWindowsEvidenceNames(noPersistenceNames, windowsCommandNames(plan.NoPersistenceChecks)))
 	add("denial_probe_evidence_complete", namesCoverDenialProbes(denialNames, plan.DenialProbes), missingDenialEvidenceNames(denialNames, plan.DenialProbes))
 
@@ -174,16 +180,38 @@ func PackageWindowsTemporaryEvidence(opts WindowsTemporaryPackageOptions) (Windo
 	return pkg, nil
 }
 
+func copyWindowsLayeredEntryEvidence(root, source string, plan WindowsTemporaryPlan, add func(string, bool, string)) []WindowsTemporaryPackageFile {
+	if strings.TrimSpace(source) == "" {
+		add("layered_entry_evidence_present", false, "missing")
+		add("layered_entry_evidence_valid", false, "missing")
+		return nil
+	}
+	content, err := readWindowsLayeredRunReport(source)
+	if err != nil {
+		add("layered_entry_evidence_present", false, layeredRunValidationDetail(err))
+		add("layered_entry_evidence_valid", false, layeredRunValidationDetail(err))
+		return nil
+	}
+	add("layered_entry_evidence_present", true, "provided")
+	if err := validateWindowsLayeredEntryEvidence(content, plan); err != nil {
+		add("layered_entry_evidence_valid", false, err.Error())
+		return nil
+	}
+	entry, err := writePackageContent(root, "evidence/layered-entry-evidence.json", "layered-entry-evidence", append(content, '\n'), "")
+	if err != nil {
+		add("layered_entry_evidence_valid", false, "evidence could not be copied")
+		return nil
+	}
+	add("layered_entry_evidence_valid", true, "validated")
+	return []WindowsTemporaryPackageFile{entry}
+}
+
 func readWindowsTemporaryPlan(path string) (WindowsTemporaryPlan, error) {
 	content, err := os.ReadFile(path)
 	if err != nil {
 		return WindowsTemporaryPlan{}, err
 	}
-	var plan WindowsTemporaryPlan
-	if err := json.Unmarshal(content, &plan); err != nil {
-		return WindowsTemporaryPlan{}, err
-	}
-	return plan, nil
+	return decodeWindowsTemporaryPlan(content)
 }
 
 func copyOptionalEvidence(root, bundlePath, kind, source string, redactor *shelladapter.ArtifactRedactor, add func(string, bool, string)) []WindowsTemporaryPackageFile {
@@ -193,7 +221,7 @@ func copyOptionalEvidence(root, bundlePath, kind, source string, redactor *shell
 	}
 	entry, err := copyPackageFile(root, bundlePath, kind, source, redactor)
 	if err != nil {
-		add(kind+"_copied", false, err.Error())
+		add(kind+"_copied", false, packageEvidenceErrorDetail(err))
 		return nil
 	}
 	add(kind+"_copied", true, entry.Path)
@@ -206,7 +234,7 @@ func copyNotesEvidence(root, source string, redactor *shelladapter.ArtifactRedac
 	}
 	entry, err := copyPackageFile(root, "evidence/notes.txt", "notes", source, redactor)
 	if err != nil {
-		add("notes_copied", false, err.Error())
+		add("notes_copied", false, packageEvidenceErrorDetail(err))
 		return nil
 	}
 	add("notes_copied", true, entry.Path)
@@ -312,7 +340,7 @@ func copyEvidenceDir(root, bundleDir, kind, sourceDir string, redactor *shellada
 	}
 	entries, err := os.ReadDir(sourceDir)
 	if err != nil {
-		add(kind+"_dir_copied", false, err.Error())
+		add(kind+"_dir_copied", false, packageEvidenceErrorDetail(err))
 		return nil, nil
 	}
 	var files []WindowsTemporaryPackageFile
@@ -328,7 +356,7 @@ func copyEvidenceDir(root, bundleDir, kind, sourceDir string, redactor *shellada
 		source := filepath.Join(sourceDir, entry.Name())
 		copied, err := copyPackageFile(root, filepath.ToSlash(filepath.Join(bundleDir, name)), kind, source, redactor)
 		if err != nil {
-			add(kind+"_dir_copied", false, err.Error())
+			add(kind+"_dir_copied", false, packageEvidenceErrorDetail(err))
 			return files, names
 		}
 		files = append(files, copied)
@@ -364,14 +392,26 @@ func writePackageContent(root, bundlePath, kind string, content []byte, source s
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		return WindowsTemporaryPackageFile{}, err
 	}
+	if err := windowsentry.ProtectPrivatePath(path, false); err != nil {
+		return WindowsTemporaryPackageFile{}, err
+	}
 	sum := sha256.Sum256(content)
 	return WindowsTemporaryPackageFile{
 		Path:      filepath.ToSlash(clean),
 		Kind:      kind,
 		SHA256:    "sha256:" + hex.EncodeToString(sum[:]),
 		SizeBytes: len(content),
-		Source:    source,
 	}, nil
+}
+
+func packageEvidenceErrorDetail(err error) string {
+	if err == nil {
+		return ""
+	}
+	if strings.Contains(err.Error(), "placeholder") {
+		return "evidence placeholder must be replaced"
+	}
+	return "evidence could not be read or copied"
 }
 
 func writePackageChecksums(root string, files []WindowsTemporaryPackageFile) ([]byte, WindowsTemporaryPackageFile, error) {

@@ -1,17 +1,32 @@
 package acceptance
 
 import (
+	"archive/zip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
+
+	"github.com/EitanWong/remote-dev-skillkit/internal/bootstrapcmd/windowsentry"
 )
 
 const WindowsTemporaryPlanSchemaVersion = "rdev.acceptance.windows-temporary-plan.v1"
+
+const maxWindowsTemporaryHandoffBytes int64 = 1 << 20
+
+// The closed ZIP remains subject to the 1 MiB delivery gate. These separate
+// limits also bound decompression work while allowing the signed PE bootstrap
+// to be larger than its compressed representation.
+const (
+	maxWindowsTemporaryHandoffEntryBytes    int64 = 8 << 20
+	maxWindowsTemporaryHandoffExpandedBytes int64 = 16 << 20
+)
 
 const (
 	windowsTemporaryColdLayeredRunEvidence = "cold-layered-run.json from a real clean Windows cold run with from_cache=false."
@@ -20,10 +35,10 @@ const (
 
 func windowsTemporaryRequiredEvidence() []string {
 	return []string{
-		"PowerShell transcript for bootstrap and foreground host startup.",
-		"SHA-256 verification output for the bootstrap script, verifier, and rdev-host binary.",
-		"Signed release manifest or release bundle verification output from rdev-verify.",
-		"Session join, endpoint trust, task, host-denial probe, revoke, and cancellation audit events.",
+		"Measured Windows-ConnectionEntry.zip size and SHA-256 from the delivered handoff.",
+		"Visible launcher attempt order and exactly one rdev-bootstrap core-start transition.",
+		"Signed bootstrap and layered core verification output.",
+		"Session registration, route reselection, task, revoke, and cancellation audit events.",
 		"No-persistence inspection output for services, scheduled tasks, Run keys, startup folders, and firewall rules.",
 		windowsTemporaryColdLayeredRunEvidence,
 		windowsTemporaryWarmLayeredRunEvidence,
@@ -31,60 +46,32 @@ func windowsTemporaryRequiredEvidence() []string {
 }
 
 type WindowsTemporaryOptions struct {
-	OutDir                         string
-	GatewayURL                     string
-	TicketCode                     string
-	DownloadURL                    string
-	ExpectedSHA256                 string
-	BootstrapScriptPath            string
-	BootstrapScriptURL             string
-	BootstrapScriptExpectedSHA256  string
-	ManifestURL                    string
-	ManifestRootPublicKey          string
-	ReleaseManifestURL             string
-	ReleaseBundleURL               string
-	ReleaseBundleRequiredArtifacts string
-	ReleaseRootPublicKey           string
-	VerifierDownloadURL            string
-	VerifierExpectedSHA256         string
-	TrustPin                       string
-	HostName                       string
-	// MaxRetries is the number of re-registration attempts after an unexpected
-	// host exit.  Zero means use the bootstrap script default (5).
-	MaxRetries int
-	Force      bool
-	Now        time.Time
+	OutDir             string
+	HandoffArchivePath string
+	Force              bool
+	Now                time.Time
 }
 
 type WindowsTemporaryPlan struct {
-	SchemaVersion                  string                     `json:"schema_version"`
-	GeneratedAt                    time.Time                  `json:"generated_at"`
-	Platform                       string                     `json:"platform"`
-	OutDir                         string                     `json:"out_dir"`
-	BootstrapScriptPath            string                     `json:"bootstrap_script_path,omitempty"`
-	BootstrapScriptURL             string                     `json:"bootstrap_script_url,omitempty"`
-	BootstrapScriptSHA256          string                     `json:"bootstrap_script_sha256,omitempty"`
-	LauncherPath                   string                     `json:"launcher_path"`
-	GatewayURL                     string                     `json:"gateway_url"`
-	TicketCode                     string                     `json:"ticket_code"`
-	ManifestURL                    string                     `json:"manifest_url,omitempty"`
-	ManifestRootPublicKey          string                     `json:"manifest_root_public_key,omitempty"`
-	ReleaseManifestURL             string                     `json:"release_manifest_url,omitempty"`
-	ReleaseBundleURL               string                     `json:"release_bundle_url,omitempty"`
-	ReleaseBundleRequiredArtifacts string                     `json:"release_bundle_required_artifacts,omitempty"`
-	ReleaseRootPublicKey           string                     `json:"release_root_public_key,omitempty"`
-	VerifierDownloadURL            string                     `json:"verifier_download_url,omitempty"`
-	VerifierExpectedSHA256         string                     `json:"verifier_expected_sha256,omitempty"`
-	TrustPin                       string                     `json:"trust_pin,omitempty"`
-	HostName                       string                     `json:"host_name,omitempty"`
-	HostDownloadURL                string                     `json:"host_download_url"`
-	HostExpectedSHA256             string                     `json:"host_expected_sha256"`
-	Checks                         []Check                    `json:"checks"`
-	Commands                       []WindowsAcceptanceCommand `json:"commands"`
-	NoPersistenceChecks            []WindowsAcceptanceCommand `json:"no_persistence_checks"`
-	DenialProbes                   []WindowsDenialProbe       `json:"denial_probes"`
-	RecommendedActions             []string                   `json:"recommended_actions"`
-	RequiredEvidence               []string                   `json:"required_evidence"`
+	SchemaVersion            string                     `json:"schema_version"`
+	GeneratedAt              time.Time                  `json:"generated_at"`
+	Platform                 string                     `json:"platform"`
+	OutDir                   string                     `json:"-"`
+	HandoffArchivePath       string                     `json:"handoff_archive_path"`
+	HandoffArchiveSHA256     string                     `json:"handoff_archive_sha256"`
+	HandoffArchiveSizeBytes  int64                      `json:"handoff_archive_size_bytes"`
+	PowerShellLauncher       string                     `json:"powershell_launcher"`
+	CommandLauncher          string                     `json:"command_launcher"`
+	PreferredLauncher        string                     `json:"preferred_launcher"`
+	FallbackOrder            []string                   `json:"fallback_order"`
+	BootstrapCommand         string                     `json:"bootstrap_command"`
+	ArchiveRecoveryAutomatic bool                       `json:"archive_recovery_automatic"`
+	Checks                   []Check                    `json:"checks"`
+	Commands                 []WindowsAcceptanceCommand `json:"commands"`
+	NoPersistenceChecks      []WindowsAcceptanceCommand `json:"no_persistence_checks"`
+	DenialProbes             []WindowsDenialProbe       `json:"denial_probes"`
+	RecommendedActions       []string                   `json:"recommended_actions"`
+	RequiredEvidence         []string                   `json:"required_evidence"`
 }
 
 type WindowsAcceptanceCommand struct {
@@ -116,163 +103,75 @@ func RunWindowsTemporaryPlan(opts WindowsTemporaryOptions) (WindowsTemporaryPlan
 	if err := prepareAcceptanceOut(outDir); err != nil {
 		return WindowsTemporaryPlan{}, err
 	}
-	resolved, err := resolveWindowsTemporaryOptions(outDir, opts)
+	sourceArchive, archiveContent, archiveSHA256, archiveSize, err := inspectWindowsLayeredAcceptanceArchive(opts.HandoffArchivePath)
 	if err != nil {
 		return WindowsTemporaryPlan{}, err
 	}
-	launcher := windowsTemporaryLauncher(resolved)
-	if err := writeAcceptanceFile(resolved.LauncherPath, []byte(launcher), opts.Force); err != nil {
+	archivePath := filepath.Join(outDir, "Windows-ConnectionEntry.zip")
+	if err := writeAcceptanceFile(archivePath, archiveContent, opts.Force); err != nil {
 		return WindowsTemporaryPlan{}, err
 	}
 	plan := WindowsTemporaryPlan{
-		SchemaVersion:                  WindowsTemporaryPlanSchemaVersion,
-		GeneratedAt:                    now.UTC(),
-		Platform:                       "windows",
-		OutDir:                         outDir,
-		BootstrapScriptPath:            resolved.BootstrapScriptPath,
-		BootstrapScriptURL:             resolved.BootstrapScriptURL,
-		BootstrapScriptSHA256:          resolved.BootstrapScriptExpectedSHA256,
-		LauncherPath:                   resolved.LauncherPath,
-		GatewayURL:                     resolved.GatewayURL,
-		TicketCode:                     resolved.TicketCode,
-		ManifestURL:                    resolved.ManifestURL,
-		ManifestRootPublicKey:          resolved.ManifestRootPublicKey,
-		ReleaseManifestURL:             resolved.ReleaseManifestURL,
-		ReleaseBundleURL:               resolved.ReleaseBundleURL,
-		ReleaseBundleRequiredArtifacts: resolved.ReleaseBundleRequiredArtifacts,
-		ReleaseRootPublicKey:           resolved.ReleaseRootPublicKey,
-		VerifierDownloadURL:            resolved.VerifierDownloadURL,
-		VerifierExpectedSHA256:         resolved.VerifierExpectedSHA256,
-		TrustPin:                       resolved.TrustPin,
-		HostName:                       resolved.HostName,
-		HostDownloadURL:                resolved.DownloadURL,
-		HostExpectedSHA256:             resolved.ExpectedSHA256,
-		Commands:                       windowsTemporaryCommands(resolved),
-		NoPersistenceChecks:            windowsNoPersistenceChecks(),
-		DenialProbes:                   windowsDenialProbes(),
+		SchemaVersion:            WindowsTemporaryPlanSchemaVersion,
+		GeneratedAt:              now.UTC(),
+		Platform:                 "windows/amd64",
+		OutDir:                   outDir,
+		HandoffArchivePath:       filepath.Base(archivePath),
+		HandoffArchiveSHA256:     archiveSHA256,
+		HandoffArchiveSizeBytes:  archiveSize,
+		PowerShellLauncher:       "Start-ConnectionEntry.ps1",
+		CommandLauncher:          "Start-ConnectionEntry.cmd",
+		PreferredLauncher:        "powershell",
+		FallbackOrder:            []string{"powershell", "powershell-bypass", "cmd"},
+		BootstrapCommand:         "rdev-bootstrap layered-run",
+		ArchiveRecoveryAutomatic: false,
+		Commands:                 windowsTemporaryCommands(),
+		NoPersistenceChecks:      windowsNoPersistenceChecks(),
+		DenialProbes:             windowsDenialProbes(),
 		RecommendedActions: []string{
-			"Review the generated PowerShell launcher and bootstrap script before using them on a Windows host.",
-			"Run the launcher in a clean Windows 10/11 VM or target support host as a visible foreground session.",
+			"Verify the delivered archive digest and inspect both visible launchers before the Windows run.",
+			"Extract the private handoff on a clean Windows 10/11 host and start with the visible PowerShell launcher.",
 			"Accept only the scoped temporary endpoint expected by this session.",
 			"Run bounded diagnostic and repair tasks, then collect evidence and audit exports.",
 			"Revoke the temporary host and run every no-persistence check before publishing the transcript.",
 		},
 		RequiredEvidence: windowsTemporaryRequiredEvidence(),
 	}
-	plan.Checks = windowsTemporaryChecks(plan, resolved)
+	plan.Checks = windowsTemporaryChecks(plan, sourceArchive)
 	if err := writeWindowsTemporaryPlan(filepath.Join(outDir, "windows-temporary-plan.json"), plan); err != nil {
 		return WindowsTemporaryPlan{}, err
 	}
 	return plan, nil
 }
 
-type windowsTemporaryResolvedOptions struct {
-	OutDir                         string
-	LauncherPath                   string
-	GatewayURL                     string
-	TicketCode                     string
-	DownloadURL                    string
-	ExpectedSHA256                 string
-	BootstrapScriptPath            string
-	BootstrapScriptURL             string
-	BootstrapScriptExpectedSHA256  string
-	ManifestURL                    string
-	ManifestRootPublicKey          string
-	ReleaseManifestURL             string
-	ReleaseBundleURL               string
-	ReleaseBundleRequiredArtifacts string
-	ReleaseRootPublicKey           string
-	VerifierDownloadURL            string
-	VerifierExpectedSHA256         string
-	TrustPin                       string
-	HostName                       string
-	MaxRetries                     int
-}
-
-func resolveWindowsTemporaryOptions(outDir string, opts WindowsTemporaryOptions) (windowsTemporaryResolvedOptions, error) {
-	bootstrapScriptPath := strings.TrimSpace(opts.BootstrapScriptPath)
-	if bootstrapScriptPath == "" {
-		bootstrapScriptPath = filepath.Join("scripts", "bootstrap", "windows-temporary.ps1")
-	}
-	if bootstrapScriptPath != "" && !filepath.IsAbs(bootstrapScriptPath) {
-		abs, err := filepath.Abs(bootstrapScriptPath)
-		if err != nil {
-			return windowsTemporaryResolvedOptions{}, err
-		}
-		bootstrapScriptPath = abs
-	}
-	bootstrapHash := strings.TrimSpace(opts.BootstrapScriptExpectedSHA256)
-	if bootstrapHash == "" && strings.TrimSpace(bootstrapScriptPath) != "" {
-		if hash, err := fileSHA256(bootstrapScriptPath); err == nil {
-			bootstrapHash = hash
-		}
-	}
-	releaseBundleURL := strings.TrimSpace(opts.ReleaseBundleURL)
-	releaseBundleRequiredArtifacts := strings.TrimSpace(opts.ReleaseBundleRequiredArtifacts)
-	if releaseBundleURL == "" {
-		releaseBundleRequiredArtifacts = ""
-	} else if releaseBundleRequiredArtifacts == "" {
-		releaseBundleRequiredArtifacts = "rdev-host.exe,rdev-verify.exe"
-	}
-	return windowsTemporaryResolvedOptions{
-		OutDir:                         outDir,
-		LauncherPath:                   filepath.Join(outDir, "run-windows-temporary.ps1"),
-		GatewayURL:                     strings.TrimSpace(opts.GatewayURL),
-		TicketCode:                     strings.TrimSpace(opts.TicketCode),
-		DownloadURL:                    strings.TrimSpace(opts.DownloadURL),
-		ExpectedSHA256:                 strings.ToLower(strings.TrimSpace(opts.ExpectedSHA256)),
-		BootstrapScriptPath:            bootstrapScriptPath,
-		BootstrapScriptURL:             strings.TrimSpace(opts.BootstrapScriptURL),
-		BootstrapScriptExpectedSHA256:  strings.ToLower(bootstrapHash),
-		ManifestURL:                    strings.TrimSpace(opts.ManifestURL),
-		ManifestRootPublicKey:          strings.TrimSpace(opts.ManifestRootPublicKey),
-		ReleaseManifestURL:             strings.TrimSpace(opts.ReleaseManifestURL),
-		ReleaseBundleURL:               releaseBundleURL,
-		ReleaseBundleRequiredArtifacts: releaseBundleRequiredArtifacts,
-		ReleaseRootPublicKey:           strings.TrimSpace(opts.ReleaseRootPublicKey),
-		VerifierDownloadURL:            strings.TrimSpace(opts.VerifierDownloadURL),
-		VerifierExpectedSHA256:         strings.ToLower(strings.TrimSpace(opts.VerifierExpectedSHA256)),
-		TrustPin:                       strings.TrimSpace(opts.TrustPin),
-		HostName:                       strings.TrimSpace(opts.HostName),
-		MaxRetries:                     opts.MaxRetries,
-	}, nil
-}
-
-func windowsTemporaryChecks(plan WindowsTemporaryPlan, opts windowsTemporaryResolvedOptions) []Check {
-	_, scriptErr := os.Stat(opts.BootstrapScriptPath)
+func windowsTemporaryChecks(plan WindowsTemporaryPlan, sourceArchive string) []Check {
 	return []Check{
-		{Name: "launcher_written", Passed: pathExists(plan.LauncherPath), Detail: plan.LauncherPath},
-		{Name: "bootstrap_script_available", Passed: scriptErr == nil || opts.BootstrapScriptURL != "", Detail: firstNonEmptyString(opts.BootstrapScriptURL, opts.BootstrapScriptPath)},
-		{Name: "bootstrap_script_hash_available", Passed: opts.BootstrapScriptExpectedSHA256 != "", Detail: opts.BootstrapScriptExpectedSHA256},
-		{Name: "gateway_url", Passed: opts.GatewayURL != "", Detail: opts.GatewayURL},
-		{Name: "ticket_code", Passed: opts.TicketCode != "", Detail: opts.TicketCode},
-		{Name: "host_download_url", Passed: opts.DownloadURL != "", Detail: opts.DownloadURL},
-		{Name: "host_sha256", Passed: isHexSHA256(opts.ExpectedSHA256), Detail: opts.ExpectedSHA256},
-		{Name: "release_manifest_or_bundle_url", Passed: opts.ReleaseManifestURL != "" || opts.ReleaseBundleURL != "", Detail: firstNonEmptyString(opts.ReleaseBundleURL, opts.ReleaseManifestURL)},
-		{Name: "release_bundle_required_artifacts", Passed: opts.ReleaseBundleURL == "" || opts.ReleaseBundleRequiredArtifacts != "", Detail: opts.ReleaseBundleRequiredArtifacts},
-		{Name: "release_root_public_key", Passed: opts.ReleaseRootPublicKey != ""},
-		{Name: "verifier_download_url", Passed: opts.VerifierDownloadURL != "", Detail: opts.VerifierDownloadURL},
-		{Name: "verifier_sha256", Passed: isHexSHA256(opts.VerifierExpectedSHA256), Detail: opts.VerifierExpectedSHA256},
+		{Name: "handoff_archive_staged", Passed: sourceArchive != "", Detail: filepath.Base(plan.HandoffArchivePath)},
+		{Name: "handoff_archive_sha256", Passed: isHexSHA256(plan.HandoffArchiveSHA256), Detail: plan.HandoffArchiveSHA256},
+		{Name: "handoff_archive_size", Passed: plan.HandoffArchiveSizeBytes > 0 && plan.HandoffArchiveSizeBytes <= maxWindowsTemporaryHandoffBytes, Detail: fmt.Sprintf("%d", plan.HandoffArchiveSizeBytes)},
+		{Name: "powershell_preferred", Passed: plan.PreferredLauncher == "powershell" && plan.PowerShellLauncher == "Start-ConnectionEntry.ps1", Detail: plan.PreferredLauncher},
+		{Name: "fallback_order", Passed: slices.Equal(plan.FallbackOrder, []string{"powershell", "powershell-bypass", "cmd"}), Detail: strings.Join(plan.FallbackOrder, ",")},
+		{Name: "bootstrap_only", Passed: plan.BootstrapCommand == "rdev-bootstrap layered-run", Detail: plan.BootstrapCommand},
+		{Name: "archive_recovery_not_automatic", Passed: !plan.ArchiveRecoveryAutomatic},
 		{Name: "no_persistence_checks_present", Passed: len(plan.NoPersistenceChecks) >= 5},
 		{Name: "denial_probes_present", Passed: len(plan.DenialProbes) >= 4},
 	}
 }
 
-func windowsTemporaryCommands(opts windowsTemporaryResolvedOptions) []WindowsAcceptanceCommand {
-	launcherCommand := "powershell.exe -NoProfile -File " + powershellQuote(opts.LauncherPath)
+func windowsTemporaryCommands() []WindowsAcceptanceCommand {
 	return []WindowsAcceptanceCommand{
 		{
-			Name:    "review_launcher",
-			Purpose: "Inspect the generated launcher before sending or running it.",
-			Shell:   "Get-Content -LiteralPath " + powershellQuote(opts.LauncherPath),
-			Argv:    []string{"powershell.exe", "-NoProfile", "-Command", "Get-Content -LiteralPath " + powershellQuote(opts.LauncherPath)},
+			Name:    "review_handoff",
+			Purpose: "Verify the delivered ZIP digest and inspect both visible launchers before execution.",
+			Shell:   "Get-FileHash -Algorithm SHA256 -LiteralPath '.\\Windows-ConnectionEntry.zip'",
+			Argv:    []string{"powershell.exe", "-NoProfile", "-Command", "Get-FileHash -Algorithm SHA256 -LiteralPath '.\\Windows-ConnectionEntry.zip'"},
 			Manual:  true,
 		},
 		{
 			Name:    "run_foreground_temporary_host",
-			Purpose: "Run the attended temporary host bootstrap as a visible foreground session.",
-			Shell:   launcherCommand,
-			Argv:    []string{"powershell.exe", "-NoProfile", "-File", opts.LauncherPath},
+			Purpose: "Extract the private handoff and run its preferred visible PowerShell entry.",
+			Shell:   "powershell.exe -NoProfile -File '.\\Start-ConnectionEntry.ps1'",
+			Argv:    []string{"powershell.exe", "-NoProfile", "-File", ".\\Start-ConnectionEntry.ps1"},
 			Manual:  true,
 		},
 		{
@@ -290,18 +189,101 @@ func windowsTemporaryCommands(opts windowsTemporaryResolvedOptions) []WindowsAcc
 	}
 }
 
+func inspectWindowsLayeredAcceptanceArchive(path string) (string, []byte, string, int64, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", nil, "", 0, fmt.Errorf("Windows layered handoff archive is required")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", nil, "", 0, err
+	}
+	info, err := os.Lstat(abs)
+	if err != nil {
+		return "", nil, "", 0, err
+	}
+	if !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxWindowsTemporaryHandoffBytes {
+		return "", nil, "", 0, fmt.Errorf("Windows layered handoff archive must be a regular file at or below %d bytes", maxWindowsTemporaryHandoffBytes)
+	}
+	reader, err := zip.OpenReader(abs)
+	if err != nil {
+		return "", nil, "", 0, err
+	}
+	defer reader.Close()
+	required := map[string]bool{
+		"Start-ConnectionEntry.ps1":            false,
+		"Start-ConnectionEntry.cmd":            false,
+		"rdev-bootstrap.exe":                   false,
+		"rdev-bootstrap.exe.rdev-release.json": false,
+		"rdev-bootstrap.exe.sha256":            false,
+		"windows-layered-verification.json":    false,
+		"ARCHIVE-RECOVERY.txt":                 false,
+	}
+	seen := make(map[string]bool, len(reader.File))
+	var expandedSize int64
+	for _, file := range reader.File {
+		if file.Name != filepath.Base(file.Name) || seen[strings.ToLower(file.Name)] {
+			return "", nil, "", 0, fmt.Errorf("Windows layered handoff contains an unsafe or duplicate entry")
+		}
+		if !file.Mode().IsRegular() || file.UncompressedSize64 == 0 || file.UncompressedSize64 > uint64(maxWindowsTemporaryHandoffEntryBytes) {
+			return "", nil, "", 0, fmt.Errorf("Windows layered handoff contains an entry above the uncompressed size limit")
+		}
+		if file.UncompressedSize64 > uint64(maxWindowsTemporaryHandoffExpandedBytes)-uint64(expandedSize) {
+			return "", nil, "", 0, fmt.Errorf("Windows layered handoff exceeds the uncompressed size limit")
+		}
+		expandedSize += int64(file.UncompressedSize64)
+		seen[strings.ToLower(file.Name)] = true
+		if _, ok := required[file.Name]; !ok {
+			return "", nil, "", 0, fmt.Errorf("Windows layered handoff contains unexpected entry %q", file.Name)
+		}
+		required[file.Name] = true
+		entry, err := file.Open()
+		if err != nil {
+			return "", nil, "", 0, err
+		}
+		content, readErr := io.ReadAll(io.LimitReader(entry, maxWindowsTemporaryHandoffEntryBytes+1))
+		closeErr := entry.Close()
+		if readErr != nil || closeErr != nil || uint64(len(content)) != file.UncompressedSize64 {
+			return "", nil, "", 0, fmt.Errorf("read and verify Windows layered handoff entry")
+		}
+		if file.Name != "Start-ConnectionEntry.ps1" && file.Name != "Start-ConnectionEntry.cmd" {
+			continue
+		}
+		lower := strings.ToLower(string(content))
+		if !strings.Contains(lower, "rdev-bootstrap") {
+			return "", nil, "", 0, fmt.Errorf("Windows layered launcher %q does not use rdev-bootstrap", file.Name)
+		}
+		for _, forbidden := range []string{"rdev host serve", "rdev-host.exe", "rdev-bootstrap upgrade", "get-command rdev"} {
+			if strings.Contains(lower, forbidden) {
+				return "", nil, "", 0, fmt.Errorf("Windows layered launcher %q contains a legacy helper path", file.Name)
+			}
+		}
+	}
+	for name, present := range required {
+		if !present {
+			return "", nil, "", 0, fmt.Errorf("Windows layered handoff is missing %q", name)
+		}
+	}
+	content, err := os.ReadFile(abs)
+	if err != nil {
+		return "", nil, "", 0, err
+	}
+	digest := sha256.Sum256(content)
+	return abs, content, hex.EncodeToString(digest[:]), int64(len(content)), nil
+}
+
 func windowsNoPersistenceChecks() []WindowsAcceptanceCommand {
 	return []WindowsAcceptanceCommand{
 		{
 			Name:    "services",
 			Purpose: "Confirm temporary mode did not install a Windows Service.",
-			Shell:   "Get-Service | Where-Object { $_.Name -match 'rdev|remote-dev' -or $_.DisplayName -match 'rdev|Remote Dev' } | Select-Object Name, Status, StartType, DisplayName",
+			Shell:   "Get-Service | Where-Object { $_.Name -match '(^|[-_.])rdev($|[-_.])|remote[- ]?dev' -or $_.DisplayName -match '(^|[-_. ])rdev($|[-_. ])|remote[- ]?dev' } | Select-Object Name, Status, StartType, DisplayName",
 			Manual:  true,
 		},
 		{
 			Name:    "scheduled_tasks",
 			Purpose: "Confirm temporary mode did not create scheduled tasks.",
-			Shell:   "Get-ScheduledTask | Where-Object { $_.TaskName -match 'rdev|remote-dev' -or $_.TaskPath -match 'rdev|remote-dev' } | Select-Object TaskPath, TaskName, State",
+			Shell:   "Get-ScheduledTask | Where-Object { $_.TaskName -match '(^|[-_.])rdev($|[-_.])|remote[- ]?dev' -or $_.TaskPath -match '(^|[-_.\\])rdev($|[-_.\\])|remote[- ]?dev' } | Select-Object TaskPath, TaskName, State",
 			Manual:  true,
 		},
 		{
@@ -319,13 +301,13 @@ func windowsNoPersistenceChecks() []WindowsAcceptanceCommand {
 		{
 			Name:    "startup_folders",
 			Purpose: "Confirm temporary mode did not add startup-folder shortcuts or scripts.",
-			Shell:   "Get-ChildItem \"$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\", \"$env:ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\StartUp\" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'rdev|remote-dev' }",
+			Shell:   "Get-ChildItem \"$env:APPDATA\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\", \"$env:ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\StartUp\" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '(^|[-_.])rdev($|[-_.])|remote[- ]?dev' }",
 			Manual:  true,
 		},
 		{
 			Name:    "firewall_rules",
 			Purpose: "Confirm temporary mode did not add firewall rules.",
-			Shell:   "Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match 'rdev|Remote Dev' -or $_.Name -match 'rdev|remote-dev' } | Select-Object DisplayName, Enabled, Direction, Action",
+			Shell:   "Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match '(^|[-_. ])rdev($|[-_. ])|remote[- ]?dev' -or $_.Name -match '(^|[-_.])rdev($|[-_.])|remote[- ]?dev' } | Select-Object DisplayName, Enabled, Direction, Action",
 			Manual:  true,
 		},
 	}
@@ -341,70 +323,6 @@ func windowsDenialProbes() []WindowsDenialProbe {
 	}
 }
 
-func windowsTemporaryLauncher(opts windowsTemporaryResolvedOptions) string {
-	var builder strings.Builder
-	builder.WriteString("# Generated by rdev acceptance windows-temporary.\n")
-	builder.WriteString("# Inspect this file before running it on a Windows host.\n")
-	builder.WriteString("$ErrorActionPreference = 'Stop'\n")
-	builder.WriteString("$bootstrap = ")
-	if opts.BootstrapScriptURL != "" {
-		builder.WriteString("Join-Path $env:TEMP 'rdev-windows-temporary.ps1'\n")
-		builder.WriteString("Invoke-WebRequest -Uri ")
-		builder.WriteString(powershellQuote(opts.BootstrapScriptURL))
-		builder.WriteString(" -OutFile $bootstrap -UseBasicParsing\n")
-		if opts.BootstrapScriptExpectedSHA256 != "" {
-			builder.WriteString("$actualBootstrap = (Get-FileHash -Algorithm SHA256 -Path $bootstrap).Hash.ToLowerInvariant()\n")
-			builder.WriteString("$expectedBootstrap = ")
-			builder.WriteString(powershellQuote(opts.BootstrapScriptExpectedSHA256))
-			builder.WriteString("\n")
-			builder.WriteString("if ($actualBootstrap -ne $expectedBootstrap) { throw \"bootstrap SHA256 mismatch expected=$expectedBootstrap actual=$actualBootstrap\" }\n")
-		}
-	} else {
-		builder.WriteString(powershellQuote(opts.BootstrapScriptPath))
-		builder.WriteString("\n")
-	}
-	builder.WriteString("& $bootstrap")
-	appendPowerShellArg(&builder, "GatewayUrl", opts.GatewayURL)
-	appendPowerShellArg(&builder, "TicketCode", opts.TicketCode)
-	appendPowerShellArg(&builder, "DownloadUrl", opts.DownloadURL)
-	appendPowerShellArg(&builder, "ExpectedSha256", opts.ExpectedSHA256)
-	appendPowerShellArg(&builder, "ManifestUrl", opts.ManifestURL)
-	appendPowerShellArg(&builder, "ManifestRootPublicKey", opts.ManifestRootPublicKey)
-	appendPowerShellArg(&builder, "ReleaseManifestUrl", opts.ReleaseManifestURL)
-	appendPowerShellArg(&builder, "ReleaseBundleUrl", opts.ReleaseBundleURL)
-	appendPowerShellArg(&builder, "ReleaseBundleRequiredArtifacts", opts.ReleaseBundleRequiredArtifacts)
-	appendPowerShellArg(&builder, "ReleaseRootPublicKey", opts.ReleaseRootPublicKey)
-	appendPowerShellArg(&builder, "VerifierDownloadUrl", opts.VerifierDownloadURL)
-	appendPowerShellArg(&builder, "VerifierExpectedSha256", opts.VerifierExpectedSHA256)
-	appendPowerShellArg(&builder, "TrustPin", opts.TrustPin)
-	appendPowerShellArg(&builder, "HostName", opts.HostName)
-	if opts.MaxRetries > 0 {
-		appendPowerShellIntArg(&builder, "MaxRetries", opts.MaxRetries)
-	}
-	builder.WriteString("\n")
-	return builder.String()
-}
-
-func appendPowerShellArg(builder *strings.Builder, name string, value string) {
-	if value == "" {
-		return
-	}
-	builder.WriteString(" `\n  -")
-	builder.WriteString(name)
-	builder.WriteByte(' ')
-	builder.WriteString(powershellQuote(value))
-}
-
-func appendPowerShellIntArg(builder *strings.Builder, name string, value int) {
-	if value == 0 {
-		return
-	}
-	builder.WriteString(" `\n  -")
-	builder.WriteString(name)
-	builder.WriteByte(' ')
-	builder.WriteString(fmt.Sprintf("%d", value))
-}
-
 func powershellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }
@@ -415,7 +333,10 @@ func writeWindowsTemporaryPlan(path string, plan WindowsTemporaryPlan) error {
 		return err
 	}
 	content = append(content, '\n')
-	return os.WriteFile(path, content, 0o600)
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		return err
+	}
+	return windowsentry.ProtectPrivatePath(path, false)
 }
 
 func fileSHA256(path string) (string, error) {

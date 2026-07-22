@@ -7,7 +7,24 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/EitanWong/remote-dev-skillkit/internal/bootstrapcmd/windowsentry"
 )
+
+func TestValidateWindowsLayeredRunReportAcceptsFocusedWindowsOutput(t *testing.T) {
+	for _, fromCache := range []bool{false, true} {
+		report := map[string]any{
+			"schema_version": windowsentry.RunReportSchemaVersion,
+			"asset_id":       "rdev-host-windows-amd64",
+			"from_cache":     fromCache,
+			"resumed":        !fromCache,
+			"bytes":          int64(4096),
+		}
+		if err := validateWindowsLayeredRunReport(marshalWindowsLayeredRunReportForTest(t, report), fromCache); err != nil {
+			t.Fatalf("focused Windows report from_cache=%t rejected: %v", fromCache, err)
+		}
+	}
+}
 
 func TestPackageWindowsTemporaryEvidenceIncludesColdAndWarmLayeredReports(t *testing.T) {
 	fixture := writeWindowsTemporaryPackageFixture(t, `{"ok": true}`)
@@ -82,6 +99,21 @@ func TestPackageWindowsTemporaryEvidenceRejectsMissingLayeredReports(t *testing.
 			t.Fatalf("missing report unexpectedly copied to %s: %v", reportPath, err)
 		}
 	}
+}
+
+func TestPackageWindowsTemporaryEvidenceRejectsMissingLayeredEntryEvidence(t *testing.T) {
+	fixture := writeWindowsTemporaryPackageFixture(t, `{"ok": true}`)
+	options := windowsTemporaryLayeredPackageOptions(fixture, filepath.Join(fixture.root, "package"), fixture.coldLayeredRunPath, fixture.warmLayeredRunPath)
+	options.LayeredEntryEvidencePath = ""
+	pkg, err := PackageWindowsTemporaryEvidence(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.OK() {
+		t.Fatal("missing layered entry evidence must fail package verification")
+	}
+	assertWindowsTemporaryPackageCheck(t, pkg.Checks, "layered_entry_evidence_present", false)
+	assertWindowsTemporaryPackageCheck(t, pkg.Checks, "layered_entry_evidence_valid", false)
 }
 
 func TestPackageWindowsTemporaryEvidenceRejectsInvalidLayeredReports(t *testing.T) {
@@ -208,16 +240,17 @@ func TestPackageWindowsTemporaryEvidenceRejectsMismatchedLayeredRuntimePair(t *t
 
 func windowsTemporaryLayeredPackageOptions(fixture windowsTemporaryPackageFixture, outDir, coldPath, warmPath string) WindowsTemporaryPackageOptions {
 	return WindowsTemporaryPackageOptions{
-		PlanPath:                fixture.planPath,
-		OutDir:                  outDir,
-		TranscriptPath:          fixture.transcriptPath,
-		ReleaseVerificationPath: fixture.releaseVerificationPath,
-		AuditPath:               fixture.auditPath,
-		NoPersistenceDir:        fixture.noPersistenceDir,
-		DenialProbesDir:         fixture.denialProbesDir,
-		ColdLayeredRunPath:      coldPath,
-		WarmLayeredRunPath:      warmPath,
-		Now:                     time.Date(2026, 7, 16, 9, 0, 0, 0, time.UTC),
+		PlanPath:                 fixture.planPath,
+		OutDir:                   outDir,
+		TranscriptPath:           fixture.transcriptPath,
+		ReleaseVerificationPath:  fixture.releaseVerificationPath,
+		AuditPath:                fixture.auditPath,
+		NoPersistenceDir:         fixture.noPersistenceDir,
+		DenialProbesDir:          fixture.denialProbesDir,
+		ColdLayeredRunPath:       coldPath,
+		WarmLayeredRunPath:       warmPath,
+		LayeredEntryEvidencePath: fixture.layeredEntryEvidencePath,
+		Now:                      time.Date(2026, 7, 16, 9, 0, 0, 0, time.UTC),
 	}
 }
 

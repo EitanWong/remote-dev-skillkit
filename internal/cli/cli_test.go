@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/ed25519"
@@ -10845,35 +10846,22 @@ func main() {
 
 func TestAcceptanceWindowsTemporaryPlan(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "windows-temporary")
-	script := filepath.Join(t.TempDir(), "windows-temporary.ps1")
-	if err := os.WriteFile(script, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	archivePath := writeLayeredHandoffArchiveForCLITest(t)
 	var stdout bytes.Buffer
 	app := NewApp(&stdout, &bytes.Buffer{})
 	if err := app.Run(context.Background(), []string{
 		"acceptance", "windows-temporary",
 		"--out", out,
-		"--gateway", "https://api.example.com/v1",
-		"--ticket-code", "ABCD-1234",
-		"--download-url", "https://agent.example.com/rdev-host.exe",
-		"--expected-sha256", strings.Repeat("a", 64),
-		"--bootstrap-script", script,
-		"--manifest-url", "https://agent.example.com/j/ABCD-1234/manifest",
-		"--manifest-root-public-key", "manifest-root:abc",
-		"--release-manifest-url", "https://agent.example.com/rdev-host.exe.rdev-release.json",
-		"--release-root-public-key", "release-root:abc",
-		"--verifier-download-url", "https://agent.example.com/rdev-verify.exe",
-		"--verifier-sha256", strings.Repeat("b", 64),
+		"--handoff-archive", archivePath,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	var payload struct {
-		OK       bool   `json:"ok"`
-		Schema   string `json:"schema"`
-		Plan     string `json:"plan"`
-		Launcher string `json:"launcher"`
-		Commands []struct {
+		OK             bool   `json:"ok"`
+		Schema         string `json:"schema"`
+		Plan           string `json:"plan"`
+		HandoffArchive string `json:"handoff_archive"`
+		Commands       []struct {
 			Name  string `json:"name"`
 			Shell string `json:"shell"`
 		} `json:"commands"`
@@ -10891,7 +10879,7 @@ func TestAcceptanceWindowsTemporaryPlan(t *testing.T) {
 	if payload.Schema != "rdev.acceptance.windows-temporary-plan.v1" {
 		t.Fatalf("unexpected schema %q", payload.Schema)
 	}
-	for _, path := range []string{payload.Plan, payload.Launcher} {
+	for _, path := range []string{filepath.Join(out, payload.Plan), filepath.Join(out, payload.HandoffArchive)} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected generated path %s: %v", path, err)
 		}
@@ -10900,40 +10888,28 @@ func TestAcceptanceWindowsTemporaryPlan(t *testing.T) {
 	if !strings.Contains(output, "run_foreground_temporary_host") || !strings.Contains(output, "Get-ScheduledTask") {
 		t.Fatalf("expected foreground and no-persistence commands, got %s", output)
 	}
-	launcher := readFileForTest(t, payload.Launcher)
-	if strings.Contains(launcher, "-ReleaseBundleRequiredArtifacts") {
-		t.Fatalf("manifest-only launcher should not contain bundle args: %s", launcher)
+	if strings.Contains(strings.ToLower(stdout.String()), "rdev-host.exe") || !strings.Contains(stdout.String(), "rdev-bootstrap layered-run") {
+		t.Fatalf("acceptance output must remain bootstrap-only: %s", stdout.String())
 	}
 }
 
 func TestAcceptanceWindowsTemporaryBundlePlan(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "windows-temporary")
-	script := filepath.Join(t.TempDir(), "windows-temporary.ps1")
-	if err := os.WriteFile(script, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	archivePath := writeLayeredHandoffArchiveForCLITest(t)
 	var stdout bytes.Buffer
 	app := NewApp(&stdout, &bytes.Buffer{})
 	if err := app.Run(context.Background(), []string{
 		"acceptance", "windows-temporary",
 		"--out", out,
-		"--gateway", "https://api.example.com/v1",
-		"--ticket-code", "ABCD-1234",
-		"--download-url", "https://agent.example.com/rdev-host.exe",
-		"--expected-sha256", strings.Repeat("a", 64),
-		"--bootstrap-script", script,
-		"--release-bundle-url", "https://agent.example.com/release-bundle.json",
-		"--release-root-public-key", "release-root:abc",
-		"--verifier-download-url", "https://agent.example.com/rdev-verify.exe",
-		"--verifier-sha256", strings.Repeat("b", 64),
+		"--handoff-archive", archivePath,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	var payload struct {
-		OK       bool   `json:"ok"`
-		Schema   string `json:"schema"`
-		Plan     string `json:"plan"`
-		Launcher string `json:"launcher"`
+		OK             bool   `json:"ok"`
+		Schema         string `json:"schema"`
+		Plan           string `json:"plan"`
+		HandoffArchive string `json:"handoff_archive"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
@@ -10944,15 +10920,14 @@ func TestAcceptanceWindowsTemporaryBundlePlan(t *testing.T) {
 	if payload.Schema != "rdev.acceptance.windows-temporary-plan.v1" {
 		t.Fatalf("unexpected schema %q", payload.Schema)
 	}
-	launcher := readFileForTest(t, payload.Launcher)
-	if !strings.Contains(launcher, "-ReleaseBundleUrl 'https://agent.example.com/release-bundle.json'") {
-		t.Fatalf("expected release bundle launcher arg, got %s", launcher)
+	if payload.HandoffArchive != "Windows-ConnectionEntry.zip" {
+		t.Fatalf("unexpected handoff archive %q", payload.HandoffArchive)
 	}
 	var verifyStdout bytes.Buffer
 	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
 	if err := verifyApp.Run(context.Background(), []string{
 		"acceptance", "verify-windows-temporary",
-		"--plan", payload.Plan,
+		"--plan", filepath.Join(out, payload.Plan),
 	}); err != nil {
 		t.Fatalf("expected bundle verification to pass: %v\n%s", err, verifyStdout.String())
 	}
@@ -11204,30 +11179,19 @@ func TestAcceptanceVerifyLinuxManagedServicePlanRejectsTampering(t *testing.T) {
 
 func TestAcceptanceVerifyWindowsTemporaryPlan(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "windows-temporary")
-	script := filepath.Join(t.TempDir(), "windows-temporary.ps1")
-	if err := os.WriteFile(script, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	archivePath := writeLayeredHandoffArchiveForCLITest(t)
 	var stdout bytes.Buffer
 	app := NewApp(&stdout, &bytes.Buffer{})
 	if err := app.Run(context.Background(), []string{
 		"acceptance", "windows-temporary",
 		"--out", out,
-		"--gateway", "https://api.example.com/v1",
-		"--ticket-code", "ABCD-1234",
-		"--download-url", "https://agent.example.com/rdev-host.exe",
-		"--expected-sha256", strings.Repeat("a", 64),
-		"--bootstrap-script", script,
-		"--release-manifest-url", "https://agent.example.com/rdev-host.exe.rdev-release.json",
-		"--release-root-public-key", "release-root:abc",
-		"--verifier-download-url", "https://agent.example.com/rdev-verify.exe",
-		"--verifier-sha256", strings.Repeat("b", 64),
+		"--handoff-archive", archivePath,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	var payload struct {
-		Plan     string `json:"plan"`
-		Launcher string `json:"launcher"`
+		Plan           string `json:"plan"`
+		HandoffArchive string `json:"handoff_archive"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("invalid json: %v\n%s", err, stdout.String())
@@ -11237,7 +11201,7 @@ func TestAcceptanceVerifyWindowsTemporaryPlan(t *testing.T) {
 	verifyApp := NewApp(&verifyStdout, &bytes.Buffer{})
 	if err := verifyApp.Run(context.Background(), []string{
 		"acceptance", "verify-windows-temporary",
-		"--plan", payload.Plan,
+		"--plan", filepath.Join(out, payload.Plan),
 	}); err != nil {
 		t.Fatalf("expected verification to pass: %v\n%s", err, verifyStdout.String())
 	}
@@ -11245,19 +11209,19 @@ func TestAcceptanceVerifyWindowsTemporaryPlan(t *testing.T) {
 		t.Fatalf("expected ok verification, got %s", verifyStdout.String())
 	}
 
-	if err := os.WriteFile(payload.Launcher, []byte("Set-ExecutionPolicy Bypass\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(out, payload.HandoffArchive), []byte("tampered\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var tamperedStdout bytes.Buffer
 	tamperedApp := NewApp(&tamperedStdout, &bytes.Buffer{})
 	err := tamperedApp.Run(context.Background(), []string{
 		"acceptance", "verify-windows-temporary",
-		"--plan", payload.Plan,
+		"--plan", filepath.Join(out, payload.Plan),
 	})
 	if err == nil {
 		t.Fatalf("expected tampered verification to fail: %s", tamperedStdout.String())
 	}
-	if !strings.Contains(tamperedStdout.String(), `"ok": false`) || !strings.Contains(tamperedStdout.String(), "launcher_has_no_forbidden_side_effects") {
+	if !strings.Contains(tamperedStdout.String(), `"ok": false`) || !strings.Contains(tamperedStdout.String(), "handoff_archive") {
 		t.Fatalf("expected structured tampered failure, got %s", tamperedStdout.String())
 	}
 }
@@ -11265,24 +11229,13 @@ func TestAcceptanceVerifyWindowsTemporaryPlan(t *testing.T) {
 func TestAcceptancePackageWindowsTemporary(t *testing.T) {
 	root := t.TempDir()
 	planOut := filepath.Join(root, "windows-temporary")
-	script := filepath.Join(root, "windows-temporary.ps1")
-	if err := os.WriteFile(script, []byte("Write-Host 'bootstrap'\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	archivePath := writeLayeredHandoffArchiveForCLITest(t)
 	var planStdout bytes.Buffer
 	planApp := NewApp(&planStdout, &bytes.Buffer{})
 	if err := planApp.Run(context.Background(), []string{
 		"acceptance", "windows-temporary",
 		"--out", planOut,
-		"--gateway", "https://api.example.com/v1",
-		"--ticket-code", "ABCD-1234",
-		"--download-url", "https://agent.example.com/rdev-host.exe",
-		"--expected-sha256", strings.Repeat("a", 64),
-		"--bootstrap-script", script,
-		"--release-bundle-url", "https://agent.example.com/release-bundle.json",
-		"--release-root-public-key", "release-root:abc",
-		"--verifier-download-url", "https://agent.example.com/rdev-verify.exe",
-		"--verifier-sha256", strings.Repeat("b", 64),
+		"--handoff-archive", archivePath,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -11292,10 +11245,12 @@ func TestAcceptancePackageWindowsTemporary(t *testing.T) {
 	if err := json.Unmarshal(planStdout.Bytes(), &planPayload); err != nil {
 		t.Fatalf("invalid plan json: %v\n%s", err, planStdout.String())
 	}
+	planPayload.Plan = filepath.Join(planOut, planPayload.Plan)
 	fakeGitHubToken := "ghp_" + "abcdefghijklmnopqrstuvwx"
 	transcriptPath, releaseVerificationPath, auditPath, noPersistenceDir, denialProbesDir := writeWindowsPackageEvidenceForCLITest(t, root, `{"ok": true, "token": "`+fakeGitHubToken+`"}`)
 	coldLayeredRunPath := writeLayeredRunReportForCLITest(t, root, "cold-layered-run.json", false)
 	warmLayeredRunPath := writeLayeredRunReportForCLITest(t, root, "warm-layered-run.json", true)
+	layeredEntryEvidencePath := writeLayeredEntryEvidenceForCLITest(t, root, planPayload.Plan)
 	packageArgs := func(out, coldLayeredRun, warmLayeredRun string) []string {
 		args := []string{
 			"acceptance", "package-windows-temporary",
@@ -11306,6 +11261,7 @@ func TestAcceptancePackageWindowsTemporary(t *testing.T) {
 			"--audit", auditPath,
 			"--no-persistence-dir", noPersistenceDir,
 			"--denial-probes-dir", denialProbesDir,
+			"--layered-entry-evidence", layeredEntryEvidencePath,
 		}
 		if coldLayeredRun != "" {
 			args = append(args, "--cold-layered-run", coldLayeredRun)
@@ -11342,7 +11298,10 @@ func TestAcceptancePackageWindowsTemporary(t *testing.T) {
 		if payload.Schema != "rdev.acceptance-package.windows-temporary.v1" {
 			t.Fatalf("unexpected schema %q", payload.Schema)
 		}
-		if _, err := os.Stat(payload.Package); err != nil {
+		if filepath.IsAbs(payload.Package) {
+			t.Fatalf("public package output leaked an absolute path: %q", payload.Package)
+		}
+		if _, err := os.Stat(filepath.Join(out, payload.Package)); err != nil {
 			t.Fatalf("expected package manifest: %v", err)
 		}
 		if payload.RedactionRuleCounts["github_token"] != 1 {
@@ -12139,6 +12098,49 @@ func copyFileForCLITest(t *testing.T, source, dest string) {
 	writeFileForCLITest(t, dest, string(content))
 }
 
+func writeLayeredHandoffArchiveForCLITest(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "Windows-ConnectionEntry.zip")
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := zip.NewWriter(file)
+	files := map[string]string{
+		"Start-ConnectionEntry.ps1":            "& $PSScriptRoot\\rdev-bootstrap.exe layered-run\n",
+		"Start-ConnectionEntry.cmd":            "@echo off\r\n%~dp0rdev-bootstrap.exe layered-run\r\n",
+		"rdev-bootstrap.exe":                   "bootstrap fixture",
+		"rdev-bootstrap.exe.rdev-release.json": "{}",
+		"rdev-bootstrap.exe.sha256":            strings.Repeat("a", 64),
+		"windows-layered-verification.json":    "{}",
+		"ARCHIVE-RECOVERY.txt":                 "rdev-bootstrap.exe layered-run\n",
+	}
+	for _, name := range []string{
+		"Start-ConnectionEntry.ps1",
+		"Start-ConnectionEntry.cmd",
+		"rdev-bootstrap.exe",
+		"rdev-bootstrap.exe.rdev-release.json",
+		"rdev-bootstrap.exe.sha256",
+		"windows-layered-verification.json",
+		"ARCHIVE-RECOVERY.txt",
+	} {
+		entry, err := writer.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write([]byte(files[name])); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func signReleaseArtifactWithCLIForTest(t *testing.T, dir, keyPath, name, content string) string {
 	t.Helper()
 	artifactPath := filepath.Join(dir, name)
@@ -12299,6 +12301,59 @@ func writeLayeredRunReportForCLITest(t *testing.T, root, name string, fromCache 
 	}
 	path := filepath.Join(root, name)
 	if err := os.WriteFile(path, append(content, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func writeLayeredEntryEvidenceForCLITest(t *testing.T, root, planPath string) string {
+	t.Helper()
+	content, err := os.ReadFile(planPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var plan struct {
+		HandoffZIPSizeBytes int64  `json:"handoff_archive_size_bytes"`
+		HandoffZIPSHA256    string `json:"handoff_archive_sha256"`
+	}
+	if err := json.Unmarshal(content, &plan); err != nil {
+		t.Fatal(err)
+	}
+	evidence := map[string]any{
+		"schema_version":            "rdev.acceptance.windows-layered-entry-evidence.v1",
+		"windows_release":           "11",
+		"architecture":              "amd64",
+		"handoff_zip_size_bytes":    plan.HandoffZIPSizeBytes,
+		"handoff_zip_sha256":        plan.HandoffZIPSHA256,
+		"selected_launcher":         "powershell",
+		"fallback_attempts":         []string{"powershell"},
+		"core_start_count":          1,
+		"network_bytes":             4096,
+		"registration_duration_ms":  750,
+		"cache_hit":                 false,
+		"range_interrupted":         true,
+		"range_resumed":             true,
+		"range_bytes":               2048,
+		"private_acl":               true,
+		"unc_rejected":              true,
+		"reparse_rejected":          true,
+		"defender_lock_verified":    true,
+		"active_route_failed":       true,
+		"route_reselected":          true,
+		"registration_count":        1,
+		"session_identity_stable":   true,
+		"event_cursor_stable":       true,
+		"archive_recovery_executed": false,
+		"bootstrap_only":            true,
+		"persistence_residue":       []string{},
+		"cleanup_complete":          true,
+	}
+	evidenceContent, err := json.MarshalIndent(evidence, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "layered-entry-evidence.json")
+	if err := os.WriteFile(path, append(evidenceContent, '\n'), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path

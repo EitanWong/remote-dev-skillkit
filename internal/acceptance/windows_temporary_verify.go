@@ -7,14 +7,17 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/bootstrapcmd"
+	"github.com/EitanWong/remote-dev-skillkit/internal/bootstrapcmd/windowsentry"
 	"github.com/EitanWong/remote-dev-skillkit/internal/shelladapter"
 )
 
 const WindowsTemporaryPlanVerificationSchemaVersion = "rdev.acceptance-verification.windows-temporary-plan.v1"
+const WindowsLayeredEntryEvidenceSchemaVersion = "rdev.acceptance.windows-layered-entry-evidence.v1"
 
 const maxWindowsLayeredRunReportBytes = 64 << 10
 
@@ -37,6 +40,36 @@ type windowsLayeredRunReport struct {
 type windowsLayeredRunReportStage struct {
 	Name       *string `json:"name"`
 	DurationMS *int64  `json:"duration_ms"`
+}
+
+type windowsLayeredEntryEvidence struct {
+	SchemaVersion           string   `json:"schema_version"`
+	WindowsRelease          string   `json:"windows_release"`
+	Architecture            string   `json:"architecture"`
+	HandoffZIPSizeBytes     int64    `json:"handoff_zip_size_bytes"`
+	HandoffZIPSHA256        string   `json:"handoff_zip_sha256"`
+	SelectedLauncher        string   `json:"selected_launcher"`
+	FallbackAttempts        []string `json:"fallback_attempts"`
+	CoreStartCount          int      `json:"core_start_count"`
+	NetworkBytes            int64    `json:"network_bytes"`
+	RegistrationDurationMS  int64    `json:"registration_duration_ms"`
+	CacheHit                bool     `json:"cache_hit"`
+	RangeInterrupted        bool     `json:"range_interrupted"`
+	RangeResumed            bool     `json:"range_resumed"`
+	RangeBytes              int64    `json:"range_bytes"`
+	PrivateACL              bool     `json:"private_acl"`
+	UNCRejected             bool     `json:"unc_rejected"`
+	ReparseRejected         bool     `json:"reparse_rejected"`
+	DefenderLockVerified    bool     `json:"defender_lock_verified"`
+	ActiveRouteFailed       bool     `json:"active_route_failed"`
+	RouteReselected         bool     `json:"route_reselected"`
+	RegistrationCount       int      `json:"registration_count"`
+	SessionIdentityStable   bool     `json:"session_identity_stable"`
+	EventCursorStable       bool     `json:"event_cursor_stable"`
+	ArchiveRecoveryExecuted bool     `json:"archive_recovery_executed"`
+	BootstrapOnly           bool     `json:"bootstrap_only"`
+	PersistenceResidue      []string `json:"persistence_residue"`
+	CleanupComplete         bool     `json:"cleanup_complete"`
 }
 
 type WindowsTemporaryPlanVerification struct {
@@ -72,18 +105,25 @@ func VerifyWindowsTemporaryPlan(planPath string) (WindowsTemporaryPlanVerificati
 	if err != nil {
 		return WindowsTemporaryPlanVerification{}, err
 	}
-	var plan WindowsTemporaryPlan
-	if err := json.Unmarshal(content, &plan); err != nil {
+	plan, err := decodeWindowsTemporaryPlan(content)
+	if err != nil {
 		return WindowsTemporaryPlanVerification{}, err
 	}
 	baseDir := filepath.Dir(abs)
-	launcherPath := resolvePlanPath(baseDir, plan.LauncherPath, "run-windows-temporary.ps1")
-	launcherContent, launcherErr := os.ReadFile(launcherPath)
-	launcherText := string(launcherContent)
+	archivePath := filepath.Join(baseDir, "Windows-ConnectionEntry.zip")
+	archivePathSafe := plan.HandoffArchivePath == "Windows-ConnectionEntry.zip"
+	var archiveSHA256 string
+	var archiveSize int64
+	var archiveErr error
+	if archivePathSafe {
+		_, _, archiveSHA256, archiveSize, archiveErr = inspectWindowsLayeredAcceptanceArchive(archivePath)
+	} else {
+		archiveErr = fmt.Errorf("handoff archive path is not the generated basename")
+	}
 
 	verification := WindowsTemporaryPlanVerification{
 		SchemaVersion: WindowsTemporaryPlanVerificationSchemaVersion,
-		PlanPath:      abs,
+		PlanPath:      filepath.Base(abs),
 		PlanSchema:    plan.SchemaVersion,
 		GeneratedAt:   time.Now().UTC(),
 	}
@@ -93,18 +133,17 @@ func VerifyWindowsTemporaryPlan(planPath string) (WindowsTemporaryPlanVerificati
 
 	add("plan_schema", plan.SchemaVersion == WindowsTemporaryPlanSchemaVersion, plan.SchemaVersion)
 	add("plan_checks_passed", allChecksPassed(plan.Checks), failedCheckNames(plan.Checks))
-	add("platform_windows", plan.Platform == "windows", plan.Platform)
-	add("launcher_exists", launcherErr == nil, launcherPath)
-	add("launcher_private_file_mode", fileModePrivate(launcherPath), launcherPath)
-	add("launcher_matches_plan", launcherErr == nil && launcherMatchesWindowsPlan(launcherText, plan), "")
-	add("launcher_has_no_forbidden_side_effects", launcherErr == nil && !containsForbiddenWindowsLauncherOperation(launcherText), forbiddenWindowsLauncherDetail(launcherText))
-	add("bootstrap_hash_pinned_or_matches", bootstrapHashPinnedOrMatches(plan), plan.BootstrapScriptSHA256)
-	add("host_sha256_valid", isHexSHA256(plan.HostExpectedSHA256), plan.HostExpectedSHA256)
-	add("verifier_sha256_valid", isHexSHA256(plan.VerifierExpectedSHA256), plan.VerifierExpectedSHA256)
-	add("release_manifest_or_bundle_present", plan.ReleaseManifestURL != "" || plan.ReleaseBundleURL != "", firstNonEmptyString(plan.ReleaseBundleURL, plan.ReleaseManifestURL))
-	add("release_bundle_required_artifacts_present", plan.ReleaseBundleURL == "" || plan.ReleaseBundleRequiredArtifacts != "", plan.ReleaseBundleRequiredArtifacts)
-	add("release_root_present", plan.ReleaseRootPublicKey != "", "")
-	add("verifier_download_present", plan.VerifierDownloadURL != "", plan.VerifierDownloadURL)
+	add("platform_windows_amd64", plan.Platform == "windows/amd64", plan.Platform)
+	add("handoff_archive_path_safe", archivePathSafe, plan.HandoffArchivePath)
+	add("handoff_archive_exists", archiveErr == nil, filepath.Base(archivePath))
+	add("handoff_archive_private_file_mode", archiveErr == nil && fileModePrivate(archivePath), filepath.Base(archivePath))
+	add("handoff_archive_sha256_matches", archiveErr == nil && strings.EqualFold(archiveSHA256, plan.HandoffArchiveSHA256), plan.HandoffArchiveSHA256)
+	add("handoff_archive_size_matches", archiveErr == nil && archiveSize == plan.HandoffArchiveSizeBytes && archiveSize <= maxWindowsTemporaryHandoffBytes, fmt.Sprintf("%d", plan.HandoffArchiveSizeBytes))
+	add("powershell_launcher_preferred", plan.PowerShellLauncher == "Start-ConnectionEntry.ps1" && plan.PreferredLauncher == "powershell", plan.PreferredLauncher)
+	add("command_launcher_present", plan.CommandLauncher == "Start-ConnectionEntry.cmd", plan.CommandLauncher)
+	add("fallback_order", slices.Equal(plan.FallbackOrder, []string{"powershell", "powershell-bypass", "cmd"}), strings.Join(plan.FallbackOrder, ","))
+	add("bootstrap_only", plan.BootstrapCommand == "rdev-bootstrap layered-run", plan.BootstrapCommand)
+	add("archive_recovery_not_automatic", !plan.ArchiveRecoveryAutomatic, "")
 	add("foreground_command_present", commandNamed(plan.Commands, "run_foreground_temporary_host"), "")
 	add("transcript_commands_present", commandNamed(plan.Commands, "start_transcript") && commandNamed(plan.Commands, "stop_transcript"), "")
 	add("no_persistence_checks_complete", windowsNoPersistenceChecksComplete(plan.NoPersistenceChecks), missingWindowsNoPersistenceChecks(plan.NoPersistenceChecks))
@@ -114,11 +153,33 @@ func VerifyWindowsTemporaryPlan(planPath string) (WindowsTemporaryPlanVerificati
 	if !verification.OK() {
 		verification.RecommendedActions = []string{
 			"Regenerate the Windows temporary acceptance plan in a fresh output directory.",
-			"Inspect run-windows-temporary.ps1 for unexpected side effects before sending it to a target user.",
+			"Inspect the measured handoff archive and its two visible launchers before sending it to a target user.",
 			"Do not run or publish this Windows acceptance plan until verification passes.",
 		}
 	}
 	return verification, nil
+}
+
+func decodeWindowsTemporaryPlan(content []byte) (WindowsTemporaryPlan, error) {
+	if len(content) == 0 {
+		return WindowsTemporaryPlan{}, fmt.Errorf("Windows temporary plan is empty")
+	}
+	if err := rejectDuplicateJSONKeys(content); err != nil {
+		return WindowsTemporaryPlan{}, fmt.Errorf("invalid Windows temporary plan JSON: %w", err)
+	}
+	if detail := windowsLayeredRunPrivateContentDetail(content); detail != "" {
+		return WindowsTemporaryPlan{}, fmt.Errorf("Windows temporary plan contains %s", detail)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	decoder.DisallowUnknownFields()
+	var plan WindowsTemporaryPlan
+	if err := decoder.Decode(&plan); err != nil {
+		return WindowsTemporaryPlan{}, fmt.Errorf("decode Windows temporary plan: %w", err)
+	}
+	if err := requireJSONEOF(decoder); err != nil {
+		return WindowsTemporaryPlan{}, err
+	}
+	return plan, nil
 }
 
 func validateWindowsLayeredRunReport(content []byte, expectedFromCache bool) error {
@@ -134,7 +195,8 @@ func validateWindowsLayeredRunReport(content []byte, expectedFromCache bool) err
 	if detail := windowsLayeredRunPrivateContentDetail(content); detail != "" {
 		return fmt.Errorf("layered run report contains %s", detail)
 	}
-	if err := validateWindowsLayeredRunFieldNames(content); err != nil {
+	reportSchema, err := validateWindowsLayeredRunFieldNames(content)
+	if err != nil {
 		return err
 	}
 
@@ -147,7 +209,7 @@ func validateWindowsLayeredRunReport(content []byte, expectedFromCache bool) err
 	if err := requireJSONEOF(decoder); err != nil {
 		return err
 	}
-	if report.SchemaVersion == nil || *report.SchemaVersion != bootstrapcmd.LayeredRunReportSchemaVersion {
+	if report.SchemaVersion == nil || *report.SchemaVersion != reportSchema {
 		return fmt.Errorf("unsupported layered run report schema")
 	}
 	if report.AssetID == nil || *report.AssetID != "rdev-host-windows-amd64" {
@@ -167,6 +229,9 @@ func validateWindowsLayeredRunReport(content []byte, expectedFromCache bool) err
 	}
 	if report.Bytes == nil || *report.Bytes <= 0 {
 		return fmt.Errorf("bytes must be positive")
+	}
+	if reportSchema == windowsentry.RunReportSchemaVersion {
+		return nil
 	}
 	if report.Stages == nil {
 		return fmt.Errorf("stages are required")
@@ -193,6 +258,129 @@ func validateWindowsLayeredRunReport(content []byte, expectedFromCache bool) err
 	return nil
 }
 
+func validateWindowsLayeredEntryEvidence(content []byte, plan WindowsTemporaryPlan) error {
+	if len(content) == 0 || len(content) > maxWindowsLayeredRunReportBytes {
+		return fmt.Errorf("layered entry evidence is empty or exceeds %d bytes", maxWindowsLayeredRunReportBytes)
+	}
+	if err := rejectDuplicateJSONKeys(content); err != nil {
+		return fmt.Errorf("invalid layered entry evidence JSON: %w", err)
+	}
+	if detail := windowsLayeredRunPrivateContentDetail(content); detail != "" {
+		return fmt.Errorf("layered entry evidence contains %s", detail)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(content, &fields); err != nil || fields == nil {
+		return fmt.Errorf("layered entry evidence must be a JSON object")
+	}
+	if err := requireExactJSONFields(fields, []string{
+		"schema_version",
+		"windows_release",
+		"architecture",
+		"handoff_zip_size_bytes",
+		"handoff_zip_sha256",
+		"selected_launcher",
+		"fallback_attempts",
+		"core_start_count",
+		"network_bytes",
+		"registration_duration_ms",
+		"cache_hit",
+		"range_interrupted",
+		"range_resumed",
+		"range_bytes",
+		"private_acl",
+		"unc_rejected",
+		"reparse_rejected",
+		"defender_lock_verified",
+		"active_route_failed",
+		"route_reselected",
+		"registration_count",
+		"session_identity_stable",
+		"event_cursor_stable",
+		"archive_recovery_executed",
+		"bootstrap_only",
+		"persistence_residue",
+		"cleanup_complete",
+	}, "layered entry evidence"); err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(content))
+	decoder.DisallowUnknownFields()
+	var evidence windowsLayeredEntryEvidence
+	if err := decoder.Decode(&evidence); err != nil {
+		return fmt.Errorf("decode layered entry evidence: %w", err)
+	}
+	if err := requireJSONEOF(decoder); err != nil {
+		return err
+	}
+	if evidence.SchemaVersion != WindowsLayeredEntryEvidenceSchemaVersion {
+		return fmt.Errorf("unsupported layered entry evidence schema")
+	}
+	if evidence.WindowsRelease != "10" && evidence.WindowsRelease != "11" {
+		return fmt.Errorf("windows_release must be 10 or 11")
+	}
+	if evidence.Architecture != "amd64" {
+		return fmt.Errorf("architecture must be amd64")
+	}
+	if evidence.HandoffZIPSizeBytes <= 0 || evidence.HandoffZIPSizeBytes > maxWindowsTemporaryHandoffBytes ||
+		evidence.HandoffZIPSizeBytes != plan.HandoffArchiveSizeBytes {
+		return fmt.Errorf("handoff ZIP size does not match the measured plan")
+	}
+	if !isHexSHA256(evidence.HandoffZIPSHA256) || !strings.EqualFold(evidence.HandoffZIPSHA256, plan.HandoffArchiveSHA256) {
+		return fmt.Errorf("handoff ZIP SHA-256 does not match the measured plan")
+	}
+	expectedAttempts := map[string][]string{
+		"powershell":        {"powershell"},
+		"powershell-bypass": {"powershell", "powershell-bypass"},
+		"cmd":               {"powershell", "powershell-bypass", "cmd"},
+	}[evidence.SelectedLauncher]
+	if expectedAttempts == nil || !slices.Equal(evidence.FallbackAttempts, expectedAttempts) {
+		return fmt.Errorf("fallback attempts are unordered or do not end at selected_launcher")
+	}
+	if evidence.CoreStartCount != 1 {
+		return fmt.Errorf("core_start_count must be exactly one")
+	}
+	if evidence.NetworkBytes < 0 {
+		return fmt.Errorf("network_bytes must be nonnegative")
+	}
+	if evidence.RegistrationDurationMS < 0 {
+		return fmt.Errorf("registration duration must be nonnegative")
+	}
+	if !evidence.RangeInterrupted || !evidence.RangeResumed || evidence.RangeBytes <= 0 {
+		return fmt.Errorf("Range interruption and resume evidence is required")
+	}
+	if !evidence.PrivateACL {
+		return fmt.Errorf("private ACL evidence is required")
+	}
+	if !evidence.UNCRejected {
+		return fmt.Errorf("UNC rejection evidence is required")
+	}
+	if !evidence.ReparseRejected {
+		return fmt.Errorf("reparse rejection evidence is required")
+	}
+	if !evidence.DefenderLockVerified {
+		return fmt.Errorf("Defender/file-lock evidence is required")
+	}
+	if !evidence.ActiveRouteFailed || !evidence.RouteReselected || !evidence.SessionIdentityStable || !evidence.EventCursorStable {
+		return fmt.Errorf("route reselection continuity evidence is required")
+	}
+	if evidence.RegistrationCount != 1 {
+		return fmt.Errorf("registration_count must be exactly one")
+	}
+	if evidence.ArchiveRecoveryExecuted {
+		return fmt.Errorf("archive recovery must not execute automatically")
+	}
+	if !evidence.BootstrapOnly {
+		return fmt.Errorf("bootstrap_only must be true")
+	}
+	if len(evidence.PersistenceResidue) != 0 {
+		return fmt.Errorf("persistence residue must be empty")
+	}
+	if !evidence.CleanupComplete {
+		return fmt.Errorf("cleanup_complete must be true")
+	}
+	return nil
+}
+
 func decodeValidatedWindowsLayeredRunReport(content []byte, expectedFromCache bool) (windowsLayeredRunReport, error) {
 	if err := validateWindowsLayeredRunReport(content, expectedFromCache); err != nil {
 		return windowsLayeredRunReport{}, err
@@ -204,36 +392,50 @@ func decodeValidatedWindowsLayeredRunReport(content []byte, expectedFromCache bo
 	return report, nil
 }
 
-func validateWindowsLayeredRunFieldNames(content []byte) error {
+func validateWindowsLayeredRunFieldNames(content []byte) (string, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(content, &fields); err != nil || fields == nil {
-		return fmt.Errorf("layered run report must be a JSON object")
+		return "", fmt.Errorf("layered run report must be a JSON object")
 	}
-	if err := requireExactJSONFields(fields, []string{
+	var schema string
+	if err := json.Unmarshal(fields["schema_version"], &schema); err != nil {
+		return "", fmt.Errorf("layered run report schema_version must be a string")
+	}
+	required := []string{
 		"schema_version",
 		"asset_id",
 		"from_cache",
 		"resumed",
 		"bytes",
-		"stages",
-	}, "layered run report"); err != nil {
-		return err
+	}
+	switch schema {
+	case bootstrapcmd.LayeredRunReportSchemaVersion:
+		required = append(required, "stages")
+	case windowsentry.RunReportSchemaVersion:
+	default:
+		return "", fmt.Errorf("unsupported layered run report schema")
+	}
+	if err := requireExactJSONFields(fields, required, "layered run report"); err != nil {
+		return "", err
+	}
+	if schema == windowsentry.RunReportSchemaVersion {
+		return schema, nil
 	}
 
 	var stages []json.RawMessage
 	if err := json.Unmarshal(fields["stages"], &stages); err != nil {
-		return fmt.Errorf("layered run report stages must be an array")
+		return "", fmt.Errorf("layered run report stages must be an array")
 	}
 	for _, content := range stages {
 		var stageFields map[string]json.RawMessage
 		if err := json.Unmarshal(content, &stageFields); err != nil || stageFields == nil {
-			return fmt.Errorf("layered run report stage must be a JSON object")
+			return "", fmt.Errorf("layered run report stage must be a JSON object")
 		}
 		if err := requireExactJSONFields(stageFields, []string{"name", "duration_ms"}, "layered run report stage"); err != nil {
-			return err
+			return "", err
 		}
 	}
-	return nil
+	return schema, nil
 }
 
 func requireExactJSONFields(fields map[string]json.RawMessage, required []string, context string) error {
@@ -398,77 +600,7 @@ func resolvePlanPath(baseDir, path, fallback string) string {
 }
 
 func fileModePrivate(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	return info.Mode().Perm()&0o077 == 0
-}
-
-func launcherMatchesWindowsPlan(launcher string, plan WindowsTemporaryPlan) bool {
-	required := []string{
-		"-GatewayUrl " + powershellQuote(plan.GatewayURL),
-		"-TicketCode " + powershellQuote(plan.TicketCode),
-		"-DownloadUrl " + powershellQuote(plan.HostDownloadURL),
-		"-ExpectedSha256 " + powershellQuote(plan.HostExpectedSHA256),
-		"-ReleaseRootPublicKey " + powershellQuote(plan.ReleaseRootPublicKey),
-		"-VerifierDownloadUrl " + powershellQuote(plan.VerifierDownloadURL),
-		"-VerifierExpectedSha256 " + powershellQuote(plan.VerifierExpectedSHA256),
-	}
-	if plan.ReleaseManifestURL != "" {
-		required = append(required, "-ReleaseManifestUrl "+powershellQuote(plan.ReleaseManifestURL))
-	}
-	if plan.ReleaseBundleURL != "" {
-		required = append(required, "-ReleaseBundleUrl "+powershellQuote(plan.ReleaseBundleURL))
-		if plan.ReleaseBundleRequiredArtifacts != "" {
-			required = append(required, "-ReleaseBundleRequiredArtifacts "+powershellQuote(plan.ReleaseBundleRequiredArtifacts))
-		}
-	}
-	for _, value := range required {
-		if !strings.Contains(launcher, value) {
-			return false
-		}
-	}
-	return strings.Contains(launcher, "& $bootstrap")
-}
-
-func containsForbiddenWindowsLauncherOperation(launcher string) bool {
-	return forbiddenWindowsLauncherDetail(launcher) != ""
-}
-
-func forbiddenWindowsLauncherDetail(launcher string) string {
-	lower := strings.ToLower(launcher)
-	for _, pattern := range []string{
-		"set-executionpolicy",
-		"new-service",
-		"sc.exe create",
-		"register-scheduledtask",
-		"new-itemproperty",
-		"set-itemproperty",
-		"currentversion\\run",
-		"startup\\",
-		"new-netfirewallrule",
-		"netsh advfirewall firewall add",
-		"-verb runas",
-	} {
-		if strings.Contains(lower, pattern) {
-			return pattern
-		}
-	}
-	return ""
-}
-
-func bootstrapHashPinnedOrMatches(plan WindowsTemporaryPlan) bool {
-	if strings.TrimSpace(plan.BootstrapScriptSHA256) == "" {
-		return false
-	}
-	if strings.TrimSpace(plan.BootstrapScriptPath) != "" {
-		hash, err := fileSHA256(plan.BootstrapScriptPath)
-		if err == nil {
-			return strings.EqualFold(hash, plan.BootstrapScriptSHA256)
-		}
-	}
-	return strings.TrimSpace(plan.BootstrapScriptURL) != "" && isHexSHA256(plan.BootstrapScriptSHA256)
+	return windowsentry.ValidatePrivatePath(path, false) == nil
 }
 
 func commandNamed(commands []WindowsAcceptanceCommand, name string) bool {

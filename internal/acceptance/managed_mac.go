@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/bootstrapcmd/windowsentry"
 	"github.com/EitanWong/remote-dev-skillkit/internal/codexadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
@@ -569,11 +570,14 @@ func prepareAcceptanceOut(outDir string) error {
 		if len(entries) > 0 {
 			return fmt.Errorf("out directory must be empty: %s", outDir)
 		}
-		return nil
+		return windowsentry.ProtectPrivatePath(outDir, true)
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	return os.MkdirAll(outDir, 0o700)
+	if err := os.MkdirAll(outDir, 0o700); err != nil {
+		return err
+	}
+	return windowsentry.ProtectPrivatePath(outDir, true)
 }
 
 func writeReport(path string, report ManagedMacReport) error {

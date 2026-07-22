@@ -1468,48 +1468,16 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 	case "windows-temporary":
 		fs := flag.NewFlagSet("acceptance windows-temporary", flag.ContinueOnError)
 		fs.SetOutput(a.Stderr)
-		out := fs.String("out", "", "empty output directory for the Windows temporary acceptance plan")
-		gatewayURL := fs.String("gateway", "", "gateway URL for attended temporary enrollment")
-		ticketCode := fs.String("ticket-code", "", "attended temporary ticket code")
-		downloadURL := fs.String("download-url", "", "rdev-host.exe download URL")
-		expectedSHA256 := fs.String("expected-sha256", "", "expected SHA-256 for rdev-host.exe")
-		bootstrapScript := fs.String("bootstrap-script", "", "local windows-temporary.ps1 path; defaults to scripts/bootstrap/windows-temporary.ps1")
-		bootstrapScriptURL := fs.String("bootstrap-script-url", "", "optional URL for downloading windows-temporary.ps1 on the target host")
-		bootstrapScriptSHA256 := fs.String("bootstrap-script-sha256", "", "expected SHA-256 for windows-temporary.ps1; defaults to local script hash when available")
-		manifestURL := fs.String("manifest-url", "", "signed join manifest URL")
-		manifestRootPublicKey := fs.String("manifest-root-public-key", "", "pinned manifest root public key")
-		releaseManifestURL := fs.String("release-manifest-url", "", "signed rdev-host release manifest URL")
-		releaseBundleURL := fs.String("release-bundle-url", "", "signed release bundle index URL")
-		releaseBundleRequiredArtifacts := fs.String("release-bundle-required-artifacts", "rdev-host.exe,rdev-verify.exe", "comma-separated artifact ids required in the release bundle")
-		releaseRootPublicKey := fs.String("release-root-public-key", "", "pinned release root public key")
-		verifierDownloadURL := fs.String("verifier-download-url", "", "rdev-verify.exe download URL")
-		verifierSHA256 := fs.String("verifier-sha256", "", "expected SHA-256 for rdev-verify.exe")
-		trustPin := fs.String("trust-pin", "", "optional gateway trust pin for development acceptance")
-		hostName := fs.String("host-name", "", "optional host display name override")
-		force := fs.Bool("force", false, "overwrite generated launcher if it already exists")
+		out := fs.String("out", "", "empty output directory for the Windows layered entry acceptance plan")
+		handoffArchive := fs.String("handoff-archive", "", "private Windows-ConnectionEntry.zip produced by connection-entry materialization")
+		force := fs.Bool("force", false, "overwrite copied acceptance inputs if they already exist")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		return a.acceptanceWindowsTemporary(acceptance.WindowsTemporaryOptions{
-			OutDir:                         *out,
-			GatewayURL:                     *gatewayURL,
-			TicketCode:                     *ticketCode,
-			DownloadURL:                    *downloadURL,
-			ExpectedSHA256:                 *expectedSHA256,
-			BootstrapScriptPath:            *bootstrapScript,
-			BootstrapScriptURL:             *bootstrapScriptURL,
-			BootstrapScriptExpectedSHA256:  *bootstrapScriptSHA256,
-			ManifestURL:                    *manifestURL,
-			ManifestRootPublicKey:          *manifestRootPublicKey,
-			ReleaseManifestURL:             *releaseManifestURL,
-			ReleaseBundleURL:               *releaseBundleURL,
-			ReleaseBundleRequiredArtifacts: *releaseBundleRequiredArtifacts,
-			ReleaseRootPublicKey:           *releaseRootPublicKey,
-			VerifierDownloadURL:            *verifierDownloadURL,
-			VerifierExpectedSHA256:         *verifierSHA256,
-			TrustPin:                       *trustPin,
-			HostName:                       *hostName,
-			Force:                          *force,
+			OutDir:             *out,
+			HandoffArchivePath: *handoffArchive,
+			Force:              *force,
 		})
 	case "windows-managed-service":
 		fs := flag.NewFlagSet("acceptance windows-managed-service", flag.ContinueOnError)
@@ -1730,20 +1698,22 @@ func (a App) acceptance(ctx context.Context, args []string) error {
 		notes := fs.String("notes", "", "optional operator notes file")
 		coldLayeredRun := fs.String("cold-layered-run", "", "cold Windows layered bootstrap report with from_cache=false")
 		warmLayeredRun := fs.String("warm-layered-run", "", "warm Windows layered bootstrap report with from_cache=true")
+		layeredEntryEvidence := fs.String("layered-entry-evidence", "", "strict non-sensitive Windows layered entry run evidence JSON")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		return a.acceptancePackageWindowsTemporary(acceptance.WindowsTemporaryPackageOptions{
-			PlanPath:                *plan,
-			OutDir:                  *out,
-			TranscriptPath:          *transcript,
-			ReleaseVerificationPath: *releaseVerification,
-			AuditPath:               *auditPath,
-			NoPersistenceDir:        *noPersistenceDir,
-			DenialProbesDir:         *denialProbesDir,
-			NotesPath:               *notes,
-			ColdLayeredRunPath:      *coldLayeredRun,
-			WarmLayeredRunPath:      *warmLayeredRun,
+			PlanPath:                 *plan,
+			OutDir:                   *out,
+			TranscriptPath:           *transcript,
+			ReleaseVerificationPath:  *releaseVerification,
+			AuditPath:                *auditPath,
+			NoPersistenceDir:         *noPersistenceDir,
+			DenialProbesDir:          *denialProbesDir,
+			NotesPath:                *notes,
+			ColdLayeredRunPath:       *coldLayeredRun,
+			WarmLayeredRunPath:       *warmLayeredRun,
+			LayeredEntryEvidencePath: *layeredEntryEvidence,
 		})
 	case "package-managed-mac-service":
 		fs := flag.NewFlagSet("acceptance package-managed-mac-service", flag.ContinueOnError)
@@ -1992,19 +1962,21 @@ func (a App) acceptanceWindowsTemporary(opts acceptance.WindowsTemporaryOptions)
 		return err
 	}
 	payload := map[string]any{
-		"ok":                    allAcceptanceChecksPassed(plan.Checks),
-		"schema":                plan.SchemaVersion,
-		"out":                   plan.OutDir,
-		"plan":                  filepath.Join(plan.OutDir, "windows-temporary-plan.json"),
-		"launcher":              plan.LauncherPath,
-		"bootstrap_script_hash": plan.BootstrapScriptSHA256,
-		"checks":                plan.Checks,
-		"commands":              plan.Commands,
-		"no_persistence_checks": plan.NoPersistenceChecks,
-		"denial_probes":         plan.DenialProbes,
-		"required_evidence":     plan.RequiredEvidence,
-		"recommended_actions":   plan.RecommendedActions,
-		"note":                  "plan and launcher written only; no PowerShell command was executed by this command",
+		"ok":                         allAcceptanceChecksPassed(plan.Checks),
+		"schema":                     plan.SchemaVersion,
+		"plan":                       "windows-temporary-plan.json",
+		"handoff_archive":            plan.HandoffArchivePath,
+		"handoff_archive_sha256":     plan.HandoffArchiveSHA256,
+		"handoff_archive_size_bytes": plan.HandoffArchiveSizeBytes,
+		"preferred_launcher":         plan.PowerShellLauncher,
+		"fallback_order":             plan.FallbackOrder,
+		"checks":                     plan.Checks,
+		"commands":                   plan.Commands,
+		"no_persistence_checks":      plan.NoPersistenceChecks,
+		"denial_probes":              plan.DenialProbes,
+		"required_evidence":          plan.RequiredEvidence,
+		"recommended_actions":        plan.RecommendedActions,
+		"note":                       "acceptance inputs were copied only; no Windows launcher was executed by this command",
 	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
@@ -12224,7 +12196,7 @@ Usage:
   rdev acceptance fresh-agent-support-session --out fresh-agent-support-session
   rdev acceptance managed-mac --out acceptance-run --repo .
   rdev acceptance managed-mac-service --out service-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --repo . --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev,rdev-host,rdev-verify
-  rdev acceptance windows-temporary --out windows-plan --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --download-url https://agent.example/rdev-host.exe --expected-sha256 <sha256> --release-bundle-url https://agent.example/release-bundle.json --release-root-public-key release-root:... --verifier-download-url https://agent.example/rdev-verify.exe --verifier-sha256 <sha256>
+  rdev acceptance windows-temporary --out windows-plan --handoff-archive ./Windows-ConnectionEntry.zip
   rdev acceptance windows-managed-service --out windows-service-plan --binary 'C:\Program Files\rdev\rdev.exe' --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --release-bundle 'C:\Program Files\rdev\release-bundle.json' --release-root-public-key release-root:... --release-require-artifacts rdev.exe,rdev-host.exe,rdev-verify.exe
   rdev acceptance linux-managed-service --out linux-service-plan --binary /opt/rdev/rdev --gateway https://api.example.com/v1 --ticket-code ABCD-1234 --release-bundle /opt/rdev/release-bundle.json --release-root-public-key release-root:... --release-require-artifacts rdev,rdev-host,rdev-verify
   rdev acceptance verify --report acceptance-run/report.json
@@ -12241,7 +12213,7 @@ Usage:
   rdev acceptance scaffold-post-release-download --post-release-install-dir post-release-install --out post-release-download-evidence-input
   rdev acceptance post-release-evidence-status --scaffold post-release-download-evidence-input
   rdev acceptance package-managed-mac-service --plan service-plan/service-plan.json --out mac-service-evidence --review-transcript review.txt --start-transcript start.txt --inspect-transcript inspect.txt --logs launchagent.log --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --managed-report managed-mac/report.json --stop-transcript stop.txt --uninstall-transcript uninstall.txt
-  rdev acceptance package-windows-temporary --plan windows-plan/windows-temporary-plan.json --out windows-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --denial-probes-dir denial-probes --cold-layered-run cold-layered-run.json --warm-layered-run warm-layered-run.json
+  rdev acceptance package-windows-temporary --plan windows-plan/windows-temporary-plan.json --out windows-evidence --transcript transcript.txt --release-verification rdev-verify.json --audit audit.jsonl --no-persistence-dir no-persistence --denial-probes-dir denial-probes --cold-layered-run cold-layered-run.json --warm-layered-run warm-layered-run.json --layered-entry-evidence layered-entry-evidence.json
   rdev acceptance package-linux-managed-service --plan linux-service-plan/linux-managed-service-plan.json --out linux-evidence --start-transcript start.txt --status-transcript status.txt --logs journal.txt --release-gate release-gate.json --audit audit.jsonl --reconnect reconnect.txt --session-evidence-dir session-evidence --stop-transcript stop.txt --uninstall-transcript uninstall.txt
   rdev acceptance package-relay-adapter --relay-package relay-adapter --out relay-evidence --evidence-dir relay-evidence-input
   rdev acceptance package-hosted-provider-runtime --hosted-provider-package hosted-provider --out hosted-runtime-evidence --evidence-dir hosted-runtime-evidence-input

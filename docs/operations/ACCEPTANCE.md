@@ -436,35 +436,28 @@ host plan:
 ```bash
 rdev acceptance windows-temporary \
   --out .rdev/acceptance/windows-temporary \
-  --gateway https://api.example.com/v1 \
-  --ticket-code ABCD-1234 \
-  --download-url https://agent.example.com/rdev-host.exe \
-  --expected-sha256 <rdev-host-sha256> \
-  --release-bundle-url https://agent.example.com/release-bundle.json \
-  --release-root-public-key release-root:... \
-  --verifier-download-url https://agent.example.com/rdev-verify.exe \
-  --verifier-sha256 <rdev-verify-sha256>
+  --handoff-archive ./Windows-ConnectionEntry.zip
 ```
 
 The command writes `windows-temporary-plan.json` with schema
-`rdev.acceptance.windows-temporary-plan.v1` and `run-windows-temporary.ps1`. It
+`rdev.acceptance.windows-temporary-plan.v1` and a private copy of the measured
+handoff ZIP. It
 validates:
 
-- local or URL bootstrap script availability;
-- bootstrap script SHA-256 availability;
-- gateway URL, ticket code, host download URL, and host SHA-256;
-- signed release manifest or signed release bundle, release root, verifier
-  download URL, verifier SHA-256, and bundle required artifacts when bundle mode
-  is used;
+- the closed ZIP SHA-256, hard size limit of 1,048,576 bytes, and bounded full
+  entry reads (including compressed-entry integrity) before any evidence is written;
+- the exact PowerShell, process-scoped PowerShell retry, and native CMD order;
+- required `rdev-bootstrap`, signed manifest, checksum, verification, and
+  explicit recovery-profile entries;
+- bootstrap-only launcher content with no direct full-helper startup;
 - host-denial probes for package install, elevation, service management, GUI
   control, and credential changes;
 - no-persistence inspection commands for services, scheduled tasks, Run keys,
   startup folders, and firewall rules.
 
-This command does not execute PowerShell. It produces the operator-reviewed plan
-for a real Windows VM or support-host acceptance run. The generated launcher is
-intentionally visible and foreground-only; it does not install a service or
-autorun entry.
+This command does not execute PowerShell. It produces a non-sensitive summary
+plan for a real Windows VM or support-host run; the private ZIP remains outside
+the public evidence package.
 
 Verify the generated plan before sending or running the launcher:
 
@@ -477,14 +470,10 @@ The verifier emits `rdev.acceptance-verification.windows-temporary-plan.v1` JSON
 and exits nonzero if any preflight check fails. It validates:
 
 - plan schema and generated plan checks;
-- launcher existence, private file mode, and parameter agreement with the plan;
-- launcher absence of forbidden persistence or policy-weakening operations such
-  as `Set-ExecutionPolicy`, service creation, scheduled-task registration,
-  Run-key mutation, firewall-rule creation, or elevation through `runas`;
-- local bootstrap script SHA-256 when the script path is available, or a pinned
-  bootstrap SHA-256 when the launcher downloads the script by URL;
-- signed release manifest or signed release bundle, release root, verifier URL,
-  host SHA-256, verifier SHA-256, and bundle required-artifact inputs;
+- private handoff ZIP existence, protected private file ACL, SHA-256, size, bounded
+  full-entry integrity, and required entries;
+- PowerShell-first selection, fallback order, bootstrap-only command, and
+  non-automatic recovery;
 - foreground run command, transcript commands, no-persistence checks,
   host-denial probes, and required evidence checklist.
 
@@ -498,25 +487,30 @@ rdev acceptance package-windows-temporary \
   --release-verification rdev-verify.json \
   --audit audit.jsonl \
   --no-persistence-dir no-persistence \
-  --denial-probes-dir denial-probes
+  --denial-probes-dir denial-probes \
+  --cold-layered-run cold-layered-run.json \
+  --warm-layered-run warm-layered-run.json \
+  --layered-entry-evidence layered-entry-evidence.json
 ```
 
 The package command emits `rdev.acceptance-package.windows-temporary.v1` JSON,
-writes `package.json` and `checksums.txt`, copies the plan and launcher, redacts
+writes `package.json` and `checksums.txt`, copies the non-sensitive plan, redacts
 transcripts and verifier output, and fails closed until all required release
 evidence is present:
 
-- PowerShell transcript from bootstrap and foreground host startup;
+- PowerShell/CMD attempt transcript and exactly one core-start transition;
 - standalone `rdev-verify` output with `"ok": true`;
-- session join, endpoint trust, task, host-denial probe, revoke, and cancellation
+- session registration, route reselection, task, revoke, and cancellation
   audit evidence;
+- cold Range-resume and warm-cache layered run reports;
 - one no-persistence evidence file for services, scheduled tasks, HKCU/HKLM Run
   keys, startup folders, and firewall rules;
 - one host-denial probe evidence file for package install, elevation, service
   management, GUI control, and credential change.
 
-Use the packaged directory as the release-candidate artifact. Do not publish a
-Windows temporary acceptance claim from screenshots or raw transcripts alone.
+The private handoff ZIP is deliberately excluded from this public evidence
+directory. Do not publish a Windows temporary acceptance claim from screenshots
+or raw transcripts alone.
 
 ## Linux Managed Service
 
