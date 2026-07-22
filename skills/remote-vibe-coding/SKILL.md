@@ -63,7 +63,7 @@ are CLI-only and must use their corresponding `rdev ...` command.
   `CLI-only: rdev support-session plan` only when the connect/handoff output, operator,
   or debug workflow explicitly asks for review-level planning.
 - When a fresh Agent session is asked to connect a machine and local `rdev`,
-  gateway state, or target helper assets are unclear, call
+  gateway state, or target bootstrap assets are unclear, call
   `CLI-only: rdev support-session prepare` or run
   `rdev support-session prepare --build-assets` from a checkout. Follow its
   `standard_recovery`, `asset_report`, and `connection_readiness` fields
@@ -125,8 +125,8 @@ are CLI-only and must use their corresponding `rdev ...` command.
   explicitly asks.
 - Read `agent_connection_runbook.fresh_agent_failure_prevention` before writing
   any setup code. It captures known bad fresh-Agent failure patterns such as
-  manual `gateway serve` plus `invite create`, missing helper assets that make
-  Windows say `rdev is required`, background gateway glue, custom interrupt
+  manual `gateway serve` plus `invite create`, missing bootstrap assets or
+  signed layered metadata, background gateway glue, custom interrupt
   polling, and Agent-written PowerShell/shell bootstraps. If you are about to
   write one of those workarounds, stop and use the returned
   `cli_start_now_command`, `ready_file.path`, `status_file.path`,
@@ -217,12 +217,12 @@ are CLI-only and must use their corresponding `rdev ...` command.
   `target_bootstrap_readiness` before sending a platform terminal command from
   an existing gateway. If readiness is false, recover with
   `rdev support-session connect --start` or `rdev support-session prepare --build-assets`
-  instead of asking the target-side human to install `rdev` manually or writing
-  a custom downloader.
+  instead of asking the target-side human to install a runtime manually or
+  writing a custom downloader.
 - Do not manually combine `rdev gateway serve` plus `rdev invite create` for
   ordinary support sessions. That low-level path can omit verified bootstrap
-  helper assets. If a dev gateway must be started by hand, configure
-  `--rdev-assets-dir` or platform-specific helper asset flags first.
+  assets or signed layered metadata. If a dev gateway must be started by hand,
+  configure `--rdev-assets-dir` and the signed layered release inputs first.
 - When `rdev.sessions.status` or `rdev support-session status --wait`
   returns `waiting`, `pending-activation`, `revoked`, or `timed_out=true`, read
   `connection_recovery` and follow its `agent_next_actions`,
@@ -282,7 +282,7 @@ are CLI-only and must use their corresponding `rdev ...` command.
    machine-readable install/connect plan.
 3. If the user wants to connect a target machine, call
    `CLI-only: rdev support-session prepare` or run `rdev support-session prepare` to
-   verify one-command support-session readiness. If helper assets are missing
+   verify one-command support-session readiness. If bootstrap assets are missing
    and a checkout plus Go are available, use `--build-assets`; use the returned
    `gateway_url_candidates` only as diagnostic metadata carried by
    `rdev`-generated handoffs; do not write custom PowerShell, ticket
@@ -322,11 +322,12 @@ are CLI-only and must use their corresponding `rdev ...` command.
    `runner_plan` is available. Dry-run the runner with
    `rdev connection-entry run --runner-manifest ... --dry-run` when network
    reliability is uncertain; it probes direct gateway, proxy, LAN, relay, mesh,
-   VPN, and SSH-assisted paths before starting `rdev host serve`. When the plan
+   VPN, and SSH-assisted paths before invoking `rdev-bootstrap`. When the plan
    includes authorized `RDEV_*_INSTALL_ACTION_JSON` metadata, let the runner
    install and verify user/workspace helper binaries before helper startup. Use
-   the visible script fallback when release package assets or release inputs are
-   missing. Present only the selected
+   only a standard visible bootstrap script that acquires and verifies
+   `rdev-bootstrap`; fail closed when signed layered release inputs are missing.
+   Present only the selected
    `connection_entry.entry_url`, visible launcher, visible script, or signed package to the
    target-side human, and treat `host_command`, ticket, gateway, root, release,
    checksum, relay, mesh, VPN, SSH, and transport values as Agent/package

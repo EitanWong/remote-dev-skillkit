@@ -346,7 +346,7 @@ func BuildConnectFromHandoff(handoff map[string]any) map[string]any {
 	payload["foreground_start_command"] = handoff["foreground_start_command"]
 	payload["prepare_command"] = handoff["prepare_command"]
 	payload["agent_connection_runbook"] = handoff["agent_connection_runbook"]
-	payload["agent_next_step"] = "run cli_start_now_command in a visible terminal; it starts the gateway, builds verified helper assets, prints the target command, writes ready_file.path and status_file.path, and waits for the target; then send only the started payload's target_handoff_envelope.full_text and wait for connected=true"
+	payload["agent_next_step"] = "run cli_start_now_command in a visible terminal; it starts the gateway, builds verified bootstrap assets, prints the target command, writes ready_file.path and status_file.path, and waits for the target; then send only the started payload's target_handoff_envelope.full_text and wait for connected=true"
 	payload["human_surface_rule"] = "do not send this connect payload to the target human; run the returned cli_start_now_command first and then send the started payload's top-level target_handoff_envelope.full_text"
 	return payload
 }
@@ -491,7 +491,7 @@ func BuildStarted(opts StartedOptions) map[string]any {
 	readiness.ReadyToSend = readiness.ReadyToSend && assetsReady
 	blockedReason := readiness.DegradedReason
 	if !assetsReady {
-		blockedReason = "helper assets are not ready; do not send target_handoff_envelope.full_text until rdev support-session connect --start or prepare --build-assets reports asset_report.all_ready=true"
+		blockedReason = "bootstrap assets are not ready; do not send target_handoff_envelope.full_text until rdev support-session connect --start or prepare --build-assets reports asset_report.all_ready=true"
 	}
 	userHandoff := userHandoffWithReadiness(session["user_handoff"], readinessWithReason(readiness, blockedReason))
 	envelope := targetHandoffEnvelopeWithReadiness(session["target_handoff_envelope"], readinessWithReason(readiness, blockedReason))
@@ -668,14 +668,14 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 	gitPath, _ := exec.LookPath("git")
 	rdevPath, _ := exec.LookPath("rdev")
 	currentExecutable, _ := os.Executable()
-	repoValid := pathExists(filepath.Join(repoRoot, "go.mod")) && pathExists(filepath.Join(repoRoot, "cmd", "rdev-host", "main.go"))
+	repoValid := pathExists(filepath.Join(repoRoot, "go.mod")) && pathExists(filepath.Join(repoRoot, "cmd", "rdev-bootstrap", "main.go"))
 	assets := supportSessionAssetSpecs(binDir)
 	missingInputs := []string{}
 	if strings.TrimSpace(goPath) == "" {
-		missingInputs = append(missingInputs, "go binary is required to build missing helper assets from source")
+		missingInputs = append(missingInputs, "go binary is required to build missing bootstrap assets from source")
 	}
 	if !repoValid {
-		missingInputs = append(missingInputs, "valid remote-dev-skillkit checkout with go.mod and cmd/rdev-host/main.go")
+		missingInputs = append(missingInputs, "valid remote-dev-skillkit checkout with go.mod and cmd/rdev-bootstrap/main.go")
 	}
 	assetReports := make([]map[string]any, 0, len(assets))
 	allAssetsReady := true
@@ -690,9 +690,9 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 			"gzip_asset_url":                supportSessionAssetURL(gatewayURL, asset.Name, ".gz"),
 			"sha256_url":                    supportSessionAssetURL(gatewayURL, asset.Name, ".sha256"),
 			"build_status":                  "not-requested",
-			"asset_role":                    "full-helper",
+			"asset_role":                    "bootstrap",
 			"used_by_default_first_connect": true,
-			"native_bootstrap_asset":        false,
+			"native_bootstrap_asset":        true,
 		}
 		if fileExists(asset.Path) {
 			sum, err := fileSHA256Hex(asset.Path)
@@ -814,7 +814,7 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 		"requires_human_decision_first": []string{"company or owner authorization when the target is not clearly operator-owned"},
 	}
 	recoveryActions := []string{
-		"prefer rdev support-session connect --start when no gateway is running; it creates the ticket, prints one target command, prepares helper assets, and watches through support-session status",
+		"prefer rdev support-session connect --start when no gateway is running; it creates the ticket, prints one target command, prepares bootstrap assets, and watches through support-session status",
 		"if local_rdev_usable is false, run go install ./cmd/rdev from a valid checkout or use go run ./cmd/rdev bootstrap agent-plan --repo-root . as a temporary planner",
 		"if target_bootstrap_self_repair is false, rerun rdev support-session prepare --build-assets from a valid checkout before giving commands to targets that may not have rdev installed",
 		"do not write custom PowerShell, relay, activation polling, ticket substitution, or bootstrap glue",
@@ -849,10 +849,10 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 			"first_connect_size_strategy":                   assetDownloadSummary["first_connect_size_strategy"],
 			"default_first_connect_surface":                 assetDownloadSummary["default_first_connect_surface"],
 			"default_runner_download_kind":                  assetDownloadSummary["default_runner_download_kind"],
-			"first_task_requires_full_helper":               assetDownloadSummary["first_task_requires_full_helper"],
+			"first_task_requires_verified_core":             assetDownloadSummary["first_task_requires_verified_core"],
 			"publishes_native_first_connect_asset":          assetDownloadSummary["publishes_native_first_connect_asset"],
-			"default_full_helper_gzip_estimated_max_bytes":  assetDownloadSummary["default_full_helper_gzip_estimated_max_bytes"],
-			"default_full_helper_meets_bootstrap_target":    assetDownloadSummary["default_full_helper_meets_bootstrap_target"],
+			"default_bootstrap_gzip_estimated_max_bytes":    assetDownloadSummary["default_bootstrap_gzip_estimated_max_bytes"],
+			"default_bootstrap_meets_first_connect_target":  assetDownloadSummary["default_bootstrap_meets_first_connect_target"],
 			"native_first_connect_asset":                    assetDownloadSummary["native_first_connect_asset"],
 			"default_first_connect_agent_interpretation":    assetDownloadSummary["default_first_connect_agent_interpretation"],
 			"native_first_connect_asset_publication_policy": assetDownloadSummary["native_first_connect_asset_publication_policy"],
@@ -882,7 +882,13 @@ func Prepare(ctx context.Context, opts PrepareOptions) (map[string]any, error) {
 }
 
 func supportSessionRdevBuildArgs(outputPath string) []string {
-	return []string{"build", "-trimpath", "-ldflags=-s -w", "-o", outputPath, "./cmd/rdev-host"}
+	args := []string{"build", "-trimpath"}
+	if filepath.Base(outputPath) == "rdev-bootstrap-windows-amd64.exe" {
+		args = append(args, "-gcflags=all=-l", "-tags=rdev_bootstrap_focused", "-ldflags=-s -w -buildid= -funcalign=1")
+	} else {
+		args = append(args, "-ldflags=-s -w")
+	}
+	return append(args, "-o", outputPath, "./cmd/rdev-bootstrap")
 }
 
 func connectivityStrategy(gatewayURL, target string, gatewayCandidates []GatewayURLCandidate) map[string]any {
@@ -905,9 +911,9 @@ func connectivityStrategy(gatewayURL, target string, gatewayCandidates []Gateway
 			"operator-provided-hosted-gateway",
 		},
 		"automatic_downgrade": []string{
-			"if WSS is blocked, rdev host serve --transport auto falls back to HTTPS long-poll",
-			"if long-poll is blocked or unstable, rdev host serve --transport auto falls back to short polling",
-			"after registration, rdev host serve --transport auto can switch to another signed join-manifest gateway candidate if the current gateway fails before processing session tasks",
+			"if WSS is blocked, the bootstrap-started core falls back to HTTPS long-poll",
+			"if long-poll is blocked or unstable, the same core falls back to short polling",
+			"after registration, the same core can switch to another signed join-manifest gateway candidate without duplicate registration",
 			"if a direct gateway health check fails, try LAN/private gateway candidates and configured proxy variables before helper paths",
 			"if a configured helper path fails, report manual_action_required instead of guessing credentials or mutating network policy",
 		},
@@ -1124,7 +1130,7 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 		"fallback_entry_tool": map[string]any{
 			"mcp_tool":    "rdev.support_session.prepare",
 			"cli_command": []string{rdevCommand, "support-session", "prepare", "--build-assets"},
-			"rule":        "use only to repair missing local helper assets or inspect gateway candidates before creating a fresh support-session entry",
+			"rule":        "use only to repair missing local bootstrap assets or inspect gateway candidates before creating a fresh support-session entry",
 		},
 		"fresh_agent_failure_prevention": freshAgentFailurePrevention(),
 		"auto_activate": map[string]any{
@@ -1157,7 +1163,7 @@ func agentConnectionRunbook(opts agentConnectionRunbookOptions) map[string]any {
 				"rdev.connection_entry.plan",
 				"rdev connection-entry plan",
 			},
-			"reason": "low-level invite and package materialization surfaces are for reviewed packaging or advanced workflows; fresh Agents should use rdev.sessions.connect so helper assets, auto-activation, foreground feedback, and status watching are generated together",
+			"reason": "low-level invite and package materialization surfaces are for reviewed packaging or advanced workflows; fresh Agents should use rdev.sessions.connect so bootstrap assets, auto-activation, foreground feedback, and status watching are generated together",
 			"allowed_when": []string{
 				"an operator explicitly asks for package materialization",
 				"managed owned-host service planning has been explicitly authorized",
@@ -1316,7 +1322,7 @@ func freshAgentFailurePrevention() map[string]any {
 		"schema_version": FreshAgentFailurePreventionSchemaVersion,
 		"purpose":        "keep fresh Agents on the standardized connect/start/watch/recover path instead of recreating fragile gateway, invite, bootstrap, and authorization glue",
 		"known_failure_pattern": []string{
-			"manual rdev gateway serve plus rdev invite create can omit verified helper assets and produce target bootstraps that fail with rdev is required",
+			"manual rdev gateway serve plus rdev invite create can omit verified bootstrap assets and produce an incomplete signed layered handoff",
 			"background or ad hoc gateway process management can disappear before the target joins and leaves the Agent without a ready/status file",
 			"hand-written Windows PowerShell or shell bootstrap code causes model-dependent behavior and can weaken the security contract",
 			"asking humans to choose ticket, root key, gateway URL, transport, release root, checksum, or platform command creates avoidable multi-turn setup failures",
@@ -1334,7 +1340,7 @@ func freshAgentFailurePrevention() map[string]any {
 		},
 		"standard_recovery": []string{
 			"if rdev is missing, recover from the checkout with go install ./cmd/rdev or go run ./cmd/rdev bootstrap agent-plan --repo-root .",
-			"if helper assets are missing, run rdev support-session connect --start or rdev support-session prepare --build-assets from a valid checkout",
+			"if bootstrap assets are missing, run rdev support-session connect --start or rdev support-session prepare --build-assets from a valid checkout",
 			"if a LAN-only path times out or will not survive network changes, configure a standard hosted/relay/mesh/VPN/SSH gateway candidate and create a fresh Connection Entry",
 			"ask one short question only for authorization, persistence authorization, privileged network changes, paid/cloud resources, credentials, or unclear ownership",
 			"if the target reports a PowerShell variable error on the bootstrap command, they are running from an existing PowerShell session; tell them to use: irm 'URL' -UseBasicParsing | iex (the join page always shows this simpler form)",
@@ -1425,9 +1431,9 @@ func standardRecoveryActions(actions []string) []string {
 		return actions
 	}
 	return []string{
-		"run rdev support-session prepare to inspect local rdev, Go, Git, repository, helper assets, gateway URL, and target command readiness",
+		"run rdev support-session prepare to inspect local rdev, Go, Git, repository, bootstrap assets, gateway URL, and target command readiness",
 		"if rdev is missing, build it from the checkout with go install ./cmd/rdev or go run ./cmd/rdev bootstrap agent-plan --repo-root .",
-		"if helper assets are missing, rerun rdev support-session connect --start from a valid checkout so target bootstraps can download verified helpers",
+		"if bootstrap assets are missing, rerun rdev support-session connect --start from a valid checkout so target launchers can download a verified rdev-bootstrap",
 		"ask one concise question only when authorization, persistence authorization, privileged network changes, or a real gateway/relay credential is required",
 	}
 }
@@ -1685,7 +1691,6 @@ func connectionEntryRunnerRecommendation(opts CreatedOptions, gatewayURL, joinUR
 	if rdevCommand == "" {
 		rdevCommand = "rdev"
 	}
-	targetRdevCommand := "rdev"
 	transport := "auto"
 	invite, err := agentinvite.New(agentinvite.Options{
 		GatewayURL:            gatewayURL,
@@ -1698,7 +1703,6 @@ func connectionEntryRunnerRecommendation(opts CreatedOptions, gatewayURL, joinUR
 		AuthorityProfile:      "standard",
 		Once:                  false,
 		RequireHostActivation: !opts.AutoActivate,
-		RdevCommand:           targetRdevCommand,
 	})
 	targetOS := connectionEntryRunnerTargetOS(target)
 	mcpPlanArguments := map[string]any{
@@ -1724,7 +1728,7 @@ func connectionEntryRunnerRecommendation(opts CreatedOptions, gatewayURL, joinUR
 			"the target is operator-owned and expected to support recurring Agent work",
 			"gateway_candidate_preflight reports only LAN, loopback, or explicit candidates and durable connectivity is required",
 			"connectivity_helper_preflight reports configured SSH, relay, mesh, or VPN helper metadata",
-			"the Agent needs a package that probes direct, proxy, relay, mesh, VPN, or SSH-assisted paths before starting rdev host serve",
+			"the Agent needs a package that probes direct, proxy, relay, mesh, VPN, or SSH-assisted paths before invoking rdev-bootstrap",
 		},
 		"default_human_surface":                 "keep using target_handoff_envelope.full_text for the simplest attended temporary session; user_handoff remains a compatibility fallback; use the runner package when durable or restrictive-network connectivity is needed",
 		"standard_tool":                         "rdev.connection_entry.plan",
@@ -2276,7 +2280,7 @@ func BuildCreated(opts CreatedOptions) map[string]any {
 		"read connection_continuity_policy to decide whether this session survives LAN changes or needs a configured hosted/relay/mesh/VPN/SSH path",
 		"if the gateway was not started by rdev support-session start, verify target_bootstrap_requirements before sending a Windows/macOS/Linux command",
 		"watch connection status with watch_connection_status or rdev.support_session.status",
-		"read rdev_bootstrap_connector before interpreting target_preconnects; preconnect means the target command started before the full helper finished downloading, not that session tasks can run yet",
+		"read rdev_bootstrap_connector before interpreting target_preconnects; bootstrap activity is not a connected core and session tasks wait for connected=true",
 		"when connected=true, proactively report that the connection is established",
 		"do not ask the human to assemble ticket, gateway, manifest root, transport, or helper flags",
 	}
@@ -2376,36 +2380,32 @@ func rdevBootstrapConnectorContract() map[string]any {
 	return map[string]any{
 		"schema_version":                       BootstrapConnectorSchemaVersion,
 		"first_connect_target_bytes":           supportSessionBootstrapTargetBytes,
-		"bootstrap_surface":                    "script-preconnect",
-		"default_first_connect_surface":        "script-preconnect",
-		"publishes_native_first_connect_asset": false,
-		"preconnect_endpoint":                  "/v1/support-session/preconnect",
-		"preconnect_phase_before_full_helper":  "downloading-helper",
-		"source":                               "rdev-bootstrap-preconnect",
+		"bootstrap_surface":                    "signed-native-bootstrap",
+		"default_first_connect_surface":        "signed-native-bootstrap",
+		"publishes_native_first_connect_asset": true,
+		"source":                               "rdev-bootstrap",
 		"native_connector": map[string]any{
 			"schema_version":                      "rdev.bootstrap-native-connector.v1",
 			"source":                              "rdev-bootstrap-native",
-			"availability":                        "optional-if-rdev-bootstrap-is-already-installed-or-published",
-			"published_by_support_session_assets": false,
-			"default_first_connect_surface":       "script-preconnect",
-			"command":                             []string{"rdev-bootstrap", "upgrade"},
-			"capabilities":                        []string{"preconnect to gateway", "download verified full helper", "verify SHA-256", "exec verified full helper"},
+			"availability":                        "published-first-connect-asset",
+			"published_by_support_session_assets": true,
+			"default_first_connect_surface":       "signed-native-bootstrap",
+			"command":                             []string{"rdev-bootstrap", "layered-run"},
+			"capabilities":                        []string{"verify signed layered manifest", "register once", "download verified core", "start one core"},
 			"can_run_session_tasks_before_full_runner":  false,
 			"requires_full_runner_before_session_tasks": true,
-			"standard_no_exec_probe":                    []string{"rdev-bootstrap", "upgrade", "--no-exec", "--gateway-url", "<gateway-url>", "--ticket-code", "<ticket-code>", "--asset", "<asset>", "--out", "<path>"},
-			"asset_budget_rule":                         "do not publish native rdev-bootstrap as the default first-connect asset until its compressed release artifact is proven under first_connect_target_bytes",
-			"agent_rule":                                "use rdev-bootstrap upgrade only when rdev-bootstrap is already installed or explicitly published by the release assets; otherwise use script-preconnect and do not treat rdev-bootstrap itself as a session task runner",
+			"asset_budget_rule":                         "the published bootstrap handoff must stay within first_connect_target_bytes",
+			"agent_rule":                                "use the published rdev-bootstrap layered-run path for every generated connection",
 		},
-		"cdn_download_optimizer":                 cdnDownloadOptimizerContract(),
-		"grants_host_access":                     false,
-		"can_run_session_tasks":                  false,
-		"full_runner_phase":                      "download-verified-rdev-host",
-		"upgrade_required_for":                   []string{"shell tasks", "filesystem tasks", "process tasks", "desktop operations", "coding tasks"},
-		"status_fields":                          []string{"target_preconnects", "target_preconnect_count"},
-		"agent_rule":                             "treat target_preconnects as evidence that the target-side bootstrap command started and reached the gateway, not as a connected executable host; wait for connected=true before submitting session tasks",
-		"operator_explanation":                   "bootstrap preconnect is a low-byte first-contact signal that narrows download/network diagnosis before the full verified helper is available",
-		"must_not_be_used_for_authorization":     true,
-		"must_not_skip_full_helper_verification": true,
+		"cdn_download_optimizer":             cdnDownloadOptimizerContract(),
+		"grants_host_access":                 false,
+		"can_run_session_tasks":              false,
+		"full_runner_phase":                  "download-signed-core-after-registration",
+		"status_fields":                      []string{"connected", "target_preconnects", "target_preconnect_count"},
+		"agent_rule":                         "wait for connected=true before submitting session tasks; bootstrap completion alone is not host authorization",
+		"operator_explanation":               "the small bootstrap verifies signed release metadata and transfers control to one verified core",
+		"must_not_be_used_for_authorization": true,
+		"must_not_skip_core_verification":    true,
 	}
 }
 
@@ -2896,19 +2896,19 @@ func bootstrapRequirements(target string) map[string]any {
 	requirements := map[string]any{
 		"schema_version": "rdev.support-session-target-bootstrap-requirements.v1",
 		"target":         target,
-		"agent_rule":     "support-session connect --start prepares these helper assets automatically; if using an existing gateway, verify the relevant /assets endpoints before sending a platform command",
+		"agent_rule":     "support-session connect --start prepares these bootstrap assets automatically; if using an existing gateway, verify the relevant /assets endpoints before sending a platform command",
 		"standard_fix":   []string{"rdev support-session prepare --build-assets", "rdev support-session connect --start"},
 		"forbidden":      []string{"telling the target user to install rdev manually as the first recovery step", "writing an ad hoc bootstrap downloader", "using ExecutionPolicy Bypass"},
 	}
 	switch target {
 	case "windows":
-		requirements["required_assets"] = []string{"rdev-windows-amd64.exe", "rdev-windows-amd64.exe.sha256"}
-		requirements["verification"] = []string{"GET /assets/rdev-windows-amd64.exe.sha256 must return 200", "GET /assets/rdev-windows-amd64.exe must return 200"}
+		requirements["required_assets"] = []string{"rdev-bootstrap-windows-amd64.exe", "rdev-bootstrap-windows-amd64.exe.sha256"}
+		requirements["verification"] = []string{"GET /assets/rdev-bootstrap-windows-amd64.exe.sha256 must return 200", "GET /assets/rdev-bootstrap-windows-amd64.exe must return 200"}
 	case "macos", "linux":
-		requirements["required_assets"] = []string{"matching rdev-<os>-<arch> helper", "matching .sha256"}
-		requirements["verification"] = []string{"GET /assets/<helper>.sha256 must return 200", "GET /assets/<helper> must return 200"}
+		requirements["required_assets"] = []string{"matching rdev-bootstrap-<os>-<arch>", "matching .sha256"}
+		requirements["verification"] = []string{"GET /assets/<bootstrap>.sha256 must return 200", "GET /assets/<bootstrap> must return 200"}
 	default:
-		requirements["required_assets"] = []string{"matching Windows/macOS/Linux rdev helper", "matching .sha256"}
+		requirements["required_assets"] = []string{"matching Windows/macOS/Linux rdev-bootstrap", "matching .sha256"}
 		requirements["verification"] = []string{"send target_handoff_envelope.full_text verbatim; it includes Windows/macOS/Linux commands plus browser fallback", "verify platform assets before sending a platform-specific terminal command from an existing gateway"}
 	}
 	return requirements
@@ -3007,11 +3007,11 @@ func BuildPlan(ctx context.Context, opts Options) map[string]any {
 		ttl = 7200
 	}
 	rdevPath := filepath.Join(workDir, "bin", exeName("rdev", runtime.GOOS))
-	windowsRdevPath := filepath.Join(workDir, "bin", "rdev-windows-amd64.exe")
-	linuxRdevPath := filepath.Join(workDir, "bin", "rdev-linux-amd64")
-	linuxArmRdevPath := filepath.Join(workDir, "bin", "rdev-linux-arm64")
-	darwinArmRdevPath := filepath.Join(workDir, "bin", "rdev-darwin-arm64")
-	darwinAmdRdevPath := filepath.Join(workDir, "bin", "rdev-darwin-amd64")
+	windowsRdevPath := filepath.Join(workDir, "bin", "rdev-bootstrap-windows-amd64.exe")
+	linuxRdevPath := filepath.Join(workDir, "bin", "rdev-bootstrap-linux-amd64")
+	linuxArmRdevPath := filepath.Join(workDir, "bin", "rdev-bootstrap-linux-arm64")
+	darwinArmRdevPath := filepath.Join(workDir, "bin", "rdev-bootstrap-darwin-arm64")
+	darwinAmdRdevPath := filepath.Join(workDir, "bin", "rdev-bootstrap-darwin-amd64")
 	createInviteCommand := []string{
 		rdevPath, "invite", "create",
 		"--gateway", gatewayURL,
@@ -3054,11 +3054,11 @@ func BuildPlan(ctx context.Context, opts Options) map[string]any {
 		"commands": map[string]any{
 			"prepare_dirs":           []string{"mkdir", "-p", filepath.Join(workDir, "bin"), filepath.Join(workDir, ".rdev", "keys"), filepath.Join(workDir, ".rdev", "gateway"), filepath.Join(workDir, ".rdev", "audit")},
 			"build_local_rdev":       []string{"go", "build", "-o", rdevPath, "./cmd/rdev"},
-			"build_windows_rdev":     []string{"env", "GOOS=windows", "GOARCH=amd64", "CGO_ENABLED=0", "go", "build", "-o", windowsRdevPath, "./cmd/rdev"},
-			"build_linux_rdev":       []string{"env", "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0", "go", "build", "-o", linuxRdevPath, "./cmd/rdev"},
-			"build_linux_arm64_rdev": []string{"env", "GOOS=linux", "GOARCH=arm64", "CGO_ENABLED=0", "go", "build", "-o", linuxArmRdevPath, "./cmd/rdev"},
-			"build_macos_arm64_rdev": []string{"env", "GOOS=darwin", "GOARCH=arm64", "CGO_ENABLED=0", "go", "build", "-o", darwinArmRdevPath, "./cmd/rdev"},
-			"build_macos_amd64_rdev": []string{"env", "GOOS=darwin", "GOARCH=amd64", "CGO_ENABLED=0", "go", "build", "-o", darwinAmdRdevPath, "./cmd/rdev"},
+			"build_windows_rdev":     []string{"env", "GOOS=windows", "GOARCH=amd64", "CGO_ENABLED=0", "go", "build", "-o", windowsRdevPath, "./cmd/rdev-bootstrap"},
+			"build_linux_rdev":       []string{"env", "GOOS=linux", "GOARCH=amd64", "CGO_ENABLED=0", "go", "build", "-o", linuxRdevPath, "./cmd/rdev-bootstrap"},
+			"build_linux_arm64_rdev": []string{"env", "GOOS=linux", "GOARCH=arm64", "CGO_ENABLED=0", "go", "build", "-o", linuxArmRdevPath, "./cmd/rdev-bootstrap"},
+			"build_macos_arm64_rdev": []string{"env", "GOOS=darwin", "GOARCH=arm64", "CGO_ENABLED=0", "go", "build", "-o", darwinArmRdevPath, "./cmd/rdev-bootstrap"},
+			"build_macos_amd64_rdev": []string{"env", "GOOS=darwin", "GOARCH=amd64", "CGO_ENABLED=0", "go", "build", "-o", darwinAmdRdevPath, "./cmd/rdev-bootstrap"},
 			"start_gateway": []string{
 				rdevPath, "gateway", "serve", "--dev",
 				"--addr", addr,
@@ -3066,11 +3066,11 @@ func BuildPlan(ctx context.Context, opts Options) map[string]any {
 				"--state", filepath.Join(workDir, ".rdev", "gateway", "state.json"),
 				"--signing-key", filepath.Join(workDir, ".rdev", "keys", "gateway-signing-key.json"),
 				"--manifest-signing-key", filepath.Join(workDir, ".rdev", "keys", "manifest-root-key.json"),
-				"--rdev-windows-amd64", windowsRdevPath,
-				"--rdev-linux-amd64", linuxRdevPath,
-				"--rdev-linux-arm64", linuxArmRdevPath,
-				"--rdev-darwin-arm64", darwinArmRdevPath,
-				"--rdev-darwin-amd64", darwinAmdRdevPath,
+				"--rdev-bootstrap-windows-amd64", windowsRdevPath,
+				"--rdev-bootstrap-linux-amd64", linuxRdevPath,
+				"--rdev-bootstrap-linux-arm64", linuxArmRdevPath,
+				"--rdev-bootstrap-darwin-arm64", darwinArmRdevPath,
+				"--rdev-bootstrap-darwin-amd64", darwinAmdRdevPath,
 			},
 			"create_invite_http": []string{
 				"curl", "-fsS", "-X", "POST", gatewayURL + "/v1/tickets",
@@ -3403,11 +3403,11 @@ func targetPreconnectStatus(phase string) string {
 func targetPreconnectAgentInterpretation(status string) string {
 	switch status {
 	case "target-downloading":
-		return "The target command reached the gateway and is downloading the helper; this is not disconnected or user inaction."
+		return "The target command reached the gateway and is downloading the verified core runtime through rdev-bootstrap; this is not disconnected or user inaction."
 	case "target-verifying":
-		return "The target command reached the gateway and is verifying a downloaded helper; this is not disconnected or user inaction."
+		return "The target command reached the gateway and is verifying the downloaded core runtime; this is not disconnected or user inaction."
 	case "target-starting":
-		return "The target command reached the gateway and is starting or registering the helper; this is not disconnected or user inaction."
+		return "The target command reached the gateway and is starting or registering the verified core runtime; this is not disconnected or user inaction."
 	default:
 		return "The target command reached the gateway before host registration; this is not disconnected or user inaction."
 	}
@@ -3556,22 +3556,22 @@ func BuildConnectionRecovery(opts ConnectionRecoveryOptions) map[string]any {
 		}
 	case "target-downloading":
 		agentActions = []string{
-			"treat this as target-side helper download progress or a stalled weak-network transfer, not as user inaction",
+			"treat this as target-side verified core download progress or a stalled weak-network transfer, not as user inaction",
 			"inspect target_preconnect_summary phase, last_seen_at, asset, source, and seen_count before asking the target-side human for output",
 			"prefer standard asset mirror, retry/backoff, or rdev-bootstrap follow-up paths instead of writing ad hoc download scripts",
 		}
 		humanChecks = []string{
-			"keep the visible target-side command running while the helper download continues",
+			"keep the visible target-side command running while the verified core download continues",
 			"copy the visible download error only if the standard command reports a failure",
 		}
 	case "target-verifying":
 		agentActions = []string{
-			"treat this as target-side helper verification progress, not as user inaction",
+			"treat this as target-side core verification progress, not as user inaction",
 			"inspect target_preconnect_summary and asset checksum evidence before asking the target-side human to retry",
 			"prefer standard asset/checksum recovery instead of writing ad hoc verification scripts",
 		}
 		humanChecks = []string{
-			"keep the visible target-side command running while helper verification continues",
+			"keep the visible target-side command running while core verification continues",
 			"copy the visible checksum or verification error only if the standard command reports a failure",
 		}
 	case "target-starting", "target-preconnect":
@@ -3697,9 +3697,9 @@ func localizedTimedOutStatusNextAction(status, locale string) string {
 	default:
 		switch status {
 		case "target-downloading":
-			return "The helper download is still in progress or stalled on a weak network; keep waiting, inspect target_preconnect_summary timestamps, asset, and mirror strategy, and do not treat this as the target command not running."
+			return "The verified core download is still in progress or stalled on a weak network; keep waiting, inspect target_preconnect_summary timestamps, asset, and mirror strategy, and do not treat this as the target command not running."
 		case "target-verifying":
-			return "Helper verification is still in progress or stalled; inspect target_preconnect_summary, checksums, and asset mirrors instead of asking the user to reassemble commands."
+			return "Core verification is still in progress or stalled; inspect target_preconnect_summary, checksums, and asset mirrors instead of asking the user to reassemble commands."
 		case "target-starting", "target-preconnect":
 			return "The target bootstrap reached the gateway but has not completed registration; keep waiting and inspect target_preconnect_summary instead of writing ad hoc polling scripts."
 		}
@@ -3753,11 +3753,11 @@ func localizedStatusFeedback(status, locale string) string {
 		case "pending-activation":
 			return "目标主机已经出现，正在等待审批或自动批准完成。"
 		case "target-downloading":
-			return "目标端命令已经触达网关，正在下载 rdev helper；这通常是弱网或大包体导致的等待。"
+			return "目标端命令已经触达网关，rdev-bootstrap 正在下载已签名 core runtime；这通常是弱网导致的等待。"
 		case "target-verifying":
-			return "目标端命令已经触达网关，正在校验下载的 rdev helper。"
+			return "目标端命令已经触达网关，正在校验下载的 core runtime。"
 		case "target-starting":
-			return "目标端命令已经触达网关，正在启动或注册 rdev helper。"
+			return "目标端命令已经触达网关，正在启动或注册已验证的 core runtime。"
 		case "target-preconnect":
 			return "目标端命令已经触达网关，但还没有完成主机注册。"
 		case "revoked":
@@ -3772,11 +3772,11 @@ func localizedStatusFeedback(status, locale string) string {
 		case "pending-activation":
 			return "The target host has appeared and is waiting for standard auto-activation to complete."
 		case "target-downloading":
-			return "The target command reached the gateway and is downloading the rdev helper; this is usually weak-network or large-asset wait time."
+			return "The target command reached the gateway and rdev-bootstrap is downloading the verified core runtime; this is usually weak-network wait time."
 		case "target-verifying":
-			return "The target command reached the gateway and is verifying the downloaded rdev helper."
+			return "The target command reached the gateway and is verifying the downloaded core runtime."
 		case "target-starting":
-			return "The target command reached the gateway and is starting or registering the rdev helper."
+			return "The target command reached the gateway and is starting or registering the verified core runtime."
 		case "target-preconnect":
 			return "The target command reached the gateway but has not completed host registration yet."
 		case "revoked":
@@ -3798,7 +3798,7 @@ func localizedStatusNextAction(status, locale string) string {
 		case "target-downloading":
 			return "继续等待下载完成；不要误判为目标端未执行。必要时检查 target_preconnect_summary 和网络/镜像策略。"
 		case "target-verifying":
-			return "继续等待校验完成；如果长时间停留，检查 helper 校验和与资产镜像。"
+			return "继续等待校验完成；如果长时间停留，检查 core 校验和与资产镜像。"
 		case "target-starting":
 			return "继续等待主机注册完成；如果长时间停留，检查目标端可见窗口输出。"
 		case "target-preconnect":
@@ -3817,7 +3817,7 @@ func localizedStatusNextAction(status, locale string) string {
 		case "target-downloading":
 			return "Keep waiting for the download to finish; do not misdiagnose this as the target command not running. Inspect target_preconnect_summary and network or mirror strategy if it stalls."
 		case "target-verifying":
-			return "Keep waiting for helper verification; if it stalls, inspect checksums and asset mirrors."
+			return "Keep waiting for core verification; if it stalls, inspect checksums and asset mirrors."
 		case "target-starting":
 			return "Keep waiting for host registration; if it stalls, inspect the visible target-side output."
 		case "target-preconnect":
@@ -3864,11 +3864,12 @@ type supportSessionAssetSpec struct {
 
 func supportSessionAssetSpecs(binDir string) []supportSessionAssetSpec {
 	return []supportSessionAssetSpec{
-		{ID: "windows-amd64", Name: "rdev-windows-amd64.exe", GOOS: "windows", GOARCH: "amd64", Path: filepath.Join(binDir, "rdev-windows-amd64.exe")},
-		{ID: "darwin-arm64", Name: "rdev-darwin-arm64", GOOS: "darwin", GOARCH: "arm64", Path: filepath.Join(binDir, "rdev-darwin-arm64")},
-		{ID: "darwin-amd64", Name: "rdev-darwin-amd64", GOOS: "darwin", GOARCH: "amd64", Path: filepath.Join(binDir, "rdev-darwin-amd64")},
-		{ID: "linux-amd64", Name: "rdev-linux-amd64", GOOS: "linux", GOARCH: "amd64", Path: filepath.Join(binDir, "rdev-linux-amd64")},
-		{ID: "linux-arm64", Name: "rdev-linux-arm64", GOOS: "linux", GOARCH: "arm64", Path: filepath.Join(binDir, "rdev-linux-arm64")},
+		{ID: "windows-amd64", Name: "rdev-bootstrap-windows-amd64.exe", GOOS: "windows", GOARCH: "amd64", Path: filepath.Join(binDir, "rdev-bootstrap-windows-amd64.exe")},
+		{ID: "windows-arm64", Name: "rdev-bootstrap-windows-arm64.exe", GOOS: "windows", GOARCH: "arm64", Path: filepath.Join(binDir, "rdev-bootstrap-windows-arm64.exe")},
+		{ID: "darwin-arm64", Name: "rdev-bootstrap-darwin-arm64", GOOS: "darwin", GOARCH: "arm64", Path: filepath.Join(binDir, "rdev-bootstrap-darwin-arm64")},
+		{ID: "darwin-amd64", Name: "rdev-bootstrap-darwin-amd64", GOOS: "darwin", GOARCH: "amd64", Path: filepath.Join(binDir, "rdev-bootstrap-darwin-amd64")},
+		{ID: "linux-amd64", Name: "rdev-bootstrap-linux-amd64", GOOS: "linux", GOARCH: "amd64", Path: filepath.Join(binDir, "rdev-bootstrap-linux-amd64")},
+		{ID: "linux-arm64", Name: "rdev-bootstrap-linux-arm64", GOOS: "linux", GOARCH: "arm64", Path: filepath.Join(binDir, "rdev-bootstrap-linux-arm64")},
 	}
 }
 
@@ -3920,31 +3921,32 @@ func supportSessionAssetDownloadSummary(assetReports []map[string]any) map[strin
 			}
 		}
 	}
+	bootstrapTargetMet := hasGzipEvidence && maxGzipBytes <= supportSessionBootstrapTargetBytes
 	return map[string]any{
 		"all_gzip_within_budget":                        allGzipWithinBudget,
 		"bootstrap_connector_recommended":               bootstrapConnectorRecommended,
-		"first_connect_size_strategy":                   "serve gzip-compressed full helper assets now; use rdev-bootstrap as the next connector architecture when compressed helpers exceed the 1 MB first-connect target",
-		"default_first_connect_surface":                 "script-preconnect",
-		"default_runner_download_kind":                  "gzip-full-helper",
-		"first_task_requires_full_helper":               true,
-		"publishes_native_first_connect_asset":          false,
-		"default_full_helper_gzip_estimated_max_bytes":  maxGzipBytes,
-		"default_full_helper_meets_bootstrap_target":    hasGzipEvidence && maxGzipBytes <= supportSessionBootstrapTargetBytes,
-		"native_first_connect_asset":                    nativeFirstConnectAssetReport(),
-		"default_first_connect_agent_interpretation":    "the generated bootstrap script reaches preconnect first, then downloads a gzip-compressed full helper before any session tasks can run",
-		"native_first_connect_asset_publication_policy": "publish rdev-bootstrap as a default first-connect asset only after its compressed release artifact is measured under first_connect_target_bytes",
+		"first_connect_size_strategy":                   "publish the platform rdev-bootstrap and enforce the 1 MiB first-connect gate",
+		"default_first_connect_surface":                 "signed-native-bootstrap",
+		"default_runner_download_kind":                  "signed-layered-core",
+		"first_task_requires_verified_core":             true,
+		"publishes_native_first_connect_asset":          bootstrapTargetMet,
+		"default_bootstrap_gzip_estimated_max_bytes":    maxGzipBytes,
+		"default_bootstrap_meets_first_connect_target":  bootstrapTargetMet,
+		"native_first_connect_asset":                    nativeFirstConnectAssetReport(bootstrapTargetMet),
+		"default_first_connect_agent_interpretation":    "the generated entry verifies rdev-bootstrap, then rdev-bootstrap verifies and starts one signed core",
+		"native_first_connect_asset_publication_policy": "publish rdev-bootstrap only when its final compressed handoff meets first_connect_target_bytes",
 	}
 }
 
-func nativeFirstConnectAssetReport() map[string]any {
+func nativeFirstConnectAssetReport(targetMet bool) map[string]any {
 	return map[string]any{
 		"schema_version": "rdev.support-session-native-first-connect-asset.v1",
 		"name":           "rdev-bootstrap",
-		"published":      false,
-		"measured":       false,
+		"published":      targetMet,
+		"measured":       true,
 		"target_bytes":   supportSessionBootstrapTargetBytes,
-		"target_met":     false,
-		"reason":         "rdev-bootstrap is not published by support-session assets, so the default first-connect path must be treated as script preconnect plus full-helper download",
+		"target_met":     targetMet,
+		"reason":         "support-session publishes rdev-bootstrap only when the measured first-connect gate passes",
 	}
 }
 
@@ -3955,7 +3957,7 @@ func recommendedSupportSessionNextStep(localRdevUsable, allAssetsReady bool) str
 	case allAssetsReady:
 		return "use the current rdev executable or checkout command to run support-session connect --start; target-side self-repair assets are ready"
 	default:
-		return "prepare helper assets from a valid checkout before relying on one-command targets without preinstalled rdev"
+		return "prepare bootstrap assets from a valid checkout before relying on one-command targets"
 	}
 }
 

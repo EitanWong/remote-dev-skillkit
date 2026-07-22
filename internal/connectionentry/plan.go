@@ -3,6 +3,7 @@ package connectionentry
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -22,33 +23,31 @@ const (
 	EntryPackagePlanSchemaVersion    = "rdev.connection-entry.package-plan.v1"
 )
 
+var connectionEntryMaterializationFailureHook func(phase string) error
+
 type Options struct {
-	InviteJSON                     string
-	InvitePath                     string
-	OutDir                         string
-	TargetOS                       string
-	Ownership                      string
-	SessionMode                    string
-	ReleaseBundleURL               string
-	ReleaseBundleRequiredArtifacts string
-	ReleaseBundlePath              string
-	ReleaseRootPublicKey           string
-	ManagedBinaryPath              string
-	ManagedServiceName             string
-	ManagedServiceLabel            string
-	ManagedUnitName                string
-	WindowsHostDownloadURL         string
-	WindowsHostExpectedSHA256      string
-	WindowsVerifierDownloadURL     string
-	WindowsVerifierExpectedSHA256  string
-	WindowsBootstrapScriptURL      string
-	WindowsBootstrapScriptSHA256   string
-	WindowsBootstrapScriptPath     string
-	HostName                       string
-	TargetArch                     string
-	RdevCommand                    string
-	Force                          bool
-	Now                            time.Time
+	InviteJSON                          string
+	InvitePath                          string
+	OutDir                              string
+	TargetOS                            string
+	Ownership                           string
+	SessionMode                         string
+	ReleaseBundleRequiredArtifacts      string
+	ReleaseBundlePath                   string
+	ReleaseRootPublicKey                string
+	ManagedBinaryPath                   string
+	ManagedServiceName                  string
+	ManagedServiceLabel                 string
+	ManagedUnitName                     string
+	WindowsBootstrapBinaryPath          string
+	WindowsBootstrapReleaseManifestPath string
+	LayeredAssetsManifestURL            string
+	LayeredReleaseVersion               string
+	HostName                            string
+	TargetArch                          string
+	BootstrapCommand                    string
+	Force                               bool
+	Now                                 time.Time
 }
 
 type Plan struct {
@@ -100,6 +99,9 @@ type EntryPackagePlan struct {
 	OK                  bool               `json:"ok"`
 	PlanPath            string             `json:"plan_path"`
 	LauncherPath        string             `json:"launcher_path,omitempty"`
+	ArchivePath         string             `json:"archive_path,omitempty"`
+	ArchiveSHA256       string             `json:"archive_sha256,omitempty"`
+	ArchiveSizeBytes    int64              `json:"archive_size_bytes,omitempty"`
 	PlatformPlanSchema  string             `json:"platform_plan_schema,omitempty"`
 	PlatformPlanKind    string             `json:"platform_plan_kind,omitempty"`
 	HumanEntryPoint     string             `json:"human_entry_point,omitempty"`
@@ -122,7 +124,17 @@ type RunnerPlan struct {
 	Checks          []acceptance.Check                `json:"checks"`
 }
 
-func FromInvite(opts Options) (Plan, error) {
+func FromInvite(opts Options) (_ Plan, resultErr error) {
+	var pendingArchive *pendingWindowsLayeredArchive
+	defer func() {
+		if pendingArchive == nil {
+			return
+		}
+		if err := pendingArchive.discard(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("discard pending Windows layered archive: %w", err))
+		}
+	}()
+
 	invite, err := readInvite(opts)
 	if err != nil {
 		return Plan{}, err
@@ -144,6 +156,7 @@ func FromInvite(opts Options) (Plan, error) {
 		return Plan{}, err
 	}
 	outDir := strings.TrimSpace(opts.OutDir)
+	materializationDir := ""
 	if outDir != "" {
 		abs, err := filepath.Abs(outDir)
 		if err != nil {
@@ -153,6 +166,11 @@ func FromInvite(opts Options) (Plan, error) {
 		if err := prepareOutDir(outDir); err != nil {
 			return Plan{}, err
 		}
+		materializationDir, err = createMaterializationStagingDir(outDir)
+		if err != nil {
+			return Plan{}, err
+		}
+		defer os.RemoveAll(materializationDir)
 	}
 	entryCommand := commandForOS(invite.ConnectionEntry.OneLineCommands, targetOS)
 	plan := Plan{
@@ -179,15 +197,46 @@ func FromInvite(opts Options) (Plan, error) {
 		RunnerManifestSchema:   connectionrunner.ManifestSchemaVersion,
 	}
 	plan.Checks = buildChecks(invite, plan, entryCommand)
-	addRunnerPlan(&plan, invite, opts, outDir)
+	layeredHandoff, err := prepareWindowsLayeredHandoff(plan, invite, opts, materializationDir)
+	if err != nil {
+		return Plan{}, err
+	}
+	addRunnerPlan(&plan, invite, opts, materializationDir)
 	if targetOS == "windows" && sessionMode == string(model.HostModeAttendedTemporary) {
-		addWindowsEntryPackagePlan(&plan, invite, opts, outDir)
+		if layeredHandoff == nil {
+			plan.MissingInputs = append(plan.MissingInputs, windowsLayeredMissingInputs(opts)...)
+			plan.Checks = append(plan.Checks, Check{Name: "windows_layered_handoff", Passed: false, Detail: "missing_inputs"})
+		} else {
+			pendingArchive, err = materializeWindowsLayeredHandoff(&plan, layeredHandoff, materializationDir)
+			if err != nil {
+				return Plan{}, err
+			}
+		}
 	}
 	if sessionMode == string(model.HostModeManaged) {
-		addManagedEntryPackagePlan(&plan, invite, opts, outDir)
+		addManagedEntryPackagePlan(&plan, invite, opts, materializationDir)
 	}
 	if outDir != "" {
-		if err := writeMaterializedFiles(&plan); err != nil {
+		if err := rewriteMaterializedPaths(&plan, materializationDir, outDir); err != nil {
+			return Plan{}, err
+		}
+		if err := writeMaterializedFiles(&plan, materializationDir); err != nil {
+			return Plan{}, err
+		}
+		var finalize func() error
+		if pendingArchive != nil {
+			finalize = func() error {
+				if err := runConnectionEntryMaterializationFailureHook("before_windows_layered_archive_publish"); err != nil {
+					return pendingArchive.publicationFailure(fmt.Errorf("before Windows layered archive publication: %w", err))
+				}
+				if _, err := pendingArchive.publish(filepath.Join(outDir, windowsLayeredArchiveName)); err != nil {
+					return err
+				}
+				pendingArchive = nil
+				return nil
+			}
+		}
+		if err := publishMaterializedFiles(materializationDir, outDir, finalize); err != nil {
 			return Plan{}, err
 		}
 	}
@@ -352,11 +401,13 @@ func agentSteps(invite agentinvite.Invite, sessionMode string) []string {
 }
 
 func buildChecks(invite agentinvite.Invite, plan Plan, entryCommand string) []Check {
+	entryURLValid := validURL(invite.ConnectionEntry.EntryURL)
+	manifestURLValid := validURL(invite.ManifestURL)
 	checks := []Check{
-		{Name: "entry_url", Passed: validURL(invite.ConnectionEntry.EntryURL), Detail: invite.ConnectionEntry.EntryURL},
-		{Name: "manifest_url", Passed: validURL(invite.ManifestURL), Detail: invite.ManifestURL},
-		{Name: "manifest_root_public_key", Passed: strings.TrimSpace(invite.ManifestRootPublicKey) != "", Detail: invite.ManifestRootPublicKey},
-		{Name: "ticket_code", Passed: strings.TrimSpace(invite.Ticket.Code) != "", Detail: invite.Ticket.Code},
+		{Name: "entry_url", Passed: entryURLValid, Detail: validationStatusDetail(invite.ConnectionEntry.EntryURL, entryURLValid)},
+		{Name: "manifest_url", Passed: manifestURLValid, Detail: validationStatusDetail(invite.ManifestURL, manifestURLValid)},
+		{Name: "manifest_root_public_key", Passed: strings.TrimSpace(invite.ManifestRootPublicKey) != "", Detail: presenceStatusDetail(invite.ManifestRootPublicKey)},
+		{Name: "ticket_code", Passed: strings.TrimSpace(invite.Ticket.Code) != "", Detail: presenceStatusDetail(invite.Ticket.Code)},
 		{Name: "session_mode_selected", Passed: plan.SessionMode != "", Detail: plan.SessionMode},
 		{Name: "entry_command_available", Passed: entryCommand != "", Detail: plan.TargetOS},
 		{Name: "human_steps_no_raw_flag_assembly", Passed: true, Detail: "connection entry carries ticket/root/gateway/transport metadata for the Agent and package; humans receive a link, script, or package"},
@@ -367,6 +418,23 @@ func buildChecks(invite agentinvite.Invite, plan Plan, entryCommand string) []Ch
 	return checks
 }
 
+func validationStatusDetail(value string, valid bool) string {
+	if strings.TrimSpace(value) == "" {
+		return "missing"
+	}
+	if valid {
+		return "valid"
+	}
+	return "invalid"
+}
+
+func presenceStatusDetail(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "missing"
+	}
+	return "present"
+}
+
 func validURL(value string) bool {
 	parsed, err := url.ParseRequestURI(strings.TrimSpace(value))
 	return err == nil && parsed.Scheme != "" && parsed.Host != ""
@@ -374,19 +442,22 @@ func validURL(value string) bool {
 
 func addRunnerPlan(plan *Plan, invite agentinvite.Invite, opts Options, outDir string) {
 	pkg, err := connectionrunner.Build(connectionrunner.Options{
-		Invite:       invite,
-		OutDir:       runnerOutDir(outDir),
-		TargetOS:     plan.TargetOS,
-		TargetArch:   opts.TargetArch,
-		SessionMode:  plan.SessionMode,
-		RdevCommand:  opts.RdevCommand,
-		HostName:     opts.HostName,
-		GeneratedAt:  plan.GeneratedAt,
-		WritePackage: outDir != "",
+		Invite:                      invite,
+		OutDir:                      runnerOutDir(outDir),
+		TargetOS:                    plan.TargetOS,
+		TargetArch:                  opts.TargetArch,
+		SessionMode:                 plan.SessionMode,
+		BootstrapCommand:            opts.BootstrapCommand,
+		LayeredAssetsManifestURL:    opts.LayeredAssetsManifestURL,
+		LayeredReleaseRootPublicKey: opts.ReleaseRootPublicKey,
+		LayeredReleaseVersion:       opts.LayeredReleaseVersion,
+		HostName:                    opts.HostName,
+		GeneratedAt:                 plan.GeneratedAt,
+		WritePackage:                outDir != "",
 	})
 	if err != nil {
 		plan.MissingInputs = append(plan.MissingInputs, "connection_entry_runner_error: "+err.Error())
-		plan.Checks = append(plan.Checks, Check{Name: "connection_entry_runner", Passed: false, Detail: err.Error()})
+		plan.Checks = append(plan.Checks, Check{Name: "connection_entry_runner", Passed: false, Detail: "failed"})
 		return
 	}
 	checks := runnerChecksToAcceptance(pkg.Checks)
@@ -411,7 +482,7 @@ func addRunnerPlan(plan *Plan, invite agentinvite.Invite, opts Options, outDir s
 			GeneratedFile{Path: pkg.PlanPath, Purpose: "reviewable Connection Entry runner package plan and helper policy"},
 		)
 	}
-	plan.Checks = append(plan.Checks, Check{Name: "connection_entry_runner", Passed: plan.RunnerPlan.OK, Detail: pkg.ManifestPath})
+	plan.Checks = append(plan.Checks, Check{Name: "connection_entry_runner", Passed: plan.RunnerPlan.OK, Detail: planArtifactStatus(plan.RunnerPlan.OK)})
 	if plan.EntryPackagePlan == nil && outDir != "" {
 		plan.EntryPackagePlan = &EntryPackagePlan{
 			SchemaVersion:      EntryPackagePlanSchemaVersion,
@@ -448,74 +519,9 @@ func runnerOutDir(outDir string) string {
 func runnerChecksToAcceptance(checks []connectionrunner.Check) []acceptance.Check {
 	values := make([]acceptance.Check, 0, len(checks))
 	for _, check := range checks {
-		values = append(values, acceptance.Check{Name: check.Name, Passed: check.Passed, Detail: check.Detail})
+		values = append(values, acceptance.Check{Name: check.Name, Passed: check.Passed, Detail: planArtifactStatus(check.Passed)})
 	}
 	return values
-}
-
-func addWindowsEntryPackagePlan(plan *Plan, invite agentinvite.Invite, opts Options, outDir string) {
-	missing := windowsMissingInputs(opts)
-	plan.MissingInputs = append(plan.MissingInputs, missing...)
-	if outDir == "" || len(missing) > 0 {
-		plan.Checks = append(plan.Checks, Check{
-			Name:   "windows_temporary_acceptance_plan",
-			Passed: false,
-			Detail: "requires out_dir and release artifact inputs before generating the Windows launcher",
-		})
-		return
-	}
-	winPlan, err := acceptance.RunWindowsTemporaryPlan(acceptance.WindowsTemporaryOptions{
-		OutDir:                         filepath.Join(outDir, "windows-temporary"),
-		GatewayURL:                     invite.GatewayURL,
-		TicketCode:                     invite.Ticket.Code,
-		DownloadURL:                    strings.TrimSpace(opts.WindowsHostDownloadURL),
-		ExpectedSHA256:                 strings.TrimSpace(opts.WindowsHostExpectedSHA256),
-		BootstrapScriptPath:            strings.TrimSpace(opts.WindowsBootstrapScriptPath),
-		BootstrapScriptURL:             strings.TrimSpace(opts.WindowsBootstrapScriptURL),
-		BootstrapScriptExpectedSHA256:  strings.TrimSpace(opts.WindowsBootstrapScriptSHA256),
-		ManifestURL:                    invite.ManifestURL,
-		ManifestRootPublicKey:          invite.ManifestRootPublicKey,
-		ReleaseBundleURL:               strings.TrimSpace(opts.ReleaseBundleURL),
-		ReleaseBundleRequiredArtifacts: firstNonEmpty(strings.TrimSpace(opts.ReleaseBundleRequiredArtifacts), "rdev-host.exe,rdev-verify.exe"),
-		ReleaseRootPublicKey:           strings.TrimSpace(opts.ReleaseRootPublicKey),
-		VerifierDownloadURL:            strings.TrimSpace(opts.WindowsVerifierDownloadURL),
-		VerifierExpectedSHA256:         strings.TrimSpace(opts.WindowsVerifierExpectedSHA256),
-		HostName:                       strings.TrimSpace(opts.HostName),
-		Force:                          opts.Force,
-		Now:                            plan.GeneratedAt,
-	})
-	if err != nil {
-		plan.MissingInputs = append(plan.MissingInputs, "entry_package_plan_error: "+err.Error())
-		plan.Checks = append(plan.Checks, Check{Name: "windows_temporary_acceptance_plan", Passed: false, Detail: err.Error()})
-		return
-	}
-	plan.EntryPackagePlan = &EntryPackagePlan{
-		SchemaVersion:      EntryPackagePlanSchemaVersion,
-		TargetOS:           plan.TargetOS,
-		SessionMode:        plan.SessionMode,
-		PackageMode:        "visible-self-contained-connection-entry",
-		OK:                 allAcceptanceChecksPassed(winPlan.Checks),
-		PlanPath:           filepath.Join(winPlan.OutDir, "windows-temporary-plan.json"),
-		LauncherPath:       winPlan.LauncherPath,
-		PlatformPlanSchema: winPlan.SchemaVersion,
-		PlatformPlanKind:   "windows-temporary-acceptance-plan",
-		HumanEntryPoint:    "run the visible PowerShell launcher from this package plan",
-		AgentOnlyParameters: []string{
-			"manifest_url",
-			"manifest_root_public_key",
-			"gateway_url",
-			"ticket_code",
-			"transport",
-			"release_bundle_url",
-			"release_root_public_key",
-		},
-		Checks: winPlan.Checks,
-	}
-	plan.GeneratedFiles = append(plan.GeneratedFiles,
-		GeneratedFile{Path: plan.EntryPackagePlan.PlanPath, Purpose: "reviewable Windows temporary acceptance plan inside the generic connection entry package plan"},
-		GeneratedFile{Path: plan.EntryPackagePlan.LauncherPath, Purpose: "visible PowerShell connection entry launcher"},
-	)
-	plan.Checks = append(plan.Checks, Check{Name: "entry_package_plan", Passed: plan.EntryPackagePlan.OK, Detail: plan.EntryPackagePlan.PlanPath})
 }
 
 func addManagedEntryPackagePlan(plan *Plan, invite agentinvite.Invite, opts Options, outDir string) {
@@ -525,7 +531,7 @@ func addManagedEntryPackagePlan(plan *Plan, invite agentinvite.Invite, opts Opti
 		plan.Checks = append(plan.Checks, Check{
 			Name:   "managed_service_package_plan",
 			Passed: false,
-			Detail: "requires out_dir, managed binary path, release bundle path, and release root before generating the managed-service package plan",
+			Detail: "missing_inputs",
 		})
 		return
 	}
@@ -538,7 +544,7 @@ func addManagedEntryPackagePlan(plan *Plan, invite agentinvite.Invite, opts Opti
 		addWindowsManagedEntryPackagePlan(plan, invite, opts, outDir)
 	default:
 		plan.MissingInputs = append(plan.MissingInputs, "managed_service_unsupported_target_os: "+plan.TargetOS)
-		plan.Checks = append(plan.Checks, Check{Name: "managed_service_package_plan", Passed: false, Detail: "unsupported target OS for managed service package plan: " + plan.TargetOS})
+		plan.Checks = append(plan.Checks, Check{Name: "managed_service_package_plan", Passed: false, Detail: "unsupported"})
 	}
 }
 
@@ -578,7 +584,7 @@ func addManagedMacEntryPackagePlan(plan *Plan, invite agentinvite.Invite, opts O
 		GeneratedFile{Path: plan.EntryPackagePlan.PlanPath, Purpose: "reviewable macOS managed-service plan inside the generic connection entry package plan"},
 		GeneratedFile{Path: plan.EntryPackagePlan.LauncherPath, Purpose: "reviewable LaunchAgent plist for owned managed host enrollment"},
 	)
-	plan.Checks = append(plan.Checks, Check{Name: "entry_package_plan", Passed: plan.EntryPackagePlan.OK, Detail: plan.EntryPackagePlan.PlanPath})
+	plan.Checks = append(plan.Checks, Check{Name: "entry_package_plan", Passed: plan.EntryPackagePlan.OK, Detail: planArtifactStatus(plan.EntryPackagePlan.OK)})
 }
 
 func addLinuxManagedEntryPackagePlan(plan *Plan, invite agentinvite.Invite, opts Options, outDir string) {
@@ -617,7 +623,7 @@ func addLinuxManagedEntryPackagePlan(plan *Plan, invite agentinvite.Invite, opts
 		GeneratedFile{Path: plan.EntryPackagePlan.PlanPath, Purpose: "reviewable Linux managed-service plan inside the generic connection entry package plan"},
 		GeneratedFile{Path: plan.EntryPackagePlan.LauncherPath, Purpose: "reviewable systemd user unit for owned managed host enrollment"},
 	)
-	plan.Checks = append(plan.Checks, Check{Name: "entry_package_plan", Passed: plan.EntryPackagePlan.OK, Detail: plan.EntryPackagePlan.PlanPath})
+	plan.Checks = append(plan.Checks, Check{Name: "entry_package_plan", Passed: plan.EntryPackagePlan.OK, Detail: planArtifactStatus(plan.EntryPackagePlan.OK)})
 }
 
 func addWindowsManagedEntryPackagePlan(plan *Plan, invite agentinvite.Invite, opts Options, outDir string) {
@@ -654,27 +660,36 @@ func addWindowsManagedEntryPackagePlan(plan *Plan, invite agentinvite.Invite, op
 	plan.GeneratedFiles = append(plan.GeneratedFiles,
 		GeneratedFile{Path: plan.EntryPackagePlan.PlanPath, Purpose: "reviewable Windows managed-service plan inside the generic connection entry package plan"},
 	)
-	plan.Checks = append(plan.Checks, Check{Name: "entry_package_plan", Passed: plan.EntryPackagePlan.OK, Detail: plan.EntryPackagePlan.PlanPath})
+	plan.Checks = append(plan.Checks, Check{Name: "entry_package_plan", Passed: plan.EntryPackagePlan.OK, Detail: planArtifactStatus(plan.EntryPackagePlan.OK)})
 }
 
 func addManagedEntryPackagePlanError(plan *Plan, err error) {
 	plan.MissingInputs = append(plan.MissingInputs, "managed_service_package_plan_error: "+err.Error())
-	plan.Checks = append(plan.Checks, Check{Name: "managed_service_package_plan", Passed: false, Detail: err.Error()})
+	plan.Checks = append(plan.Checks, Check{Name: "managed_service_package_plan", Passed: false, Detail: "failed"})
 }
 
-func windowsMissingInputs(opts Options) []string {
-	var missing []string
-	required := map[string]string{
-		"windows_host_download_url":        opts.WindowsHostDownloadURL,
-		"windows_host_expected_sha256":     opts.WindowsHostExpectedSHA256,
-		"release_bundle_url":               opts.ReleaseBundleURL,
-		"release_root_public_key":          opts.ReleaseRootPublicKey,
-		"windows_verifier_download_url":    opts.WindowsVerifierDownloadURL,
-		"windows_verifier_expected_sha256": opts.WindowsVerifierExpectedSHA256,
+func planArtifactStatus(passed bool) string {
+	if passed {
+		return "ready"
 	}
-	for name, value := range required {
-		if strings.TrimSpace(value) == "" {
-			missing = append(missing, name)
+	return "failed"
+}
+
+func windowsLayeredMissingInputs(opts Options) []string {
+	required := []struct {
+		name  string
+		value string
+	}{
+		{name: "windows_bootstrap_binary", value: opts.WindowsBootstrapBinaryPath},
+		{name: "windows_bootstrap_release_manifest", value: opts.WindowsBootstrapReleaseManifestPath},
+		{name: "layered_assets_manifest_url", value: opts.LayeredAssetsManifestURL},
+		{name: "layered_release_version", value: opts.LayeredReleaseVersion},
+		{name: "release_root_public_key", value: opts.ReleaseRootPublicKey},
+	}
+	missing := make([]string, 0, len(required))
+	for _, input := range required {
+		if strings.TrimSpace(input.value) == "" {
+			missing = append(missing, input.name)
 		}
 	}
 	return missing
@@ -731,9 +746,12 @@ func splitCSV(value string) []string {
 	return values
 }
 
-func writeMaterializedFiles(plan *Plan) error {
+func writeMaterializedFiles(plan *Plan, materializationDir string) error {
+	if err := runConnectionEntryMaterializationFailureHook("before_top_level_files"); err != nil {
+		return err
+	}
 	humanPath := filepath.Join(plan.OutDir, "CONNECTION_ENTRY.md")
-	if err := os.WriteFile(humanPath, []byte(renderHumanMessage(*plan)), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(materializationDir, "CONNECTION_ENTRY.md"), []byte(renderHumanMessage(*plan)), 0o600); err != nil {
 		return err
 	}
 	plan.HumanMessagePath = humanPath
@@ -743,7 +761,10 @@ func writeMaterializedFiles(plan *Plan) error {
 		return err
 	}
 	content = append(content, '\n')
-	return os.WriteFile(filepath.Join(plan.OutDir, "connection-entry-plan.json"), content, 0o600)
+	if err := os.WriteFile(filepath.Join(materializationDir, "connection-entry-plan.json"), content, 0o600); err != nil {
+		return err
+	}
+	return runConnectionEntryMaterializationFailureHook("after_top_level_files")
 }
 
 func renderHumanMessage(plan Plan) string {
@@ -762,10 +783,10 @@ func renderHumanMessage(plan Plan) string {
 }
 
 func prepareOutDir(outDir string) error {
-	if err := os.MkdirAll(outDir, 0o700); err != nil {
-		return err
-	}
 	entries, err := os.ReadDir(outDir)
+	if os.IsNotExist(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
@@ -773,6 +794,199 @@ func prepareOutDir(outDir string) error {
 		return fmt.Errorf("out directory must be empty: %s", outDir)
 	}
 	return nil
+}
+
+func createMaterializationStagingDir(outDir string) (string, error) {
+	parentDir := filepath.Dir(outDir)
+	if err := os.MkdirAll(parentDir, 0o700); err != nil {
+		return "", err
+	}
+	stagingDir, err := os.MkdirTemp(parentDir, "."+filepath.Base(outDir)+".staging-")
+	if err != nil {
+		return "", err
+	}
+	if err := os.Chmod(stagingDir, 0o700); err != nil {
+		os.RemoveAll(stagingDir)
+		return "", err
+	}
+	return stagingDir, nil
+}
+
+func rewriteMaterializedPaths(plan *Plan, stagingDir, outDir string) error {
+	if err := filepath.WalkDir(stagingDir, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || !strings.EqualFold(filepath.Ext(path), ".json") {
+			return nil
+		}
+		return rewriteMaterializedJSONFile(path, stagingDir, outDir)
+	}); err != nil {
+		return err
+	}
+
+	plan.OutDir = outDir
+	plan.HumanMessagePath = rewriteMaterializedPath(plan.HumanMessagePath, stagingDir, outDir)
+	for index := range plan.GeneratedFiles {
+		plan.GeneratedFiles[index].Path = rewriteMaterializedPath(plan.GeneratedFiles[index].Path, stagingDir, outDir)
+	}
+	for index := range plan.Checks {
+		plan.Checks[index].Detail = rewriteMaterializedPath(plan.Checks[index].Detail, stagingDir, outDir)
+	}
+	for index := range plan.MissingInputs {
+		plan.MissingInputs[index] = rewriteMaterializedPath(plan.MissingInputs[index], stagingDir, outDir)
+	}
+	if plan.RunnerPlan != nil {
+		plan.RunnerPlan.ManifestPath = rewriteMaterializedPath(plan.RunnerPlan.ManifestPath, stagingDir, outDir)
+		plan.RunnerPlan.LauncherPath = rewriteMaterializedPath(plan.RunnerPlan.LauncherPath, stagingDir, outDir)
+		plan.RunnerPlan.PlanPath = rewriteMaterializedPath(plan.RunnerPlan.PlanPath, stagingDir, outDir)
+		for index := range plan.RunnerPlan.Checks {
+			plan.RunnerPlan.Checks[index].Detail = rewriteMaterializedPath(plan.RunnerPlan.Checks[index].Detail, stagingDir, outDir)
+		}
+	}
+	if plan.EntryPackagePlan != nil {
+		plan.EntryPackagePlan.PlanPath = rewriteMaterializedPath(plan.EntryPackagePlan.PlanPath, stagingDir, outDir)
+		plan.EntryPackagePlan.LauncherPath = rewriteMaterializedPath(plan.EntryPackagePlan.LauncherPath, stagingDir, outDir)
+		plan.EntryPackagePlan.ArchivePath = rewriteMaterializedPath(plan.EntryPackagePlan.ArchivePath, stagingDir, outDir)
+		for index := range plan.EntryPackagePlan.Checks {
+			plan.EntryPackagePlan.Checks[index].Detail = rewriteMaterializedPath(plan.EntryPackagePlan.Checks[index].Detail, stagingDir, outDir)
+		}
+	}
+	return nil
+}
+
+func rewriteMaterializedJSONFile(path, stagingDir, outDir string) error {
+	if filepath.Ext(path) != ".json" {
+		return nil
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(content)))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return err
+	}
+	rewritten, changed := rewriteMaterializedJSONValue(value, stagingDir, outDir)
+	if !changed {
+		return nil
+	}
+	content, err = json.MarshalIndent(rewritten, "", "  ")
+	if err != nil {
+		return err
+	}
+	content = append(content, '\n')
+	return os.WriteFile(path, content, 0o600)
+}
+
+func rewriteMaterializedJSONValue(value any, stagingDir, outDir string) (any, bool) {
+	switch typed := value.(type) {
+	case string:
+		rewritten := rewriteMaterializedPath(typed, stagingDir, outDir)
+		return rewritten, rewritten != typed
+	case []any:
+		rewritten := make([]any, len(typed))
+		changed := false
+		for index, child := range typed {
+			var childChanged bool
+			rewritten[index], childChanged = rewriteMaterializedJSONValue(child, stagingDir, outDir)
+			changed = changed || childChanged
+		}
+		return rewritten, changed
+	case map[string]any:
+		rewritten := make(map[string]any, len(typed))
+		changed := false
+		for key, child := range typed {
+			var childChanged bool
+			rewritten[key], childChanged = rewriteMaterializedJSONValue(child, stagingDir, outDir)
+			changed = changed || childChanged
+		}
+		return rewritten, changed
+	default:
+		return value, false
+	}
+}
+
+func rewriteMaterializedPath(value, stagingDir, outDir string) string {
+	rewritten := strings.ReplaceAll(value, stagingDir, outDir)
+	stagingSlash := filepath.ToSlash(stagingDir)
+	if stagingSlash != stagingDir {
+		rewritten = strings.ReplaceAll(rewritten, stagingSlash, filepath.ToSlash(outDir))
+	}
+	return rewritten
+}
+
+func publishMaterializedFiles(stagingDir, outDir string, finalize func() error) error {
+	originalOutDirExists := false
+	placeholder := ""
+	entries, err := os.ReadDir(outDir)
+	if os.IsNotExist(err) {
+		if err := os.Rename(stagingDir, outDir); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	} else if len(entries) != 0 {
+		return fmt.Errorf("out directory must be empty: %s", outDir)
+	} else {
+		originalOutDirExists = true
+		parentDir := filepath.Dir(outDir)
+		placeholder, err = os.MkdirTemp(parentDir, "."+filepath.Base(outDir)+".empty-")
+		if err != nil {
+			return err
+		}
+		if err := os.Remove(placeholder); err != nil {
+			_ = os.RemoveAll(placeholder)
+			return err
+		}
+		if err := os.Rename(outDir, placeholder); err != nil {
+			return err
+		}
+		if err := os.Rename(stagingDir, outDir); err != nil {
+			if rollbackErr := os.Rename(placeholder, outDir); rollbackErr != nil {
+				return errors.Join(
+					fmt.Errorf("publish materialized output: %w", err),
+					fmt.Errorf("restore empty output: %w", rollbackErr),
+				)
+			}
+			return err
+		}
+	}
+
+	if finalize != nil {
+		if err := finalize(); err != nil {
+			rollbackErr := rollbackPublishedMaterializedFiles(outDir, placeholder, originalOutDirExists)
+			return errors.Join(err, rollbackErr)
+		}
+	}
+	if placeholder != "" {
+		if err := os.RemoveAll(placeholder); err != nil {
+			return fmt.Errorf("remove replaced empty output directory: %w", err)
+		}
+	}
+	return nil
+}
+
+func rollbackPublishedMaterializedFiles(outDir, placeholder string, restoreOriginal bool) error {
+	if err := os.RemoveAll(outDir); err != nil {
+		return fmt.Errorf("remove failed materialized output: %w", err)
+	}
+	if !restoreOriginal {
+		return nil
+	}
+	if err := os.Rename(placeholder, outDir); err != nil {
+		return fmt.Errorf("restore empty output: %w", err)
+	}
+	return nil
+}
+
+func runConnectionEntryMaterializationFailureHook(phase string) error {
+	if connectionEntryMaterializationFailureHook == nil {
+		return nil
+	}
+	return connectionEntryMaterializationFailureHook(phase)
 }
 
 func allAcceptanceChecksPassed(checks []acceptance.Check) bool {

@@ -13,46 +13,51 @@ import (
 const SchemaVersion = "rdev.agent-invite.v1"
 
 type Options struct {
-	GatewayURL            string
-	JoinURL               string
-	ManifestURL           string
-	ManifestRootPublicKey string
-	Ticket                model.Ticket
-	Transport             string
-	NetworkScope          string
-	AuthorityProfile      string
-	Once                  bool
-	RequireHostActivation bool
-	RdevCommand           string
-	CreatedAt             time.Time
+	GatewayURL                  string
+	JoinURL                     string
+	ManifestURL                 string
+	ManifestRootPublicKey       string
+	LayeredAssetsManifestURL    string
+	LayeredReleaseRootPublicKey string
+	LayeredReleaseVersion       string
+	Ticket                      model.Ticket
+	Transport                   string
+	NetworkScope                string
+	AuthorityProfile            string
+	Once                        bool
+	RequireHostActivation       bool
+	CreatedAt                   time.Time
 }
 
 type Invite struct {
-	SchemaVersion         string              `json:"schema_version"`
-	GatewayURL            string              `json:"gateway_url"`
-	JoinURL               string              `json:"join_url"`
-	ManifestURL           string              `json:"manifest_url"`
-	ManifestRootPublicKey string              `json:"manifest_root_public_key,omitempty"`
-	Ticket                model.Ticket        `json:"ticket"`
-	Transport             string              `json:"transport"`
-	TransportPlan         TransportPlan       `json:"transport_plan"`
-	ConnectionPlan        ConnectionPlan      `json:"connection_plan"`
-	AuthorityProfile      AuthorityProfile    `json:"authority_profile"`
-	ConnectionEntry       ConnectionEntry     `json:"connection_entry"`
-	ConnectionEntryPlan   ConnectionEntryPlan `json:"connection_entry_plan"`
-	HostContextPlan       HostContextPlan     `json:"host_context_plan"`
-	ProvisioningPlan      ProvisioningPlan    `json:"agent_provisioning_plan"`
-	CollaborationPlan     CollaborationPlan   `json:"agent_collaboration_plan"`
-	LocalizationPlan      LocalizationPlan    `json:"localization_plan"`
-	ManagedDevPlan        ManagedDevPlan      `json:"managed_development_plan"`
-	HostCommand           string              `json:"host_command"`
-	FallbackCommands      []string            `json:"fallback_commands"`
-	HumanNextActions      []string            `json:"human_next_actions"`
-	AgentNextActions      []string            `json:"agent_next_actions"`
-	ConnectivityChecks    []string            `json:"connectivity_checks"`
-	MCPTools              map[string]string   `json:"mcp_tools"`
-	RequiresHumanAction   []string            `json:"requires_human_action"`
-	CreatedAt             time.Time           `json:"created_at"`
+	SchemaVersion               string              `json:"schema_version"`
+	GatewayURL                  string              `json:"gateway_url"`
+	JoinURL                     string              `json:"join_url"`
+	ManifestURL                 string              `json:"manifest_url"`
+	ManifestRootPublicKey       string              `json:"manifest_root_public_key,omitempty"`
+	LayeredAssetsManifestURL    string              `json:"layered_assets_manifest_url,omitempty"`
+	LayeredReleaseRootPublicKey string              `json:"layered_release_root_public_key,omitempty"`
+	LayeredReleaseVersion       string              `json:"layered_release_version,omitempty"`
+	Ticket                      model.Ticket        `json:"ticket"`
+	Transport                   string              `json:"transport"`
+	TransportPlan               TransportPlan       `json:"transport_plan"`
+	ConnectionPlan              ConnectionPlan      `json:"connection_plan"`
+	AuthorityProfile            AuthorityProfile    `json:"authority_profile"`
+	ConnectionEntry             ConnectionEntry     `json:"connection_entry"`
+	ConnectionEntryPlan         ConnectionEntryPlan `json:"connection_entry_plan"`
+	HostContextPlan             HostContextPlan     `json:"host_context_plan"`
+	ProvisioningPlan            ProvisioningPlan    `json:"agent_provisioning_plan"`
+	CollaborationPlan           CollaborationPlan   `json:"agent_collaboration_plan"`
+	LocalizationPlan            LocalizationPlan    `json:"localization_plan"`
+	ManagedDevPlan              ManagedDevPlan      `json:"managed_development_plan"`
+	HostCommand                 string              `json:"host_command"`
+	FallbackCommands            []string            `json:"fallback_commands"`
+	HumanNextActions            []string            `json:"human_next_actions"`
+	AgentNextActions            []string            `json:"agent_next_actions"`
+	ConnectivityChecks          []string            `json:"connectivity_checks"`
+	MCPTools                    map[string]string   `json:"mcp_tools"`
+	RequiresHumanAction         []string            `json:"requires_human_action"`
+	CreatedAt                   time.Time           `json:"created_at"`
 }
 
 type TransportPlan struct {
@@ -264,28 +269,24 @@ func New(opts Options) (Invite, error) {
 	if !validAuthorityProfile(authorityProfile) {
 		return Invite{}, fmt.Errorf("unsupported authority profile %q", authorityProfile)
 	}
-	rdevCommand := strings.TrimSpace(opts.RdevCommand)
-	if rdevCommand == "" {
-		rdevCommand = "rdev"
-	}
 	createdAt := opts.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
 
 	manifestRootPublicKey := strings.TrimSpace(opts.ManifestRootPublicKey)
-	hostCommand := hostServeCommand(rdevCommand, manifestURL, manifestRootPublicKey, transport, opts.Once)
-	transportPlan := newTransportPlan(rdevCommand, manifestURL, manifestRootPublicKey, transport, opts.Once)
+	connectionEntry := newConnectionEntry(joinURL)
+	hostCommand := connectionEntry.OneLineCommands["macos_linux_sh"]
+	transportPlan := newTransportPlan(hostCommand, transport)
 	connectionPlan := newConnectionPlan(gatewayURL, networkScope)
 	authority := newAuthorityProfile(authorityProfile)
-	connectionEntry := newConnectionEntry(joinURL)
 	connectionEntryPlan := newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, transport)
 	hostContextPlan := newHostContextPlan()
 	provisioningPlan := newProvisioningPlan()
 	collaborationPlan := newCollaborationPlan()
 	localizationPlan := newLocalizationPlan()
 	managedDevPlan := newManagedDevPlan()
-	fallbackCommands := fallbackCommandsFromPlan(transportPlan, transport)
+	var fallbackCommands []string
 
 	agentActions := []string{
 		"Probe the local runtime with rdev doctor and inspect configured gateway reachability before giving the human a connection entry link, script, or package.",
@@ -299,25 +300,28 @@ func New(opts Options) (Invite, error) {
 	}
 
 	return Invite{
-		SchemaVersion:         SchemaVersion,
-		GatewayURL:            gatewayURL,
-		JoinURL:               joinURL,
-		ManifestURL:           manifestURL,
-		ManifestRootPublicKey: manifestRootPublicKey,
-		Ticket:                opts.Ticket,
-		Transport:             transport,
-		TransportPlan:         transportPlan,
-		ConnectionPlan:        connectionPlan,
-		AuthorityProfile:      authority,
-		ConnectionEntry:       connectionEntry,
-		ConnectionEntryPlan:   connectionEntryPlan,
-		HostContextPlan:       hostContextPlan,
-		ProvisioningPlan:      provisioningPlan,
-		CollaborationPlan:     collaborationPlan,
-		LocalizationPlan:      localizationPlan,
-		ManagedDevPlan:        managedDevPlan,
-		HostCommand:           hostCommand,
-		FallbackCommands:      fallbackCommands,
+		SchemaVersion:               SchemaVersion,
+		GatewayURL:                  gatewayURL,
+		JoinURL:                     joinURL,
+		ManifestURL:                 manifestURL,
+		ManifestRootPublicKey:       manifestRootPublicKey,
+		LayeredAssetsManifestURL:    strings.TrimSpace(opts.LayeredAssetsManifestURL),
+		LayeredReleaseRootPublicKey: strings.TrimSpace(opts.LayeredReleaseRootPublicKey),
+		LayeredReleaseVersion:       strings.TrimSpace(opts.LayeredReleaseVersion),
+		Ticket:                      opts.Ticket,
+		Transport:                   transport,
+		TransportPlan:               transportPlan,
+		ConnectionPlan:              connectionPlan,
+		AuthorityProfile:            authority,
+		ConnectionEntry:             connectionEntry,
+		ConnectionEntryPlan:         connectionEntryPlan,
+		HostContextPlan:             hostContextPlan,
+		ProvisioningPlan:            provisioningPlan,
+		CollaborationPlan:           collaborationPlan,
+		LocalizationPlan:            localizationPlan,
+		ManagedDevPlan:              managedDevPlan,
+		HostCommand:                 hostCommand,
+		FallbackCommands:            fallbackCommands,
 		HumanNextActions: []string{
 			"Open connection_entry.entry_url or run the generated connection entry package on the target machine that needs help.",
 			"Keep the visible connection session open until the Agent reports completion.",
@@ -632,12 +636,12 @@ func newConnectionEntry(joinURL string) ConnectionEntry {
 		AutomationLevel: "one-entry-minimal-steps-after-consent",
 		PackageCatalog:  model.NewConnectionEntryPackageCatalog(joinURL),
 		OneLineCommands: map[string]string{
-			"macos_linux_sh":     "curl -fsSL " + shellQuote(bootstrapBase+"/bootstrap.sh") + " | sh",
-			"windows_powershell": "powershell -NoProfile -Command \"irm '" + powershellSingleQuoteValue(bootstrapBase+"/bootstrap.ps1") + "' | iex\"",
+			"macos_linux_sh":     "curl -fsSL " + shellQuote(bootstrapBase+"/bootstrap.sh") + " | sh # rdev-bootstrap layered entry",
+			"windows_powershell": "powershell -NoProfile -Command \"irm '" + powershellSingleQuoteValue(bootstrapBase+"/bootstrap.ps1") + "' | iex; # rdev-bootstrap layered entry\"",
 		},
 		InstallPrerequisites: []string{
 			"preferred: a signed self-contained Remote Dev Skillkit connection entry package is available for the target OS",
-			"fallback: rdev binary is already installed or made available by the published connection entry package",
+			"fallback: the platform rdev-bootstrap is supplied by the published connection entry package or bootstrap script",
 			"target-side user runs one visible connection entry on the machine that needs help",
 			"outbound HTTPS or configured fallback connectivity to the gateway",
 		},
@@ -698,7 +702,7 @@ func newConnectionEntryPlan(gatewayURL, manifestURL, manifestRootPublicKey, tran
 			"linux-amd64/linux-arm64 tar.gz or AppImage-style package containing rdev, release-bundle.json, checksums, and a visible connection launcher",
 		},
 		RequiredContents: []string{
-			"target-platform rdev/rdev-host binary",
+			"target-platform rdev-bootstrap and signed core runtime",
 			"signed release-bundle.json and required artifact manifests",
 			"pinned release root public key",
 			"pinned manifest root public key: " + placeholderIfEmpty(manifestRootPublicKey, "<manifest-root-public-key>"),
@@ -837,7 +841,7 @@ func validAuthorityProfile(profile string) bool {
 	}
 }
 
-func newTransportPlan(rdevCommand, manifestURL, manifestRootPublicKey, transport string, once bool) TransportPlan {
+func newTransportPlan(connectionEntryCommand, transport string) TransportPlan {
 	transports := []string{transport}
 	if transport == "auto" {
 		transports = []string{"wss", "long-poll", "poll"}
@@ -848,7 +852,7 @@ func newTransportPlan(rdevCommand, manifestURL, manifestRootPublicKey, transport
 			Transport:    candidate,
 			Priority:     i + 1,
 			Reason:       transportReason(candidate),
-			HostCommand:  hostServeCommand(rdevCommand, manifestURL, manifestRootPublicKey, candidate, once),
+			HostCommand:  connectionEntryCommand,
 			FailureHints: transportFailureHints(candidate),
 		})
 	}
@@ -1135,33 +1139,6 @@ func gatewayLooksLAN(rawURL string) bool {
 		return false
 	}
 	return ip.IsPrivate() || ip.IsLinkLocalUnicast()
-}
-
-func fallbackCommandsFromPlan(plan TransportPlan, selected string) []string {
-	if selected != "auto" {
-		return nil
-	}
-	values := make([]string, 0, len(plan.Candidates)-1)
-	for _, candidate := range plan.Candidates {
-		if candidate.Transport == "wss" {
-			continue
-		}
-		values = append(values, candidate.HostCommand)
-	}
-	return values
-}
-
-func hostServeCommand(rdevCommand, manifestURL, manifestRootPublicKey, transport string, once bool) string {
-	command := fmt.Sprintf("%s host serve --manifest-url %s --transport %s", rdevCommand, shellQuote(manifestURL), shellQuote(transport))
-	if strings.TrimSpace(manifestRootPublicKey) != "" {
-		command += " --manifest-root-public-key " + shellQuote(manifestRootPublicKey)
-	}
-	if once {
-		command += " --once"
-	} else {
-		command += " --once=false --max-tasks 0"
-	}
-	return command
 }
 
 func transportReason(transport string) string {

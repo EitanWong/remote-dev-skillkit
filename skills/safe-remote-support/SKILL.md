@@ -116,7 +116,7 @@ If `rdev` is not found in PATH:
 ### Rule 5 — Temporary gateway process MUST run in foreground
 
 For attended-temporary sessions, `rdev support-session connect --start` is a
-**foreground process**. It manages the public tunnel, serves helper assets, and
+**foreground process**. It manages the public tunnel, serves bootstrap assets, and
 holds session state in memory. If it exits, the tunnel drops and the target
 machine loses connectivity.
 
@@ -153,7 +153,7 @@ Omitting `gateway_url` can hit the wrong empty gateway and produce misleading "n
 
 Do NOT use `find` to locate executables. Use:
 - `command -v rdev` or `which rdev` (shell)
-- Known install paths: `~/go/bin/rdev`, `./work/rdev-support-session/bin/rdev-<os>-<arch>`
+- Known operator install paths such as `~/go/bin/rdev`
 - `Get-Command rdev -ErrorAction SilentlyContinue` (PowerShell)
 
 `find` scans the entire filesystem and hangs on cache directories. It is never appropriate for locating a known executable.
@@ -302,7 +302,7 @@ rdev support-session connect --start
 Do not add `--public-tunnel`; that option no longer exists. Do not start
 cloudflared, tunn3l, or an SSH tunnel in a separate terminal. Do not run this
 command with `&`, `nohup`, or any background terminal. The CLI owns provider
-selection, process lifetime, fallback, helper assets, and in-memory session
+selection, process lifetime, fallback, bootstrap assets, and in-memory session
 state. Keep this foreground process alive for the whole session.
 
 ### Step 3 — Send ONE thing to the user

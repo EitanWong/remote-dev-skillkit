@@ -21,7 +21,6 @@ func TestBuildWritesSelfContainedRunnerPackage(t *testing.T) {
 		TargetOS:     "windows",
 		TargetArch:   "amd64",
 		SessionMode:  string(model.HostModeAttendedTemporary),
-		RdevCommand:  "rdev",
 		GeneratedAt:  time.Date(2026, 7, 2, 12, 0, 0, 0, time.UTC),
 		WritePackage: true,
 	})
@@ -44,8 +43,8 @@ func TestBuildWritesSelfContainedRunnerPackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(launcher), "connection-entry run --runner-manifest") {
-		t.Fatalf("launcher should call runner, got:\n%s", string(launcher))
+	if !strings.Contains(string(launcher), "rdev-bootstrap' layered-run") {
+		t.Fatalf("launcher should call rdev-bootstrap layered-run, got:\n%s", string(launcher))
 	}
 	if !pkg.Manifest.NoManualAssembly ||
 		!slices.Contains(pkg.Manifest.AgentOnlyParameters, "manifest_root_public_key") ||
@@ -54,6 +53,58 @@ func TestBuildWritesSelfContainedRunnerPackage(t *testing.T) {
 	}
 	if pkg.LauncherSHA256 == "" {
 		t.Fatalf("expected launcher checksum")
+	}
+}
+
+func TestRunnerLauncherUsesBootstrapOnly(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "runner")
+	pkg, err := Build(Options{
+		Invite:       testInvite(t),
+		OutDir:       out,
+		TargetOS:     "windows",
+		TargetArch:   "amd64",
+		SessionMode:  string(model.HostModeAttendedTemporary),
+		GeneratedAt:  time.Now().UTC(),
+		WritePackage: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(pkg.LauncherPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	launcher := string(content)
+	if !strings.Contains(launcher, "rdev-bootstrap") {
+		t.Fatalf("runner launcher must invoke rdev-bootstrap:\n%s", launcher)
+	}
+	for _, forbidden := range []string{"host serve", "rdev-host", "Get-Command rdev", "command -v rdev", "rdev-bootstrap upgrade"} {
+		if strings.Contains(launcher, forbidden) {
+			t.Fatalf("runner launcher contains legacy path %q:\n%s", forbidden, launcher)
+		}
+	}
+}
+
+func TestRunRejectsExplicitNonBootstrapCommand(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "runner")
+	pkg, err := Build(Options{
+		Invite:       testInvite(t),
+		OutDir:       out,
+		TargetOS:     "linux",
+		TargetArch:   "amd64",
+		SessionMode:  string(model.HostModeAttendedTemporary),
+		WritePackage: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Run(RunOptions{
+		ManifestPath:     pkg.ManifestPath,
+		BootstrapCommand: "rdev-host",
+		DryRun:           true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "rdev-bootstrap") {
+		t.Fatalf("explicit non-bootstrap command must fail closed, got %v", err)
 	}
 }
 
@@ -89,12 +140,12 @@ func TestRunDryRunSelectsDirectGateway(t *testing.T) {
 	}
 	if result.SelectedPath != "native-direct-gateway" ||
 		result.SelectedTransport != "auto" ||
-		len(result.HostServeArgs) == 0 ||
-		!slices.Contains(result.HostServeArgs, "--manifest-root-public-key") {
-		t.Fatalf("expected direct host serve dry-run, got %#v", result)
+		len(result.BootstrapArgs) == 0 ||
+		!slices.Contains(result.BootstrapArgs, "--manifest-root-public-key") {
+		t.Fatalf("expected bootstrap dry-run, got %#v", result)
 	}
 	if result.Executed {
-		t.Fatalf("dry-run must not execute host serve")
+		t.Fatalf("dry-run must not execute bootstrap")
 	}
 }
 
@@ -169,10 +220,10 @@ func TestRunUsesConfiguredRelayGatewayOverride(t *testing.T) {
 		result.SelectedGatewayURL != "http://127.0.0.1:8787" {
 		t.Fatalf("expected relay gateway override, got %#v", result)
 	}
-	joined := strings.Join(result.HostServeArgs, " ")
+	joined := strings.Join(result.BootstrapArgs, " ")
 	if !strings.Contains(joined, "--gateway http://127.0.0.1:8787") ||
 		!strings.Contains(joined, "--manifest-url http://127.0.0.1:8787/v1/tickets/") {
-		t.Fatalf("expected rewritten manifest URL for selected relay gateway, got %v", result.HostServeArgs)
+		t.Fatalf("expected rewritten manifest URL for selected relay gateway, got %v", result.BootstrapArgs)
 	}
 }
 
@@ -261,9 +312,9 @@ func TestRunStartsConfiguredHelperBeforeHostServe(t *testing.T) {
 			}, nil
 		},
 		CommandRunner: func(command string, args []string) error {
-			events = append(events, "host-serve")
-			if command != "rdev" || !slices.Contains(args, "--gateway") {
-				t.Fatalf("unexpected host serve command: %s %v", command, args)
+			events = append(events, "bootstrap")
+			if command != "rdev-bootstrap" || !slices.Contains(args, "layered-run") || !slices.Contains(args, "--gateway") {
+				t.Fatalf("unexpected bootstrap command: %s %v", command, args)
 			}
 			return nil
 		},
@@ -273,7 +324,7 @@ func TestRunStartsConfiguredHelperBeforeHostServe(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !result.HelperStartConfigured || !result.HelperStarted || !result.Executed {
-		t.Fatalf("expected helper and host serve execution, got %#v", result)
+		t.Fatalf("expected helper and bootstrap execution, got %#v", result)
 	}
 	transcript := strings.Join(result.HelperTranscript, "\n")
 	for _, expected := range []string{
@@ -281,8 +332,8 @@ func TestRunStartsConfiguredHelperBeforeHostServe(t *testing.T) {
 		"helper_start_configured tool=chisel",
 		"helper_started tool=chisel",
 		"helper_gateway_reachable selected_path=existing-frp-or-chisel-relay",
-		"host_serve_invoked",
-		"host_serve_completed",
+		"bootstrap_invoked",
+		"bootstrap_completed",
 		"helper_cleanup_attempted tool=chisel",
 		"helper_cleanup_succeeded tool=chisel",
 	} {
@@ -293,7 +344,7 @@ func TestRunStartsConfiguredHelperBeforeHostServe(t *testing.T) {
 	if !result.HelperCleanupAttempted || !result.HelperCleanupSucceeded {
 		t.Fatalf("expected cleanup evidence, got %#v", result)
 	}
-	want := []string{"helper-started", "helper-probed", "host-serve", "helper-cleaned"}
+	want := []string{"helper-started", "helper-probed", "bootstrap", "helper-cleaned"}
 	if strings.Join(events, "|") != strings.Join(want, "|") {
 		t.Fatalf("unexpected event order: got %v want %v", events, want)
 	}
@@ -409,9 +460,9 @@ func TestRunStartsConfiguredStandardConnectivityHelpers(t *testing.T) {
 					}, nil
 				},
 				CommandRunner: func(command string, args []string) error {
-					events = append(events, "host-serve")
-					if command != "rdev" || !slices.Contains(args, "--gateway") || !slices.Contains(args, tc.gatewayURL) {
-						t.Fatalf("unexpected host serve command: %s %v", command, args)
+					events = append(events, "bootstrap")
+					if command != "rdev-bootstrap" || !slices.Contains(args, "layered-run") || !slices.Contains(args, "--gateway") || !slices.Contains(args, tc.gatewayURL) {
+						t.Fatalf("unexpected bootstrap command: %s %v", command, args)
 					}
 					return nil
 				},
@@ -428,7 +479,7 @@ func TestRunStartsConfiguredStandardConnectivityHelpers(t *testing.T) {
 				!result.Executed {
 				t.Fatalf("expected executed %s helper path, got %#v", tc.selected, result)
 			}
-			want := []string{"helper-started", "helper-probed", "host-serve", "helper-cleaned"}
+			want := []string{"helper-started", "helper-probed", "bootstrap", "helper-cleaned"}
 			if strings.Join(events, "|") != strings.Join(want, "|") {
 				t.Fatalf("unexpected event order: got %v want %v", events, want)
 			}
@@ -521,7 +572,7 @@ func TestRunInstallsMissingHelperDependencyBeforeHostServe(t *testing.T) {
 			}, nil
 		},
 		CommandRunner: func(command string, args []string) error {
-			events = append(events, "host-serve")
+			events = append(events, "bootstrap")
 			return nil
 		},
 		ProbeTimeout: time.Second,
@@ -531,14 +582,14 @@ func TestRunInstallsMissingHelperDependencyBeforeHostServe(t *testing.T) {
 	}
 	if !result.DependencyInstallConfigured || !result.DependencyInstalled || result.DependencyInstallTool != "chisel" ||
 		!result.HelperStarted || !result.Executed {
-		t.Fatalf("expected install, helper start, and host serve, got %#v", result)
+		t.Fatalf("expected install, helper start, and bootstrap, got %#v", result)
 	}
 	transcript := strings.Join(result.HelperTranscript, "\n")
 	if !strings.Contains(transcript, "dependency_install_configured tool=chisel") ||
 		!strings.Contains(transcript, "dependency_installed tool=chisel") {
 		t.Fatalf("expected dependency install transcript, got %#v", result.HelperTranscript)
 	}
-	want := []string{"dependency-installed", "helper-started", "helper-probed", "host-serve", "helper-cleaned"}
+	want := []string{"dependency-installed", "helper-started", "helper-probed", "bootstrap", "helper-cleaned"}
 	if strings.Join(events, "|") != strings.Join(want, "|") {
 		t.Fatalf("unexpected event order: got %v want %v", events, want)
 	}
@@ -666,15 +717,18 @@ func testInvite(t *testing.T) agentinvite.Invite {
 		t.Fatal(err)
 	}
 	invite, err := agentinvite.New(agentinvite.Options{
-		GatewayURL:            "https://api.example.com/v1",
-		JoinURL:               "https://api.example.com/join/" + ticket.Code,
-		ManifestURL:           "https://api.example.com/v1/tickets/" + ticket.Code + "/manifest",
-		ManifestRootPublicKey: "manifest-root:" + strings.Repeat("d", 43),
-		Ticket:                ticket,
-		Transport:             "auto",
-		NetworkScope:          "auto",
-		AuthorityProfile:      "max-control",
-		CreatedAt:             now,
+		GatewayURL:                  "https://api.example.com/v1",
+		JoinURL:                     "https://api.example.com/join/" + ticket.Code,
+		ManifestURL:                 "https://api.example.com/v1/tickets/" + ticket.Code + "/manifest",
+		ManifestRootPublicKey:       "manifest-root:" + strings.Repeat("d", 43),
+		LayeredAssetsManifestURL:    "https://api.example.com/layered-assets.json",
+		LayeredReleaseRootPublicKey: "release-root:" + strings.Repeat("e", 43),
+		LayeredReleaseVersion:       "v2.0.0-test",
+		Ticket:                      ticket,
+		Transport:                   "auto",
+		NetworkScope:                "auto",
+		AuthorityProfile:            "max-control",
+		CreatedAt:                   now,
 	})
 	if err != nil {
 		t.Fatal(err)

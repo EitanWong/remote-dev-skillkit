@@ -134,7 +134,7 @@ Steps:
     missing `rdev`, what not to ask humans for, and which custom PowerShell,
     shell, tunnel, interrupt, or polling scripts are forbidden. If you are about
     to improvise setup code, stop and follow that contract instead. If local
-    `rdev`, gateway state, or target helper assets are unclear, call
+    `rdev`, gateway state, or target bootstrap assets are unclear, call
     the CLI-only `rdev support-session prepare` command or run
     `rdev support-session prepare --build-assets` from the checkout. Follow its
     `connection_readiness`, `asset_report`, `missing_inputs`, and
@@ -187,17 +187,16 @@ Steps:
     Connection Entry URLs on the target machine with the returned
     `connection_attempt_policy` timeout/retry behavior; do not write your own
     PowerShell, shell, relay, or interrupt-polling fallback. Ordinary attended
-    `/join/.../bootstrap.*` handoffs use `rdev host serve --transport
-    long-poll` for stable HTTPS-only connectivity. Use `--transport auto` only
-    for managed or explicit advanced runner paths where WSS fallback has been
-    validated. Read
+    `/join/.../bootstrap.*` handoffs verify and invoke `rdev-bootstrap
+    layered-run`. The single verified core uses `--transport auto` and may
+    switch among signed routes without another registration. Read
     `agent_connection_runbook` first; it is the machine-readable order of
     operations for connecting, waiting, reporting, and recovering without
     custom scripts. Read
     `agent_connection_runbook.fresh_agent_failure_prevention` before writing
     any setup code: it captures known bad fresh-Agent failure patterns such as
-    manual `gateway serve` plus `invite create`, missing helper assets that make
-    Windows say `rdev is required`, background gateway glue, custom interrupt
+    manual `gateway serve` plus `invite create`, missing bootstrap assets or
+    signed layered metadata, background gateway glue, custom interrupt
     polling, and Agent-written PowerShell/shell bootstraps. If you are about to
     write one of those workarounds, stop and use the returned
     `cli_start_now_command`, `ready_file.path`, `status_file.path`,
@@ -226,14 +225,14 @@ Steps:
     extract the join URL into a separate first message. Also read
     `target_bootstrap_requirements` and, for CLI
     create calls, `target_bootstrap_readiness`. If an existing gateway cannot
-    serve the verified helper assets for the selected platform, use the
+    serve the verified bootstrap assets for the selected platform, use the
     standard `rdev support-session connect --start` or
     `rdev support-session prepare --build-assets` recovery path instead of
-    asking the target-side human to install `rdev` manually or writing a custom
-    downloader. If no suitable
+    asking the target-side human to install a runtime manually or writing a
+    custom downloader. If no suitable
     gateway is running yet, run `rdev support-session connect --start` in a visible
     foreground terminal. It
-    prepares verified Windows/macOS/Linux helper assets when a checkout and Go
+    prepares verified Windows/macOS/Linux bootstrap assets when a checkout and Go
     are available, starts the local gateway, and prints
     `rdev.support-session-started.v1` with top-level
     `target_handoff_envelope`, `user_handoff`,
@@ -284,11 +283,11 @@ Steps:
     code when the plan can provide it. Do not manually combine
     `rdev gateway serve` plus `rdev invite create` for a normal support session;
     use `rdev support-session connect --start` so ready/status files,
-    auto-authorization, and helper assets are created together. If a low-level dev
+    auto-authorization, and bootstrap assets are created together. If a low-level dev
     gateway is explicitly required, keep the default
     `--auto-build-rdev-assets` behavior enabled from a valid checkout with Go,
-    or configure helper assets with `--rdev-assets-dir` / platform-specific
-    asset flags before generating human-facing target commands. For lower-level package materialization
+    or configure bootstrap assets and signed layered release inputs with
+    `--rdev-assets-dir` before generating human-facing target commands. For lower-level package materialization
     or when `rdev.sessions.create` is not sufficient, use
     `CLI-only: rdev invite create` or `rdev invite create` so the Agent receives
     `connection_entry`, `connection_entry.package_catalog`,

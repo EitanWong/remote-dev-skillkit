@@ -346,6 +346,10 @@ func (r *Runtime) Stop(ctx context.Context) error {
 	if r.cancel != nil {
 		r.cancel()
 	}
+	// scheduleReplacement adds workers while holding mu. Cross the same lock
+	// after publishing stopRequested so cleanup cannot Wait alongside a late Add.
+	r.mu.Lock()
+	r.mu.Unlock()
 	r.cleanupOnce.Do(func() { go r.cleanup() })
 	select {
 	case <-r.cleanupDone:

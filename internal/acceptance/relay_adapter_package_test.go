@@ -73,6 +73,64 @@ func TestPackageAndVerifyRelayAdapterEvidence(t *testing.T) {
 	}
 }
 
+func TestPackageRelayAdapterEvidenceRedactsRunnerPrivateSurface(t *testing.T) {
+	root := t.TempDir()
+	relayDir := filepath.Join(root, "relay")
+	if _, err := relayadapter.Build(relayadapter.Options{
+		OutDir:      relayDir,
+		AdapterKind: "wireguard",
+		GeneratedAt: time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	evidence := writeRelayAdapterEvidenceForTest(t, root, "existing-wireguard-vpn")
+	privatePath := filepath.Join(string(filepath.Separator), "Users", "example", "private", "runner-manifest.json")
+	privateCache := filepath.Join(string(filepath.Separator), "Users", "example", "private", "cache")
+	runnerResult, err := json.MarshalIndent(map[string]any{
+		"schema_version":       "rdev.connection-entry.runner-result.v1",
+		"manifest_path":        privatePath,
+		"selected_path":        "existing-wireguard-vpn",
+		"selected_gateway_url": "https://gateway.example.invalid/v1",
+		"bootstrap_args":       []string{"rdev-bootstrap", "--cache-dir", privateCache, "--gateway", "https://gateway.example.invalid/v1"},
+		"tool_results":         []map[string]any{{"name": "rdev-bootstrap", "found": true, "path": privatePath}},
+		"helper_started":       true,
+	}, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(evidence.runnerResult, append(runnerResult, '\n'), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	pkg, err := PackageRelayAdapterEvidence(RelayAdapterPackageOptions{
+		RelayAdapterPackagePath: relayDir,
+		OutDir:                  filepath.Join(root, "package"),
+		EvidenceDirPath:         evidence.dir,
+		Now:                     time.Date(2026, 7, 4, 12, 5, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pkg.OK() {
+		t.Fatalf("expected package ok: %#v", pkg.Checks)
+	}
+	verification, err := VerifyRelayAdapterAcceptancePackage(pkg.OutDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !verification.OK() {
+		t.Fatalf("expected sanitized runner evidence to verify: %#v", verification.Checks)
+	}
+
+	copied, err := os.ReadFile(filepath.Join(pkg.OutDir, "evidence", "runner-result.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(copied), privatePath) || strings.Contains(string(copied), "gateway.example.invalid") {
+		t.Fatalf("runner evidence retained private surface: %s", copied)
+	}
+}
+
 func TestVerifyRelayAdapterEvidenceRejectsMissingConnection(t *testing.T) {
 	root := t.TempDir()
 	relayDir := filepath.Join(root, "relay")
