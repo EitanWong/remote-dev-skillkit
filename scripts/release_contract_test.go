@@ -112,6 +112,13 @@ exit 2
 	if err := os.WriteFile(filepath.Join(fakeBin, "go"), []byte(fakeGo), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	fakeSHA256Sum := `#!/bin/sh
+set -eu
+printf 'fallback-sha256  %s\n' "$1"
+`
+	if err := os.WriteFile(filepath.Join(fakeBin, "sha256sum"), []byte(fakeSHA256Sum), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	outDir := t.TempDir()
 	cmd := exec.Command("bash", "scripts/release/build-artifacts.sh",
 		"--out", outDir,
@@ -131,6 +138,7 @@ exit 2
 		Artifacts []struct {
 			Command string `json:"command"`
 			Target  string `json:"target"`
+			SHA256  string `json:"sha256"`
 		} `json:"artifacts"`
 	}
 	if err := json.Unmarshal(content, &manifest); err != nil {
@@ -143,6 +151,9 @@ exit 2
 	for _, artifact := range manifest.Artifacts {
 		if artifact.Command != "rdev-bootstrap" {
 			t.Fatalf("unexpected command in bootstrap-only build: %+v", manifest.Artifacts)
+		}
+		if artifact.SHA256 != "fallback-sha256" {
+			t.Fatalf("release script did not use sha256sum fallback: %+v", artifact)
 		}
 		targets[artifact.Target] = true
 	}

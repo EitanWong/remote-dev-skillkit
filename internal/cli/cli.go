@@ -146,6 +146,8 @@ func (a App) Run(ctx context.Context, args []string) error {
 		return a.update(ctx, args[1:])
 	case "deps":
 		return a.deps(ctx, args[1:])
+	case "toolchain":
+		return a.toolchain(ctx, args[1:])
 	case "enrollment":
 		return a.enrollment(ctx, args[1:])
 	case "trust":
@@ -2038,6 +2040,62 @@ func (a App) acceptanceLinuxManagedService(opts acceptance.LinuxManagedServiceOp
 }
 
 func (a App) acceptanceVerify(reportPath string) error {
+	schema, err := acceptanceReportSchema(reportPath)
+	if err != nil {
+		return err
+	}
+	switch schema {
+	case acceptance.FreshAgentSupportSessionReportSchemaVersion:
+		return a.acceptanceVerifyFreshAgentSupportSession(reportPath)
+	case acceptance.ManagedMacReportSchemaVersion:
+		return a.acceptanceVerifyManagedMac(reportPath)
+	default:
+		return fmt.Errorf("unsupported acceptance report schema %q", schema)
+	}
+}
+
+func acceptanceReportSchema(reportPath string) (string, error) {
+	if strings.TrimSpace(reportPath) == "" {
+		return "", fmt.Errorf("report path is required")
+	}
+	content, err := os.ReadFile(reportPath)
+	if err != nil {
+		return "", err
+	}
+	var header struct {
+		SchemaVersion string `json:"schema_version"`
+	}
+	if err := json.Unmarshal(content, &header); err != nil {
+		return "", err
+	}
+	return header.SchemaVersion, nil
+}
+
+func (a App) acceptanceVerifyFreshAgentSupportSession(reportPath string) error {
+	verification, err := acceptance.VerifyFreshAgentSupportSessionReport(reportPath)
+	if err != nil {
+		return err
+	}
+	payload := map[string]any{
+		"ok":                  verification.OK(),
+		"schema":              verification.SchemaVersion,
+		"report":              verification.ReportPath,
+		"report_schema":       verification.ReportSchema,
+		"checks":              verification.Checks,
+		"recommended_actions": verification.RecommendedActions,
+	}
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(payload); err != nil {
+		return err
+	}
+	if !verification.OK() {
+		return fmt.Errorf("fresh-Agent support-session acceptance verification failed")
+	}
+	return nil
+}
+
+func (a App) acceptanceVerifyManagedMac(reportPath string) error {
 	verification, err := acceptance.VerifyManagedMacReport(reportPath)
 	if err != nil {
 		return err
@@ -12293,6 +12351,7 @@ func (a App) printCommandGroupUsage(command string) bool {
 		"demo":             "local",
 		"desktop":          "windows, screenshot, record, focus, move, input, app, url, clipboard",
 		"deps":             "install",
+		"toolchain":        "plan, ensure",
 		"enrollment":       "issue-certificate, sign-certificate, verify-certificate, renew-certificate, revoke-certificate, init-revocations, verify-revocations, fetch-revocations, lifecycle",
 		"files":            "list, read, write, download, upload, delete",
 		"gateway":          "serve, storage verify",

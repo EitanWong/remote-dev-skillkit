@@ -11,6 +11,8 @@ func Tools() []Tool {
 	gatewayURL := gatewayURLField()
 	sessionID := stringField()
 	payloadObject := map[string]any{"type": "object", "additionalProperties": true}
+	engineeringTask := EngineeringTaskSchema()
+	toolchainRequest := ToolchainRequestSchema()
 
 	return []Tool{
 		{
@@ -56,19 +58,24 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.sessions.task",
-			Description: "Submit or inspect a Control Plane v1 task through the session event stream and return task, event, user_summary, agent_next_action, recoverable, and retry_after_ms. Tasks are routed through session endpoints.",
-			Safety:      "Creates a routed task event for an already joined session endpoint. Adapter payloads remain policy-bound by the target runtime and session capabilities.",
+			Description: "Submit a Control Plane v1 task, including typed engineering or user-scoped toolchain bootstrap requests, or resume a terminal/paused typed engineering task from a bounded host checkpoint. Submit returns task, event, user_summary, agent_next_action, recoverable, and retry_after_ms; resume creates a fresh routed attempt bound to the supplied checkpoint without adding an MCP top-level tool.",
+			Safety:      "Creates a routed task event for an already joined session endpoint. Toolchain installation is typed, user-scoped, and requires package-install authorization; credentials remain host-local environment references. Resume only reuses a checkpoint from the same typed engineering task; adapter payloads remain policy-bound by the target runtime and session capabilities.",
 			InputSchema: object(map[string]any{
 				"gateway_url":        gatewayURL,
 				"session_id":         sessionID,
+				"action":             enum("submit", "resume"),
+				"task_id":            stringField(),
+				"checkpoint_id":      stringField(),
 				"target_endpoint_id": stringField(),
 				"adapter":            stringField(),
 				"intent":             stringField(),
 				"capabilities":       stringArray(),
 				"payload":            payloadObject,
 				"limits":             payloadObject,
+				"engineering_task":   engineeringTask,
+				"toolchain_request":  toolchainRequest,
 				"idempotency_key":    stringField(),
-			}, []string{"session_id", "adapter", "idempotency_key"}),
+			}, []string{"session_id", "idempotency_key"}),
 		},
 		{
 			Name:        "rdev.sessions.interrupt",

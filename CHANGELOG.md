@@ -4,6 +4,50 @@ All notable local development changes are recorded here. The public repository
 is maintained at `https://github.com/EitanWong/remote-dev-skillkit`; release
 publication still requires explicit operator authorization.
 
+## 0.1.44-dev
+
+Current phase: establish a policy-bound remote engineering execution gate that
+can provision an Agent runtime, isolate a bounded engineering task, and return
+reviewable evidence without widening target-host authority.
+
+### Added
+
+- Added typed engineering-task contracts, bounded workspace snapshots and write
+  scopes, project-context manifests, task progress, iteration evidence, and
+  final worktree cleanup/lock-release evidence.
+- Added a policy-bound `toolchain_request` path for exact-version Codex and
+  Claude Code provisioning, including ordered HTTPS registry fallback, optional
+  verified portable Node bootstrap, user-scoped installation, and explicit
+  execution authorization.
+- Added secret-free runtime profiles that bind an installed Agent executable to
+  a later bounded task through an opaque profile ID. Codex uses an isolated
+  config home; Claude Code receives endpoint/auth environment only in its Agent
+  child process.
+- Added Agent-facing CLI/MCP task and toolchain surfaces plus static tool schema
+  synchronization so coordinators can plan, authorize, provision, verify, and
+  hand off without arbitrary shell-install payloads.
+
+### Changed
+
+- Updated hostrunner, control-plane, HTTP, MCP, adapter, and workspace paths to
+  carry explicit task scope, runtime-profile binding, progress, acceptance, and
+  evidence contracts across the remote engineering lifecycle.
+- Added project version-commit discipline and ephemeral-cloud cleanup rules to
+  the versioning policy.
+
+### Fixed
+
+- Hardened Windows fresh-Agent acceptance routing, support-session cancellation
+  ordering, and private cache ACL handling, with regression coverage for the
+  SYSTEM-SID deduplication edge case.
+
+### Security
+
+- Toolchain provisioning rejects floating versions, plaintext sources,
+  credential literals, unsafe archive paths, profile traversal, and profile/tool
+  mismatches. Managed Node PATH is scoped to provisioning and Agent children,
+  never the target host globally.
+
 ## 0.1.43-dev
 
 Current phase: make remote-control adapter validation Agent-native instead of

@@ -26,6 +26,7 @@ type Spec struct {
 	Prompt                    string
 	ClaudeCodeCommand         string
 	ClaudeCodeArgs            []string
+	Environment               map[string]string
 	VerificationCommands      [][]string
 	AllowVerificationCommands []string
 	MaxDurationSeconds        int
@@ -134,7 +135,7 @@ func ExecuteContext(parent context.Context, spec Spec) (Result, error) {
 
 	started := time.Now().UTC()
 	argv := claudeCodeArgv(prompt, spec)
-	claudeCodeResult := runCommand(ctx, workspaceRoot, argv, maxOutputBytes)
+	claudeCodeResult := runCommandWithEnvironment(ctx, workspaceRoot, argv, maxOutputBytes, spec.Environment)
 	result := Result{
 		Adapter:           "claude-code",
 		WorkspaceRoot:     workspaceRoot,
@@ -268,12 +269,19 @@ func runVerificationCommand(ctx context.Context, dir string, argv []string, maxO
 }
 
 func runCommand(ctx context.Context, dir string, argv []string, maxOutputBytes int) CommandResult {
+	return runCommandWithEnvironment(ctx, dir, argv, maxOutputBytes, nil)
+}
+
+func runCommandWithEnvironment(ctx context.Context, dir string, argv []string, maxOutputBytes int, environment map[string]string) CommandResult {
 	if len(argv) == 0 {
 		return CommandResult{Dir: dir, ExitCode: -1, Stderr: "argv is required"}
 	}
 	limiter := newOutputLimiter(maxOutputBytes)
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
+	if len(environment) > 0 {
+		cmd.Env = mergeRuntimeEnvironment(environment)
+	}
 	cmd.Stdout = limiter.stdoutWriter()
 	cmd.Stderr = limiter.stderrWriter()
 	err := cmd.Run()
@@ -292,6 +300,32 @@ func runCommand(ctx context.Context, dir string, argv []string, maxOutputBytes i
 		TimedOut:        ctxErr == context.DeadlineExceeded,
 		OutputTruncated: limiter.truncated(),
 	}
+}
+
+func mergeRuntimeEnvironment(overrides map[string]string) []string {
+	values := map[string]string{}
+	order := make([]string, 0, len(os.Environ())+len(overrides))
+	for _, entry := range os.Environ() {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		if _, exists := values[key]; !exists {
+			order = append(order, key)
+		}
+		values[key] = value
+	}
+	for key, value := range overrides {
+		if _, exists := values[key]; !exists {
+			order = append(order, key)
+		}
+		values[key] = value
+	}
+	result := make([]string, 0, len(order))
+	for _, key := range order {
+		result = append(result, key+"="+values[key])
+	}
+	return result
 }
 
 func parseTestReport(argv []string, stdout string, outputTruncated bool) *TestReport {
@@ -387,69 +421,7 @@ func parseGoTestJSON(stdout string, outputTruncated bool) *TestReport {
 }
 
 func verifyWriteScope(root string, scopes []string) error {
-	for _, scope := range scopes {
-		if strings.TrimSpace(scope) == "" {
-			continue
-		}
-		resolved, err := resolveScope(root, scope)
-		if err != nil {
-			return err
-		}
-		if !pathWithin(root, resolved) {
-			return fmt.Errorf("write scope %q escapes workspace root", scope)
-		}
-	}
-	return nil
-}
-
-func resolveScope(root, scope string) (string, error) {
-	path := scope
-	if !filepath.IsAbs(path) {
-		path = root + string(filepath.Separator) + path
-	}
-	resolved, err := resolveExistingPrefix(path)
-	if err != nil {
-		return "", fmt.Errorf("resolve write scope: %w", err)
-	}
-	return resolved, nil
-}
-
-func resolveExistingPrefix(path string) (string, error) {
-	volume := filepath.VolumeName(path)
-	rest := strings.TrimPrefix(path, volume)
-	current := volume + string(filepath.Separator)
-	parts := strings.FieldsFunc(rest, func(r rune) bool {
-		return r == '/' || r == '\\'
-	})
-	for _, part := range parts {
-		switch part {
-		case "", ".":
-			continue
-		case "..":
-			current = filepath.Dir(current)
-			continue
-		}
-		next := filepath.Join(current, part)
-		resolved, err := filepath.EvalSymlinks(next)
-		if err == nil {
-			current = resolved
-			continue
-		}
-		if os.IsNotExist(err) {
-			current = next
-			continue
-		}
-		return "", err
-	}
-	return filepath.Clean(current), nil
-}
-
-func pathWithin(root, path string) bool {
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..")
+	return workspace.ValidateWriteScopes(root, scopes)
 }
 
 func allowedCommand(command string, allowlist []string) bool {

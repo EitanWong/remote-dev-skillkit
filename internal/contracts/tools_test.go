@@ -63,6 +63,27 @@ func TestSessionToolsExposeGatewayURLAndAgentFields(t *testing.T) {
 	}
 }
 
+func TestSessionTaskSchemaExposesEngineeringTaskContract(t *testing.T) {
+	tool := findTool("rdev.sessions.task")
+	if tool == nil {
+		t.Fatal("missing rdev.sessions.task")
+	}
+	properties, _ := tool.InputSchema["properties"].(map[string]any)
+	raw, ok := properties["engineering_task"].(map[string]any)
+	if !ok {
+		t.Fatalf("sessions.task must expose engineering_task: %#v", properties)
+	}
+	versions, _ := raw["properties"].(map[string]any)
+	schemaVersion, _ := versions["schema_version"].(map[string]any)
+	if schemaVersion["const"] != EngineeringTaskSchemaVersion {
+		t.Fatalf("unexpected engineering task schema: %#v", raw)
+	}
+	profiles, ok := raw["x-rdev-adapter-profiles"].([]AdapterTaskProfile)
+	if !ok || len(profiles) != len(AdapterTaskProfiles()) {
+		t.Fatalf("sessions.task must publish adapter profiles: %#v", raw)
+	}
+}
+
 func TestSupportSessionConnectSchemaAcceptsRegionalTunnelPolicy(t *testing.T) {
 	tool := findTool("rdev.sessions.connect")
 	if tool == nil {

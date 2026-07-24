@@ -162,7 +162,7 @@ func executePlatform(ctx context.Context, spec Spec) (ResultArtifact, error) {
 			return ResultArtifact{Status: "failed", DesktopSessionState: "desktop_session_unavailable"}, err
 		}
 		if strings.TrimSpace(spec.OutputPath) != "" {
-			persisted, err := persistDesktopArtifact(spec.WorkspaceRoot, spec.OutputPath, "image/png", pngBytes)
+			persisted, err := persistDesktopArtifact(spec.WorkspaceRoot, spec.OutputPath, "image/png", pngBytes, spec.WriteScope)
 			if err != nil {
 				return ResultArtifact{Status: "failed"}, err
 			}
@@ -211,7 +211,7 @@ func executePlatform(ctx context.Context, spec Spec) (ResultArtifact, error) {
 			if err != nil {
 				return ResultArtifact{Status: "failed"}, err
 			}
-			persisted, err := persistDesktopArtifact(spec.WorkspaceRoot, spec.OutputPath, "application/zip", bundle)
+			persisted, err := persistDesktopArtifact(spec.WorkspaceRoot, spec.OutputPath, "application/zip", bundle, spec.WriteScope)
 			if err != nil {
 				return ResultArtifact{Status: "failed"}, err
 			}

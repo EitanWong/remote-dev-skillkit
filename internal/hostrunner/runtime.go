@@ -10,10 +10,12 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/acpxadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/claudecodeadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/codexadapter"
+	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
 	"github.com/EitanWong/remote-dev-skillkit/internal/desktopadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/fileadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/powershelladapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/shelladapter"
+	"github.com/EitanWong/remote-dev-skillkit/internal/toolchain"
 	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
 )
 
@@ -23,13 +25,18 @@ type adapterExecution struct {
 }
 
 func executeJobAdapter(ctx context.Context, envelope taskEnvelope, captureRuntimeFixture bool, releaseWorkspaceLock func()) (adapterExecution, error) {
+	return executeJobAdapterWithToolchainRoot(ctx, envelope, captureRuntimeFixture, releaseWorkspaceLock, "")
+}
+
+func executeJobAdapterWithToolchainRoot(ctx context.Context, envelope taskEnvelope, captureRuntimeFixture bool, releaseWorkspaceLock func(), toolchainRoot string) (adapterExecution, error) {
 	if !captureRuntimeFixture {
-		artifact, err := executeJobAdapterDirect(ctx, envelope)
+		artifact, err := executeJobAdapterDirectWithToolchainRoot(ctx, envelope, toolchainRoot)
 		return adapterExecution{ArtifactContent: artifact}, err
 	}
 	runtimeAdapter := &hostRuntimeAdapter{
 		envelope:             envelope,
 		releaseWorkspaceLock: releaseWorkspaceLock,
+		toolchainRoot:        toolchainRoot,
 	}
 	fixture, err := adapterkit.RunLifecycle(ctx, runtimeAdapter, adapterkit.RuntimeRequest{
 		Adapter:       envelope.Adapter,
@@ -60,6 +67,7 @@ func executeJobAdapter(ctx context.Context, envelope taskEnvelope, captureRuntim
 type hostRuntimeAdapter struct {
 	envelope             taskEnvelope
 	releaseWorkspaceLock func()
+	toolchainRoot        string
 	artifactContent      string
 	resultSchema         string
 }
@@ -97,7 +105,7 @@ func (a *hostRuntimeAdapter) Prepare(context.Context, adapterkit.RuntimeRequest)
 }
 
 func (a *hostRuntimeAdapter) Run(ctx context.Context, _ adapterkit.RuntimeRequest) (adapterkit.RuntimePhaseOutput, error) {
-	artifact, err := executeJobAdapterDirect(ctx, a.envelope)
+	artifact, err := executeJobAdapterDirectWithToolchainRoot(ctx, a.envelope, a.toolchainRoot)
 	a.artifactContent = artifact
 	a.resultSchema = resultSchemaForAdapter(a.envelope.Adapter)
 	output := adapterkit.RuntimePhaseOutput{
@@ -140,6 +148,10 @@ func (a *hostRuntimeAdapter) Cleanup(context.Context, adapterkit.RuntimeRequest)
 }
 
 func executeJobAdapterDirect(ctx context.Context, envelope taskEnvelope) (string, error) {
+	return executeJobAdapterDirectWithToolchainRoot(ctx, envelope, "")
+}
+
+func executeJobAdapterDirectWithToolchainRoot(ctx context.Context, envelope taskEnvelope, toolchainRoot string) (string, error) {
 	switch envelope.Adapter {
 	case "acpx":
 		execution, err := acpxadapter.ExecuteContext(ctx, acpxadapter.Spec{
@@ -156,12 +168,24 @@ func executeJobAdapterDirect(ctx context.Context, envelope taskEnvelope) (string
 		})
 		return execution.ArtifactContent(), err
 	case "claude-code":
+		runtimeProfile, err := resolveAgentRuntimeProfile(envelope, contracts.ToolchainClaudeCode, Options{ToolchainRoot: toolchainRoot})
+		if err != nil {
+			return "", err
+		}
+		claudeCommand := configuredAgentCommand(envelope, "claude_code_command", "claude_command")
+		if runtimeProfile.Command != "" {
+			if claudeCommand != "" {
+				return "", fmt.Errorf("toolchain profile task must not override the configured Claude Code command")
+			}
+			claudeCommand = runtimeProfile.Command
+		}
 		execution, err := claudecodeadapter.ExecuteContext(ctx, claudecodeadapter.Spec{
 			WorkspaceRoot:             envelope.Workspace.Root,
 			WriteScope:                envelope.Workspace.WriteScope,
 			Prompt:                    stringValue(envelope.Payload, "prompt", envelope.Intent),
-			ClaudeCodeCommand:         stringValue(envelope.Payload, "claude_code_command", stringValue(envelope.Payload, "claude_command", "")),
+			ClaudeCodeCommand:         claudeCommand,
 			ClaudeCodeArgs:            stringSliceValue(envelope.Payload, "claude_code_args"),
+			Environment:               runtimeProfile.Environment,
 			VerificationCommands:      stringMatrixValue(envelope.Payload, "verification_commands"),
 			AllowVerificationCommands: stringSliceValue(envelope.Payload, "allow_verification_commands"),
 			MaxDurationSeconds:        envelope.Limits.MaxDurationSeconds,
@@ -169,18 +193,33 @@ func executeJobAdapterDirect(ctx context.Context, envelope taskEnvelope) (string
 		})
 		return execution.ArtifactContent(), err
 	case "codex":
+		runtimeProfile, err := resolveAgentRuntimeProfile(envelope, contracts.ToolchainCodex, Options{ToolchainRoot: toolchainRoot})
+		if err != nil {
+			return "", err
+		}
+		codexCommand := configuredAgentCommand(envelope, "codex_command")
+		if runtimeProfile.Command != "" {
+			if codexCommand != "" {
+				return "", fmt.Errorf("toolchain profile task must not override the configured Codex command")
+			}
+			codexCommand = runtimeProfile.Command
+		}
 		execution, err := codexadapter.ExecuteContext(ctx, codexadapter.Spec{
 			WorkspaceRoot:             envelope.Workspace.Root,
 			WriteScope:                envelope.Workspace.WriteScope,
 			Prompt:                    stringValue(envelope.Payload, "prompt", envelope.Intent),
-			CodexCommand:              stringValue(envelope.Payload, "codex_command", ""),
+			CodexCommand:              codexCommand,
 			CodexArgs:                 stringSliceValue(envelope.Payload, "codex_args"),
+			CodexProfile:              runtimeProfile.CodexProfile,
+			Environment:               runtimeProfile.Environment,
 			VerificationCommands:      stringMatrixValue(envelope.Payload, "verification_commands"),
 			AllowVerificationCommands: stringSliceValue(envelope.Payload, "allow_verification_commands"),
 			MaxDurationSeconds:        envelope.Limits.MaxDurationSeconds,
 			MaxOutputBytes:            envelope.Limits.MaxOutputBytes,
 		})
 		return execution.ArtifactContent(), err
+	case "toolchain":
+		return executeToolchainAdapter(ctx, envelope, toolchainRoot)
 	case "desktop":
 		action := desktopadapter.NormalizeAction(stringValue(envelope.Payload, "action", ""))
 		outputPath := stringValue(envelope.Payload, "output_path", "")
@@ -208,12 +247,14 @@ func executeJobAdapterDirect(ctx context.Context, envelope taskEnvelope) (string
 			MaxDurationSeconds: envelope.Limits.MaxDurationSeconds,
 			MaxOutputBytes:     envelope.Limits.MaxOutputBytes,
 			WorkspaceRoot:      envelope.Workspace.Root,
+			WriteScope:         envelope.Workspace.WriteScope,
 			OutputPath:         outputPath,
 		})
 		return execution.ArtifactContent(), err
 	case "file":
 		execution, err := fileadapter.ExecuteContext(ctx, fileadapter.Spec{
 			WorkspaceRoot:      envelope.Workspace.Root,
+			ReadScope:          stringSliceValue(envelope.Payload, "read_scope"),
 			WriteScope:         envelope.Workspace.WriteScope,
 			Action:             stringValue(envelope.Payload, "action", ""),
 			Path:               stringValue(envelope.Payload, "path", ""),
@@ -221,9 +262,15 @@ func executeJobAdapterDirect(ctx context.Context, envelope taskEnvelope) (string
 			Encoding:           stringValue(envelope.Payload, "encoding", ""),
 			ExpectedBytes:      intValue(envelope.Payload, "expected_bytes", 0),
 			ExpectedSHA256:     stringValue(envelope.Payload, "expected_sha256", ""),
+			ExpectedHash:       stringValue(envelope.Payload, "expected_hash", ""),
 			MaxBytes:           intValue(envelope.Payload, "max_bytes", envelope.Limits.MaxOutputBytes),
 			Offset:             int64Value(envelope.Payload, "offset", 0),
 			ChunkBytes:         intValue(envelope.Payload, "chunk_bytes", 0),
+			Query:              stringValue(envelope.Payload, "query", ""),
+			Glob:               stringValue(envelope.Payload, "glob", ""),
+			MaxResults:         intValue(envelope.Payload, "max_results", 0),
+			ResultOffset:       intValue(envelope.Payload, "result_offset", 0),
+			AllowGitInspection: hasCapability(envelope.Capabilities, "git.diff"),
 			MaxDurationSeconds: envelope.Limits.MaxDurationSeconds,
 			MaxOutputBytes:     envelope.Limits.MaxOutputBytes,
 		})
@@ -250,6 +297,22 @@ func executeJobAdapterDirect(ctx context.Context, envelope taskEnvelope) (string
 		})
 		return execution.ArtifactContent(), err
 	}
+}
+
+func executeToolchainAdapter(ctx context.Context, envelope taskEnvelope, toolchainRoot string) (string, error) {
+	request, err := contracts.DecodeToolchainRequest(envelope.Payload["toolchain_request"])
+	if err != nil {
+		return "", err
+	}
+	result, ensureErr := toolchain.Ensure(ctx, request, toolchain.Options{Root: toolchainRoot})
+	artifact, marshalErr := json.MarshalIndent(result, "", "  ")
+	if marshalErr != nil {
+		return "", fmt.Errorf("encode toolchain result: %w", marshalErr)
+	}
+	if ensureErr != nil {
+		return string(artifact), ensureErr
+	}
+	return string(artifact), nil
 }
 
 func safeArtifactTaskID(taskID string) string {
@@ -292,6 +355,8 @@ func resultSchemaForAdapter(adapter string) string {
 		return claudecodeadapter.ResultSchemaVersion
 	case "codex":
 		return codexadapter.ResultSchemaVersion
+	case "toolchain":
+		return toolchain.ResultSchemaVersion
 	case "desktop":
 		return desktopadapter.ResultSchemaVersion
 	case "file":

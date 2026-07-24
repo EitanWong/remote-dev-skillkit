@@ -17,6 +17,32 @@ type windowsPrivateTrustees struct {
 	system         string
 }
 
+func (trustees windowsPrivateTrustees) uniqueSIDs() []string {
+	values := []string{trustees.current, trustees.system, trustees.administrators}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, sid := range values {
+		if sid == "" {
+			continue
+		}
+		if _, exists := seen[sid]; exists {
+			continue
+		}
+		seen[sid] = struct{}{}
+		result = append(result, sid)
+	}
+	return result
+}
+
+func (trustees windowsPrivateTrustees) privateDACL(flags string) string {
+	var builder strings.Builder
+	builder.WriteString("D:P")
+	for _, sid := range trustees.uniqueSIDs() {
+		fmt.Fprintf(&builder, "(A;%s;FA;;;%s)", flags, sid)
+	}
+	return builder.String()
+}
+
 func preparePrivateCache(root string, directories []string, files []managedCacheFile) error {
 	if err := validateWindowsCacheRoot(root); err != nil {
 		return err
@@ -186,11 +212,7 @@ func windowsPrivateSecurityDescriptor() (winSecurityDescriptor, windowsPrivateTr
 	if err != nil {
 		return winSecurityDescriptor{}, windowsPrivateTrustees{}, err
 	}
-	descriptor, err := newWinSecurityDescriptor(fmt.Sprintf(
-		"O:%sD:P(A;OICI;FA;;;%s)(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)",
-		trustees.current,
-		trustees.current,
-	))
+	descriptor, err := newWinSecurityDescriptor("O:" + trustees.current + trustees.privateDACL("OICI"))
 	if err != nil {
 		return winSecurityDescriptor{}, windowsPrivateTrustees{}, fmt.Errorf("create private Windows security descriptor: %w", err)
 	}
@@ -345,10 +367,11 @@ func validateWindowsPrivateSecurityState(state winSecurityState, requireProtecte
 	if !trustees.contains(state.owner) {
 		return fmt.Errorf("private Windows path owner is not trusted")
 	}
-	if len(state.aces) != 3 {
-		return fmt.Errorf("private Windows path DACL must contain exactly three ACEs")
+	trustedSIDs := trustees.uniqueSIDs()
+	if len(state.aces) != len(trustedSIDs) {
+		return fmt.Errorf("private Windows path DACL must contain exactly %d unique trustee ACEs", len(trustedSIDs))
 	}
-	seen := make(map[string]bool, 3)
+	seen := make(map[string]bool, len(trustedSIDs))
 	for _, ace := range state.aces {
 		if ace.typeID != winAccessAllowedACEType || ace.mask != winPrivateFullControl || expectedFlags >= 0 && int(ace.flags) != expectedFlags {
 			return fmt.Errorf("private Windows DACL contains an unsupported ACE")
@@ -358,8 +381,10 @@ func validateWindowsPrivateSecurityState(state winSecurityState, requireProtecte
 		}
 		seen[ace.sid] = true
 	}
-	if !seen[trustees.current] || !seen[trustees.administrators] || !seen[trustees.system] {
-		return fmt.Errorf("private Windows DACL is missing a trusted trustee")
+	for _, sid := range trustedSIDs {
+		if !seen[sid] {
+			return fmt.Errorf("private Windows DACL is missing a trusted trustee")
+		}
 	}
 	return nil
 }

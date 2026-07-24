@@ -312,6 +312,61 @@ func TestForegroundCancellationRevokesOnlyBeforeConnection(t *testing.T) {
 	}
 }
 
+func TestForegroundCancellationWinsOverPendingRuntimeLoss(t *testing.T) {
+	runtime, handles := supportSessionAvailabilityRuntime(t, "cancellation-race")
+	gw, store, ticket := publishedSupportSessionForAvailabilityTest(t)
+	root := t.TempDir()
+	readyFile, handoffFile, statusFile := availabilityTestFiles(t, root, ticket.Code)
+	published := runtime.Snapshot()
+
+	handles[0].wait <- errors.New("route exited before canceled watcher starts")
+	deadline := time.Now().Add(3 * time.Second)
+	for len(runtime.Snapshot().Candidates) != 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("runtime did not publish the pending route loss")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	callback := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		watchForegroundSupportSessionAvailability(ctx, foregroundSupportSessionOptions{
+			Out: &bytes.Buffer{}, StatusFile: statusFile, ReadyFile: readyFile, HandoffTextFile: handoffFile,
+			ConnectedReportFile: filepath.Join(root, "connected.txt"), JournalPath: filepath.Join(root, "journal.json"),
+			Gateway: gw, Store: store, TicketID: ticket.ID, TicketCode: ticket.Code, Runtime: runtime, Published: published,
+			OnInvalidated: func(err error) { callback <- err },
+		})
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("canceled watcher did not terminate")
+	}
+	select {
+	case err := <-callback:
+		t.Fatalf("cancellation was misreported as tunnel loss: %v", err)
+	default:
+	}
+	current, _ := gw.TicketForCode(ticket.Code)
+	if current.Status != model.TicketStatusRevoked {
+		t.Fatalf("cancellation before connection left ticket active: %#v", current)
+	}
+	content, err := os.ReadFile(readyFile)
+	if err != nil {
+		t.Fatalf("read cancellation diagnostic: %v", err)
+	}
+	var diagnostic struct {
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(content, &diagnostic); err != nil || diagnostic.Reason != "support_session_canceled" {
+		t.Fatalf("cancellation did not write the cancellation diagnostic: %s err=%v", content, err)
+	}
+}
+
 func TestForegroundConnectedHostStopsAvailabilityWatcher(t *testing.T) {
 	runtime, handles := supportSessionAvailabilityRuntime(t, "connected")
 	gw, store, ticket := publishedSupportSessionForAvailabilityTest(t)

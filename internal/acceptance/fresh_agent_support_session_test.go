@@ -32,6 +32,13 @@ func TestRunFreshAgentSupportSessionWritesPassingReport(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(out, "report.json")); err != nil {
 		t.Fatalf("expected report file: %v", err)
 	}
+	verification, err := VerifyFreshAgentSupportSessionReport(filepath.Join(out, "report.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if verification.SchemaVersion != FreshAgentSupportSessionVerificationSchemaVersion || !verification.OK() {
+		t.Fatalf("expected passing fresh-Agent verification: %#v", verification)
+	}
 	if report.HandoffNoGateway["selected_path"] != "start-foreground-gateway" {
 		t.Fatalf("expected foreground start path, got %#v", report.HandoffNoGateway)
 	}

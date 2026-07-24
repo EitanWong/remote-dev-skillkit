@@ -217,11 +217,15 @@ func writeManagedMacServicePackageFixture(t *testing.T, fakeCodex, releaseGate s
 		t.Fatal(err)
 	}
 	managedOut := filepath.Join(root, "managed-mac-run")
-	if _, err := RunManagedMac(context.Background(), ManagedMacOptions{
+	report, err := RunManagedMac(context.Background(), ManagedMacOptions{
 		OutDir:       managedOut,
 		CodexCommand: fakeCodex,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if report.CodingTask.Payload["isolation"] != "workspace-lock" || report.CodingTask.Payload["base_sha"] != report.Worktree.BaseSHA {
+		t.Fatalf("managed acceptance must hand its prepared worktree to the host runner without nested isolation: task=%#v worktree=%#v", report.CodingTask.Payload, report.Worktree)
 	}
 	reviewTranscriptPath := filepath.Join(root, "review.txt")
 	startTranscriptPath := filepath.Join(root, "start.txt")

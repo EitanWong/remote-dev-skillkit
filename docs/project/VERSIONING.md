@@ -10,6 +10,28 @@ Before v1.0.0:
 - Development versions are staged as `0.0.N-dev` until the first public
   readiness line. Each `0.0.N-dev` marks one coherent engineering gate, not a
   calendar snapshot.
+
+## Version-commit discipline
+
+- Each completed development gate is represented by one verified Conventional
+  Commit that updates `CHANGELOG.md` for that version. On the protected main
+  branch, that is normally the PR squash commit.
+- Do not mix independent completed gates in one version commit. A defect found
+  after a gate has been recorded advances the next development version rather
+  than rewriting published history.
+- Every version commit must carry its focused and full verification evidence in
+  the issue or PR before it is integrated.
+
+## Ephemeral cloud acceptance
+
+- Provision a temporary cloud host only when local or cross-platform evidence
+  is insufficient for the acceptance target.
+- Keep credentials, connection tickets, and raw host metadata out of source,
+  changelogs, and audit artifacts. Record only sanitized acceptance evidence.
+- Release temporary cloud hosts and their dependent resources after the test,
+  including on failure. Confirm deletion with an independent provider readback
+  rather than treating a command exit code as proof of cleanup.
+
 - `0.1.0-dev` marks the public-readiness line after the local safety kernel,
   Skillkit packaging, release evidence, public-surface audits, and local
   operator-auth foundation exist.

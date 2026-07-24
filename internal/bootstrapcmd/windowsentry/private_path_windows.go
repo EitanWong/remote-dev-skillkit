@@ -34,10 +34,7 @@ func ProtectPrivatePath(path string, directory bool) error {
 	if directory {
 		flags = "OICI"
 	}
-	descriptor, err := newWinSecurityDescriptor(fmt.Sprintf(
-		"D:P(A;%s;FA;;;%s)(A;%s;FA;;;SY)(A;%s;FA;;;BA)",
-		flags, trustees.current, flags, flags,
-	))
+	descriptor, err := newWinSecurityDescriptor(trustees.privateDACL(flags))
 	if err != nil {
 		return err
 	}

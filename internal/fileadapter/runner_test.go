@@ -204,6 +204,75 @@ func TestExecuteRejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
+func TestExecuteWriteRejectsExistingFileSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	allowed := filepath.Join(root, "allowed")
+	if err := os.MkdirAll(allowed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outsideTarget := filepath.Join(outside, "target.txt")
+	if err := os.WriteFile(outsideTarget, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outsideTarget, filepath.Join(allowed, "output.txt")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	if _, err := Execute(Spec{
+		WorkspaceRoot: root,
+		WriteScope:    []string{"allowed"},
+		Action:        "write",
+		Path:          "allowed/output.txt",
+		Content:       "escaped",
+	}); err == nil {
+		t.Fatal("expected existing file symlink escape to be rejected")
+	}
+	content, err := os.ReadFile(outsideTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "keep" {
+		t.Fatalf("symlink escape must not modify outside target, got %q", content)
+	}
+}
+
+func TestExecuteWriteRejectsExistingFileSymlinkOutsideDeclaredScope(t *testing.T) {
+	root := t.TempDir()
+	allowed := filepath.Join(root, "allowed")
+	other := filepath.Join(root, "other")
+	if err := os.MkdirAll(allowed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(other, "target.txt")
+	if err := os.WriteFile(target, []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(allowed, "output.txt")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	if _, err := Execute(Spec{
+		WorkspaceRoot: root,
+		WriteScope:    []string{"allowed"},
+		Action:        "write",
+		Path:          "allowed/output.txt",
+		Content:       "escaped",
+	}); err == nil {
+		t.Fatal("expected symlink target outside declared write scope to be rejected")
+	}
+	content, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "keep" {
+		t.Fatalf("write scope escape must not modify sibling target, got %q", content)
+	}
+}
+
 func TestExecuteDeleteWithinWriteScope(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "out", "old.txt")

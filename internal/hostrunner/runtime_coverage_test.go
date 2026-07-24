@@ -2,11 +2,16 @@ package hostrunner
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/fileadapter"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 	"github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit"
@@ -29,6 +34,12 @@ func TestHostRunnerCapabilityAndPayloadHelpers(t *testing.T) {
 	}{
 		{"read", nil, "file.transfer.read"},
 		{"read", []string{"file.transfer.read"}, ""},
+		{"describe", []string{"file.transfer.read"}, "git.diff"},
+		{"describe", []string{"file.transfer.read", "git.diff"}, ""},
+		{"search", []string{"file.transfer.read"}, ""},
+		{"read_slice", []string{"file.transfer.read"}, ""},
+		{"symbols", []string{"file.transfer.read"}, ""},
+		{"diagnostics", []string{"file.transfer.read"}, ""},
 		{"write", []string{"file.transfer.write"}, "fs.write.scoped"},
 		{"write", []string{"file.transfer.write", "fs.write.scoped"}, ""},
 		{"unknown", []string{"file.transfer.read"}, "file.transfer.read"},
@@ -122,10 +133,16 @@ func TestHostRunnerCapabilityRequirementsAcrossAdapters(t *testing.T) {
 			t.Fatalf("adapter %s missing capability=%q, want %q", tc.adapter, got, tc.want)
 		}
 	}
-	for _, action := range []string{"list", "read", "download"} {
+	for _, action := range []string{"list", "read", "download", "search", "read_slice", "symbols", "diagnostics"} {
 		if got := missingFileCapability(taskEnvelope{Payload: map[string]any{"action": action}, Capabilities: []string{"file.transfer.read"}}); got != "" {
 			t.Fatalf("read action %s should be allowed, got %q", action, got)
 		}
+	}
+	if got := missingFileCapability(taskEnvelope{Payload: map[string]any{"action": "describe"}, Capabilities: []string{"file.transfer.read"}}); got != "git.diff" {
+		t.Fatalf("describe without git.diff should be denied, got %q", got)
+	}
+	if got := missingFileCapability(taskEnvelope{Payload: map[string]any{"action": "describe"}, Capabilities: []string{"file.transfer.read", "git.diff"}}); got != "" {
+		t.Fatalf("describe with read and git.diff should be allowed, got %q", got)
 	}
 	for _, action := range []string{"write", "upload", "delete"} {
 		if got := missingFileCapability(taskEnvelope{Payload: map[string]any{"action": action}, Capabilities: []string{"file.transfer.write", "fs.write.scoped"}}); got != "" {
@@ -138,6 +155,92 @@ func TestHostRunnerCapabilityRequirementsAcrossAdapters(t *testing.T) {
 		}}); got != "" {
 			t.Fatalf("desktop action %s should be allowed, got %q", action, got)
 		}
+	}
+}
+
+func TestHostRunnerExecutesProjectContextThroughFileAdapter(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is required for project-context hostrunner test")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.test/context\n\ngo 1.25\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "lookup.go"), []byte("package src\n\nfunc Lookup() string { return \"ok\" }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runnerGit(t, root, "init")
+	runnerGit(t, root, "config", "user.email", "rdev@example.test")
+	runnerGit(t, root, "config", "user.name", "Remote Dev")
+	runnerGit(t, root, "add", ".")
+	runnerGit(t, root, "commit", "-m", "context fixture")
+
+	base := SessionTaskSpec{
+		TaskID:       "task-project-context",
+		EndpointID:   "endpoint-project-context",
+		Adapter:      "file",
+		Workspace:    model.TaskWorkspace{Root: root},
+		Capabilities: []string{"file.transfer.read", "git.diff"},
+		Limits:       model.TaskLimits{MaxDurationSeconds: 30, MaxOutputBytes: 64 * 1024},
+		Payload: map[string]any{
+			"action":     "describe",
+			"read_scope": []string{"."},
+		},
+	}
+	described, err := RunSessionTaskWithOptionsContext(context.Background(), base, time.Now().UTC(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var descriptionArtifact fileadapter.ResultArtifact
+	if err := json.Unmarshal([]byte(described.ArtifactContent), &descriptionArtifact); err != nil {
+		t.Fatal(err)
+	}
+	if descriptionArtifact.ProjectContext == nil || descriptionArtifact.ProjectContext.Description == nil || descriptionArtifact.ProjectContext.Description.Git.HeadSHA == "" {
+		t.Fatalf("project describe did not cross the hostrunner adapter boundary: %#v", descriptionArtifact)
+	}
+
+	search := base
+	search.TaskID = "task-project-search"
+	search.Capabilities = []string{"file.transfer.read"}
+	search.Payload = map[string]any{
+		"action":        "search",
+		"path":          "src",
+		"read_scope":    []string{"src"},
+		"query":         "Lookup",
+		"glob":          "*.go",
+		"max_results":   1,
+		"result_offset": 0,
+	}
+	searched, err := RunSessionTaskWithOptionsContext(context.Background(), search, time.Now().UTC(), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var searchArtifact fileadapter.ResultArtifact
+	if err := json.Unmarshal([]byte(searched.ArtifactContent), &searchArtifact); err != nil {
+		t.Fatal(err)
+	}
+	if searchArtifact.ProjectContext == nil || len(searchArtifact.ProjectContext.Matches) != 1 || searchArtifact.ProjectContext.Matches[0].Path != "src/lookup.go" {
+		t.Fatalf("project search did not preserve scoped context payload: %#v", searchArtifact)
+	}
+
+	missingGit := base
+	missingGit.TaskID = "task-project-describe-denied"
+	missingGit.Capabilities = []string{"file.transfer.read"}
+	denied, err := RunSessionTaskWithOptionsContext(context.Background(), missingGit, time.Now().UTC(), Options{})
+	var denial DenialError
+	if !errors.As(err, &denial) || denial.Explanation.Code != "missing_capability" || denial.Explanation.Capability != "git.diff" {
+		t.Fatalf("describe without git.diff must be denied before execution: result=%#v err=%v", denied, err)
+	}
+}
+
+func runnerGit(t *testing.T, root string, args ...string) {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", root}, args...)...)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
 	}
 }
 

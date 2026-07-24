@@ -43,7 +43,11 @@ func main() {}
 func TestConformanceRejectsWriteScopeEscapeBeforeAcpxRuns(t *testing.T) {
 	repo := initGitRepo(t)
 	outside := t.TempDir()
-	link := filepath.Join(repo, "outside-link")
+	allowed := filepath.Join(repo, "allowed")
+	if err := os.MkdirAll(allowed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(allowed, "outside-link")
 	if err := os.Symlink(outside, link); err != nil {
 		t.Skipf("symlink creation is not available: %v", err)
 	}
@@ -59,7 +63,7 @@ func main() {
 `)
 	_, err := Execute(Spec{
 		WorkspaceRoot:      repo,
-		WriteScope:         []string{filepath.Join(link, "missing-child")},
+		WriteScope:         []string{"allowed"},
 		Prompt:             "attempt escaped write scope",
 		AcpxCommand:        "go",
 		AcpxArgs:           []string{"run", fakeAcpx},

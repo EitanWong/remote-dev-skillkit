@@ -79,7 +79,7 @@ func TestEncodePNGWithinBudgetKeepsValidPNG(t *testing.T) {
 
 func TestPersistDesktopArtifactReturnsRelativeMetadata(t *testing.T) {
 	root := t.TempDir()
-	artifact, err := persistDesktopArtifact(root, ".rdev/desktop-artifacts/capture.png", "image/png", []byte("png-data"))
+	artifact, err := persistDesktopArtifact(root, ".rdev/desktop-artifacts/capture.png", "image/png", []byte("png-data"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,32 @@ func TestPersistDesktopArtifactReturnsRelativeMetadata(t *testing.T) {
 }
 
 func TestPersistDesktopArtifactRejectsPathEscape(t *testing.T) {
-	if _, err := persistDesktopArtifact(t.TempDir(), "../capture.png", "image/png", []byte("x")); err == nil {
+	if _, err := persistDesktopArtifact(t.TempDir(), "../capture.png", "image/png", []byte("x"), nil); err == nil {
 		t.Fatal("expected artifact path escape to be rejected")
+	}
+}
+
+func TestPersistDesktopArtifactRejectsSymlinkEscape(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, ".rdev")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	if _, err := persistDesktopArtifact(root, ".rdev/desktop-artifacts/capture.png", "image/png", []byte("x"), nil); err == nil {
+		t.Fatal("expected artifact symlink escape to be rejected")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "desktop-artifacts", "capture.png")); !os.IsNotExist(err) {
+		t.Fatalf("symlink escape must not create outside artifact, stat err=%v", err)
+	}
+}
+
+func TestPersistDesktopArtifactHonorsWriteScope(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "allowed"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := persistDesktopArtifact(root, ".rdev/desktop-artifacts/capture.png", "image/png", []byte("x"), []string{"allowed"}); err == nil {
+		t.Fatal("expected artifact outside declared write scope to be rejected")
 	}
 }

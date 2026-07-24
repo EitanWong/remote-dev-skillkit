@@ -472,6 +472,67 @@ func TestHTTPSessionTaskResultArtifactAndTerminalBehavior(t *testing.T) {
 	}
 }
 
+func TestHTTPSessionTaskPreflightsEngineeringTask(t *testing.T) {
+	handler := NewServer(gateway.NewMemoryGateway()).Handler()
+	created := createHTTPSession(t, handler)
+	joined := postJSON(t, handler, "/v1/session-joins", `{
+		"join_code":"`+created.Session.JoinCode+`",
+		"endpoint":{"role":"target","platform":"linux/amd64","identity_fingerprint":"fp-engineering","capabilities":["codex.run","git.diff"],"transport":"long-poll"}
+	}`, "")
+	if joined.Code != http.StatusOK {
+		t.Fatalf("join engineering endpoint status = %d body=%s", joined.Code, joined.Body.String())
+	}
+
+	valid := postJSON(t, handler, "/v1/sessions/"+url.PathEscape(created.Session.ID)+"/tasks", `{
+		"adapter":"codex",
+		"capabilities":["codex.run","git.diff"],
+		"idempotency_key":"http-engineering-task-1",
+		"engineering_task":{
+			"schema_version":"rdev.engineering-task.v1",
+			"goal":"Exercise HTTP engineering preflight.",
+			"workspace":{"root":"/tmp/http-engineering-repo","base_sha":"0123456789abcdef0123456789abcdef01234567","isolation":"git-worktree","dirty_policy":"preserve","read_scope":["."],"write_scope":["internal"]},
+			"plan":["Inspect.","Implement."],
+			"acceptance":["Focused tests pass."],
+			"verification":{"commands":[["go","test","./internal/contracts"]],"allow_commands":["go"]},
+			"limits":{"max_duration_seconds":600,"max_output_bytes":65536,"max_attempts":2},
+			"network_policy":"default-deny",
+			"required_capabilities":["codex.run","git.diff"],
+			"idempotency_key":"http-engineering-task-1"
+		}
+	}`, "")
+	if valid.Code != http.StatusAccepted {
+		t.Fatalf("valid engineering task status = %d body=%s", valid.Code, valid.Body.String())
+	}
+	var payload struct {
+		Task controlplane.Task `json:"task"`
+	}
+	decodeHTTP(t, valid, &payload)
+	if payload.Task.Payload["workspace_root"] != "/tmp/http-engineering-repo" || payload.Task.Limits["max_attempts"] != float64(2) {
+		t.Fatalf("HTTP engineering task did not normalize: %#v", payload.Task)
+	}
+
+	invalid := postJSON(t, handler, "/v1/sessions/"+url.PathEscape(created.Session.ID)+"/tasks", `{
+		"adapter":"codex",
+		"capabilities":["codex.run","git.diff"],
+		"idempotency_key":"http-engineering-task-invalid",
+		"engineering_task":{
+			"schema_version":"rdev.engineering-task.v1",
+			"goal":"Reject malformed base SHA.",
+			"workspace":{"root":"/tmp/http-engineering-repo","base_sha":"not-a-sha","isolation":"git-worktree","dirty_policy":"preserve","read_scope":["."],"write_scope":["internal"]},
+			"plan":["Inspect."],
+			"acceptance":["Focused tests pass."],
+			"verification":{"commands":[["go","test","./internal/contracts"]],"allow_commands":["go"]},
+			"limits":{"max_duration_seconds":600,"max_output_bytes":65536,"max_attempts":2},
+			"network_policy":"default-deny",
+			"required_capabilities":["codex.run","git.diff"],
+			"idempotency_key":"http-engineering-task-invalid"
+		}
+	}`, "")
+	if invalid.Code != http.StatusBadRequest || !strings.Contains(invalid.Body.String(), "base_sha") {
+		t.Fatalf("malformed engineering task must fail before routing: status=%d body=%s", invalid.Code, invalid.Body.String())
+	}
+}
+
 func TestHTTPSessionEventsPersistsRenewedLeaseForGatewayRestart(t *testing.T) {
 	publicKey, privateKey := httpGatewayKeyPair(t)
 	now := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)

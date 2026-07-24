@@ -351,6 +351,47 @@ func TestSubmitTaskAppendsTaskEvent(t *testing.T) {
 	}
 }
 
+func TestTaskProgressTransitionsAssignedTaskAndIsIdempotent(t *testing.T) {
+	store, _ := newStoreHarness()
+	session, target, _ := mustJoinedTarget(t, store)
+	task, _, err := store.SubmitTask(session.ID, TaskSpec{Adapter: "shell", Capabilities: []string{"shell"}, IdempotencyKey: "progress-base"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	progress := Event{
+		Type:           EventTypeTaskProgress,
+		FromEndpointID: target.ID,
+		TaskID:         task.ID,
+		IdempotencyKey: "engineering-progress:checkpoint-1",
+		Payload: map[string]any{
+			"schema_version": "rdev.engineering-progress.v1",
+			"phase":          "inspect",
+			"attempt":        0,
+			"checkpoint_id":  "checkpoint-1",
+			"recoverable":    true,
+		},
+	}
+	first, err := store.AppendEvent(session.ID, progress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.AppendEvent(session.ID, progress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := store.Session(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Type != EventTypeTaskProgress || first.Seq != second.Seq || current.Tasks[0].Status != TaskStatusRunning || current.Tasks[0].StartedAt == nil {
+		t.Fatalf("task progress must be idempotent and transition the assigned task to running: first=%#v second=%#v task=%#v", first, second, current.Tasks[0])
+	}
+	_, err = store.AppendEvent(session.ID, Event{Type: EventTypeTaskProgress, FromEndpointID: "wrong-endpoint", TaskID: task.ID, IdempotencyKey: "engineering-progress:wrong"})
+	if !errors.Is(err, ProtocolError{Code: ErrUnauthorizedEndpoint}) {
+		t.Fatalf("unassigned endpoint progress error = %v, want unauthorized endpoint", err)
+	}
+}
+
 func TestRepeatedTaskEventDoesNotCreateSecondAttempt(t *testing.T) {
 	store, _ := newStoreHarness()
 	session, _, _ := mustJoinedTarget(t, store)
@@ -392,6 +433,38 @@ func TestCancelTaskUsesTaskEventAndIsIdempotent(t *testing.T) {
 	}
 	if firstEvent.Seq != secondEvent.Seq || firstTask.ID != secondTask.ID {
 		t.Fatalf("cancel should be idempotent: %#v %#v", firstEvent, secondEvent)
+	}
+}
+
+func TestResumeEngineeringTaskClonesOnlyTerminalTaskWithCheckpointBinding(t *testing.T) {
+	store, _ := newStoreHarness()
+	session, target, _ := mustJoinedTarget(t, store)
+	source, _, err := store.SubmitTask(session.ID, TaskSpec{
+		TargetEndpointID: target.ID,
+		Adapter:          "codex",
+		Capabilities:     []string{"shell"},
+		Payload:          map[string]any{"engineering_task": map[string]any{"schema_version": "rdev.engineering-task.v1"}},
+		IdempotencyKey:   "resume-source",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.CancelTask(session.ID, source.ID, "transport interrupted", "resume-cancel"); err != nil {
+		t.Fatal(err)
+	}
+	resumed, event, err := store.ResumeTask(session.ID, source.ID, "ecp_fixture", "resume-request")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.ID == source.ID || resumed.AttemptID == source.AttemptID || resumed.Status != TaskStatusOffered || event.Type != EventTypeTask || resumed.Payload["engineering_resume_checkpoint_id"] != "ecp_fixture" || resumed.Payload["engineering_resume_task_id"] != source.ID {
+		t.Fatalf("resume task did not bind a new attempt to the source checkpoint: source=%#v resumed=%#v event=%#v", source, resumed, event)
+	}
+	duplicate, duplicateEvent, err := store.ResumeTask(session.ID, source.ID, "ecp_fixture", "resume-request")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duplicate.ID != resumed.ID || duplicateEvent.Seq != event.Seq {
+		t.Fatalf("resume task must obey task idempotency: %#v %#v %#v %#v", resumed, duplicate, event, duplicateEvent)
 	}
 }
 

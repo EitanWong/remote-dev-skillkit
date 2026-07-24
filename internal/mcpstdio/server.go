@@ -437,14 +437,36 @@ func (s Server) sessionEvents(args map[string]any) (any, error) {
 
 func (s Server) sessionTask(args map[string]any) (any, error) {
 	sessionID := requiredString(args, "session_id")
-	spec := controlplane.TaskSpec{
-		TargetEndpointID: stringArg(args, "target_endpoint_id", ""),
-		Adapter:          requiredString(args, "adapter"),
-		Intent:           stringArg(args, "intent", ""),
-		Capabilities:     stringSliceArg(args, "capabilities"),
-		Payload:          objectArg(args, "payload"),
-		Limits:           objectArg(args, "limits"),
-		IdempotencyKey:   requiredString(args, "idempotency_key"),
+	action := strings.TrimSpace(stringArg(args, "action", "submit"))
+	if action == "" {
+		action = "submit"
+	}
+	if action == "resume" {
+		taskID := requiredString(args, "task_id")
+		request := map[string]any{
+			"checkpoint_id":   requiredString(args, "checkpoint_id"),
+			"idempotency_key": requiredString(args, "idempotency_key"),
+		}
+		if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+			return s.proxyPOSTTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/tasks/"+url.PathEscape(taskID)+"/resume", request)
+		}
+		task, event, err := s.Gateway.ResumeSessionTask(sessionID, taskID, request["checkpoint_id"].(string), request["idempotency_key"].(string))
+		if err != nil {
+			return nil, err
+		}
+		session, err := s.Gateway.Session(sessionID)
+		if err != nil {
+			return nil, err
+		}
+		status := session.DeriveStatus()
+		return withSessionStatus(map[string]any{"task": task, "event": event, "status": status}, status), nil
+	}
+	if action != "submit" {
+		return nil, fmt.Errorf("unsupported task action %q", action)
+	}
+	spec, err := sessionTaskSpecFromArgs(args)
+	if err != nil {
+		return nil, err
 	}
 	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
 		return s.proxyPOSTTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/tasks", spec)
@@ -463,6 +485,104 @@ func (s Server) sessionTask(args map[string]any) (any, error) {
 		"event":  event,
 		"status": status,
 	}, status), nil
+}
+
+func sessionTaskSpecFromArgs(args map[string]any) (controlplane.TaskSpec, error) {
+	adapter := strings.TrimSpace(stringArg(args, "adapter", ""))
+	if adapter == "" {
+		return controlplane.TaskSpec{}, fmt.Errorf("adapter is required")
+	}
+	payload := objectArg(args, "payload")
+	if raw, ok := args["toolchain_request"]; ok && raw != nil {
+		if adapter != "toolchain" {
+			return controlplane.TaskSpec{}, fmt.Errorf("toolchain_request requires adapter %q", "toolchain")
+		}
+		if len(payload) != 0 {
+			return controlplane.TaskSpec{}, fmt.Errorf("toolchain_request does not accept an additional payload object")
+		}
+		request, err := contracts.DecodeToolchainRequest(raw)
+		if err != nil {
+			return controlplane.TaskSpec{}, err
+		}
+		if !sameStringSet(stringSliceArg(args, "capabilities"), contracts.ToolchainRequiredCapabilities()) {
+			return controlplane.TaskSpec{}, fmt.Errorf("toolchain_request capabilities must exactly match package-install authorization")
+		}
+		intent := strings.TrimSpace(stringArg(args, "intent", ""))
+		if intent == "" {
+			intent = "ensure " + request.Tool + " toolchain"
+		}
+		return controlplane.TaskSpec{
+			TargetEndpointID: stringArg(args, "target_endpoint_id", ""),
+			Adapter:          adapter,
+			Intent:           intent,
+			Capabilities:     contracts.ToolchainRequiredCapabilities(),
+			Payload:          request.TaskPayload(),
+			Limits:           objectArg(args, "limits"),
+			IdempotencyKey:   requiredString(args, "idempotency_key"),
+		}, nil
+	}
+	if raw, ok := args["engineering_task"]; ok && raw != nil {
+		engineering, err := contracts.DecodeEngineeringTask(raw)
+		if err != nil {
+			return controlplane.TaskSpec{}, err
+		}
+		if err := engineering.ValidateForAdapter(adapter); err != nil {
+			return controlplane.TaskSpec{}, err
+		}
+		outerCapabilities := stringSliceArg(args, "capabilities")
+		if len(outerCapabilities) > 0 && !sameStringSet(outerCapabilities, engineering.RequiredCapabilities) {
+			return controlplane.TaskSpec{}, fmt.Errorf("capabilities must exactly match engineering_task.required_capabilities")
+		}
+		outerIntent := strings.TrimSpace(stringArg(args, "intent", ""))
+		if outerIntent != "" && outerIntent != engineering.Goal {
+			return controlplane.TaskSpec{}, fmt.Errorf("intent must match engineering_task.goal when engineering_task is present")
+		}
+		outerKey := strings.TrimSpace(stringArg(args, "idempotency_key", ""))
+		if outerKey != "" && outerKey != engineering.IdempotencyKey {
+			return controlplane.TaskSpec{}, fmt.Errorf("idempotency_key must match engineering_task.idempotency_key")
+		}
+		return controlplane.TaskSpec{
+			TargetEndpointID: stringArg(args, "target_endpoint_id", ""),
+			Adapter:          adapter,
+			Intent:           engineering.Goal,
+			Capabilities:     append([]string(nil), engineering.RequiredCapabilities...),
+			Payload:          engineering.TaskPayload(payload),
+			Limits:           engineering.TaskLimits(),
+			IdempotencyKey:   engineering.IdempotencyKey,
+		}, nil
+	}
+	idempotencyKey := strings.TrimSpace(stringArg(args, "idempotency_key", ""))
+	if idempotencyKey == "" {
+		return controlplane.TaskSpec{}, fmt.Errorf("idempotency_key is required")
+	}
+	return controlplane.TaskSpec{
+		TargetEndpointID: stringArg(args, "target_endpoint_id", ""),
+		Adapter:          adapter,
+		Intent:           stringArg(args, "intent", ""),
+		Capabilities:     stringSliceArg(args, "capabilities"),
+		Payload:          payload,
+		Limits:           objectArg(args, "limits"),
+		IdempotencyKey:   idempotencyKey,
+	}, nil
+}
+
+func sameStringSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	values := make(map[string]bool, len(left))
+	for _, value := range left {
+		if value == "" || values[value] {
+			return false
+		}
+		values[value] = true
+	}
+	for _, value := range right {
+		if !values[value] {
+			return false
+		}
+	}
+	return true
 }
 
 func (s Server) sessionInterrupt(args map[string]any) (any, error) {

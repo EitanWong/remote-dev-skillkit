@@ -922,10 +922,14 @@ func (a App) runSessionTaskWithRoutes(ctx context.Context, opts serveOptions, cl
 	if !CapabilitiesAllowed(task.Capabilities, opts.CapabilityCeiling, opts.CapabilityCeilingSet) {
 		err = fmt.Errorf("task capabilities exceed the signed join manifest ceiling")
 	} else {
+		progressReporter := a.engineeringProgressReporter(opts, client, sessionID, endpointID, leaseSecret, task, routes)
 		result, err = hostrunner.RunSessionTaskWithOptionsContext(ctx, sessionTaskSpec(task, endpointID, identityFingerprint), time.Now(), hostrunner.Options{
-			IdentityFingerprint:   identityFingerprint,
-			WorkspaceLockStore:    opts.WorkspaceLockStore,
-			CaptureRuntimeFixture: opts.CaptureRuntimeFixture,
+			IdentityFingerprint:           identityFingerprint,
+			WorkspaceLockStore:            opts.WorkspaceLockStore,
+			CaptureRuntimeFixture:         opts.CaptureRuntimeFixture,
+			EngineeringProgressReporter:   progressReporter,
+			EngineeringResumeCheckpointID: stringValueFromAny(task.Payload["engineering_resume_checkpoint_id"]),
+			EngineeringResumeSourceTaskID: stringValueFromAny(task.Payload["engineering_resume_task_id"]),
 		})
 	}
 	status := string(controlplane.TaskStatusSucceeded)
@@ -979,22 +983,80 @@ func (a App) runSessionTaskWithRoutes(ctx context.Context, opts serveOptions, cl
 	}
 }
 
+func (a App) engineeringProgressReporter(opts serveOptions, client *http.Client, sessionID, endpointID, leaseSecret string, task controlplane.Task, routes *gatewayCandidateSet) hostrunner.EngineeringProgressReporter {
+	return func(ctx context.Context, progress hostrunner.EngineeringProgress) error {
+		if progress.TaskID != task.ID {
+			return fmt.Errorf("engineering progress task id does not match the assigned task")
+		}
+		event := controlplane.Event{
+			Type:           controlplane.EventTypeTaskProgress,
+			FromEndpointID: endpointID,
+			TaskID:         task.ID,
+			IdempotencyKey: "engineering-progress:" + task.AttemptID + ":" + progress.CheckpointID,
+			Payload: map[string]any{
+				"schema_version": progress.SchemaVersion,
+				"phase":          progress.Phase,
+				"attempt":        progress.Attempt,
+				"summary":        progress.Summary,
+				"artifact_refs":  progress.ArtifactRefs,
+				"checkpoint_id":  progress.CheckpointID,
+				"recoverable":    progress.Recoverable,
+				"failure_class":  progress.FailureClass,
+				"attempt_id":     progress.AttemptID,
+			},
+		}
+		return a.reportEngineeringProgress(ctx, opts, client, sessionID, leaseSecret, event, routes)
+	}
+}
+
+func (a App) reportEngineeringProgress(ctx context.Context, opts serveOptions, client *http.Client, sessionID, leaseSecret string, event controlplane.Event, routes *gatewayCandidateSet) error {
+	for {
+		snapshot, pooled := routes.currentSnapshot()
+		gatewayURL := ""
+		if pooled {
+			gatewayURL = snapshot.Candidate.URL
+		} else {
+			if routes.pool != nil {
+				return errNoHealthyRoutes
+			}
+			gatewayURL = routes.current()
+		}
+		requestCtx, cancel := context.WithTimeout(ctx, min(sessionRequestTimeout(opts), 5*time.Second))
+		_, err := appendSessionEvent(requestCtx, client, gatewayURL, sessionID, leaseSecret, event)
+		cancel()
+		if err == nil {
+			if pooled {
+				_ = routes.reportSuccess(snapshot)
+			}
+			return nil
+		}
+		if !isTransientGatewayResponseError(err) || (pooled && !routes.reportFailure(ctx, snapshot)) || (!pooled && !routes.rotate(ctx, client, opts.TrustPin)) {
+			return err
+		}
+	}
+}
+
 func sessionTaskSpec(task controlplane.Task, endpointID, identityFingerprint string) hostrunner.SessionTaskSpec {
 	payload := cloneStringAnyMap(task.Payload)
+	workspaceRoot := stringValueFromAny(payload["workspace_root"])
 	writeScope := stringSliceFromAny(payload["write_scope"])
-	if len(writeScope) == 0 {
-		writeScope = []string{stringValueFromAny(payload["workspace_root"])}
+	if len(writeScope) == 0 && workspaceRoot != "" {
+		writeScope = []string{workspaceRoot}
 	}
 	return hostrunner.SessionTaskSpec{
 		TaskID:              task.ID,
+		AttemptID:           task.AttemptID,
 		EndpointID:          endpointID,
 		IdentityFingerprint: identityFingerprint,
 		Adapter:             task.Adapter,
 		Intent:              task.Intent,
 		Workspace: model.TaskWorkspace{
-			Root:       stringValueFromAny(payload["workspace_root"]),
-			WriteScope: writeScope,
-			Branch:     stringValueFromAny(payload["branch"]),
+			Root:        workspaceRoot,
+			WriteScope:  writeScope,
+			Branch:      stringValueFromAny(payload["branch"]),
+			BaseSHA:     stringValueFromAny(payload["base_sha"]),
+			Isolation:   stringValueFromAny(payload["isolation"]),
+			DirtyPolicy: stringValueFromAny(payload["dirty_policy"]),
 		},
 		Capabilities: append([]string(nil), task.Capabilities...),
 		Limits: model.TaskLimits{
@@ -1196,6 +1258,44 @@ func completeSessionTask(ctx context.Context, client *http.Client, gatewayURL, s
 		return controlplane.Task{}, controlplane.Event{}, gatewayResponseError("complete session task failed", req.URL.String(), resp, responseBody, err)
 	}
 	return payload.Task, payload.Event, nil
+}
+
+func appendSessionEvent(ctx context.Context, client *http.Client, gatewayURL, sessionID, leaseSecret string, event controlplane.Event) (controlplane.Event, error) {
+	body, err := json.Marshal(event)
+	if err != nil {
+		return controlplane.Event{}, err
+	}
+	endpoint := strings.TrimRight(gatewayURL, "/") + "/v1/sessions/" + url.PathEscape(sessionID) + "/events"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return controlplane.Event{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if event.IdempotencyKey != "" {
+		req.Header.Set("Idempotency-Key", event.IdempotencyKey)
+	}
+	if leaseSecret != "" {
+		req.Header.Set("Authorization", "Bearer "+leaseSecret)
+	}
+	resp, err := doGatewayRequest(client, req)
+	if err != nil {
+		return controlplane.Event{}, transientGatewayResponseError{Endpoint: endpoint, Cause: err}
+	}
+	defer resp.Body.Close()
+	responseBody, err := readBoundedGatewayBody(resp.Body, 256*1024)
+	if err != nil {
+		return controlplane.Event{}, transientGatewayResponseError{Endpoint: endpoint, Status: resp.Status, Cause: err}
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return controlplane.Event{}, gatewayResponseError("append session event failed", endpoint, resp, responseBody, nil)
+	}
+	var payload struct {
+		Event controlplane.Event `json:"event"`
+	}
+	if err := json.Unmarshal(responseBody, &payload); err != nil {
+		return controlplane.Event{}, gatewayResponseError("append session event failed", endpoint, resp, responseBody, err)
+	}
+	return payload.Event, nil
 }
 
 func sessionEventLimit(transport string) int {

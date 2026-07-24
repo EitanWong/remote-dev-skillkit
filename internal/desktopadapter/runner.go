@@ -38,6 +38,7 @@ type Spec struct {
 	MaxDurationSeconds int
 	MaxOutputBytes     int
 	WorkspaceRoot      string
+	WriteScope         []string
 	OutputPath         string
 }
 
@@ -201,7 +202,7 @@ type persistedArtifact struct {
 	SHA256      string
 }
 
-func persistDesktopArtifact(workspaceRoot, outputPath, contentType string, data []byte) (persistedArtifact, error) {
+func persistDesktopArtifact(workspaceRoot, outputPath, contentType string, data []byte, writeScope []string) (persistedArtifact, error) {
 	root, err := workspace.CanonicalDir(workspaceRoot)
 	if err != nil {
 		return persistedArtifact{}, fmt.Errorf("artifact workspace root must exist: %w", err)
@@ -213,7 +214,15 @@ func persistDesktopArtifact(workspaceRoot, outputPath, contentType string, data 
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) || (len(clean) >= 2 && clean[1] == ':') {
 		return persistedArtifact{}, fmt.Errorf("artifact output path escapes workspace root")
 	}
-	target := filepath.Join(root, clean)
+	var target string
+	if len(writeScope) > 0 {
+		target, err = workspace.ResolveScopedWorkspaceWritePath(root, clean, writeScope)
+	} else {
+		target, err = workspace.ResolveWorkspaceWritePath(root, clean)
+	}
+	if err != nil {
+		return persistedArtifact{}, fmt.Errorf("resolve artifact output path: %w", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		return persistedArtifact{}, err
 	}

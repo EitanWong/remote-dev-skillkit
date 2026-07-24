@@ -26,6 +26,20 @@ Environment:
 EOF
 }
 
+sha256_file() {
+  local path="${1:?missing file path}"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$path" | awk '{print $1}'
+    return
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$path" | awk '{print $1}'
+    return
+  fi
+  echo "missing SHA-256 utility: sha256sum or shasum" >&2
+  return 127
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --out)
@@ -129,7 +143,7 @@ for target in "${target_list[@]}"; do
     fi
     build_args+=(-ldflags "$ldflags" -o "$artifact" "$package")
     CGO_ENABLED="$cgo_enabled" GOOS="$goos" GOARCH="$goarch" go build "${build_args[@]}"
-    sha="$(shasum -a 256 "$artifact" | awk '{print $1}')"
+    sha="$(sha256_file "$artifact")"
     size="$(wc -c < "$artifact" | tr -d ' ')"
     rel="${artifact#"$out_dir"/}"
     printf '%s  %s\n' "$sha" "$rel" >> "$checksums_path"
