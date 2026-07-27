@@ -324,7 +324,7 @@ func (s RedisStreamStateStore) SaveFrom(gw *MemoryGateway) (Snapshot, error) {
 	if _, err := s.runRedis("SET", s.snapshotKey(), string(content)); err != nil {
 		return Snapshot{}, err
 	}
-	if _, err := s.runRedis("XADD", s.streamKey(), "*", "schema_version", "rdev.gateway-snapshot.v1", "snapshot_key", "current"); err != nil {
+	if _, err := s.runRedis("XADD", s.streamKey(), "*", "schema_version", SnapshotSchemaVersion, "snapshot_key", "current"); err != nil {
 		return Snapshot{}, err
 	}
 	return snapshot, nil
