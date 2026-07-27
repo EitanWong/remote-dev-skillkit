@@ -79,34 +79,30 @@ for operator CLI, MCP, gateway, acceptance, and managed-service authoring.`))
 }
 
 type serveOptions struct {
-	Mode                       string
-	GatewayURL                 string
-	JoinCode                   string
-	Name                       string
-	Once                       bool
-	Transport                  string
-	PollInterval               time.Duration
-	LongPollTimeout            time.Duration
-	MaxTasks                   int
-	TrustPin                   string
-	GatewayCACertPath          string
-	GatewayClientCertPath      string
-	GatewayClientKeyPath       string
-	TrustStorePath             string
-	IdentityStorePath          string
-	IdentityKeyID              string
-	EnrollmentCertificatePath  string
-	FetchEnrollmentRevocations bool
-	RenewEnrollmentCertificate bool
-	OperatorTokenFile          string
-	WorkspaceLockStore         string
-	CaptureRuntimeFixture      bool
-	KeepAwake                  bool
-	ReleaseBundlePath          string
-	ReleaseRootPublicKey       string
-	ReleaseRequiredArtifacts   []string
-	CapabilityCeiling          []string
-	CapabilityCeilingSet       bool
+	Mode                     string
+	GatewayURL               string
+	JoinCode                 string
+	Name                     string
+	Once                     bool
+	Transport                string
+	PollInterval             time.Duration
+	LongPollTimeout          time.Duration
+	MaxTasks                 int
+	TrustPin                 string
+	GatewayCACertPath        string
+	GatewayClientCertPath    string
+	GatewayClientKeyPath     string
+	TrustStorePath           string
+	IdentityStorePath        string
+	IdentityKeyID            string
+	WorkspaceLockStore       string
+	CaptureRuntimeFixture    bool
+	KeepAwake                bool
+	ReleaseBundlePath        string
+	ReleaseRootPublicKey     string
+	ReleaseRequiredArtifacts []string
+	CapabilityCeiling        []string
+	CapabilityCeilingSet     bool
 }
 
 func (a App) serve(ctx context.Context, args []string) error {
@@ -128,12 +124,6 @@ func (a App) serve(ctx context.Context, args []string) error {
 	trustStore := fs.String("trust-store", "", "optional local signed trust bundle store path for managed hosts")
 	identityStore := fs.String("identity-store", "", "optional local host identity key store path")
 	identityKeyID := fs.String("identity-key-id", hostidentity.DefaultKeyID, "host identity key id")
-	enrollmentCertificate := fs.String("enrollment-certificate", "", "optional host enrollment certificate JSON path")
-	fetchEnrollmentRevocations := fs.Bool("fetch-enrollment-revocations", false, "fetch and verify signed enrollment revocations before registration")
-	renewEnrollmentCertificate := fs.Bool("renew-enrollment-certificate", false, "renew the enrollment certificate before registration")
-	operatorTokenFile := fs.String("operator-token-file", "", "file containing an operator auth bearer token")
-	_ = fs.Duration("enrollment-renew-before", 24*time.Hour, "accepted for full rdev parity; renewal is handled by full rdev")
-	_ = fs.Int("enrollment-renew-valid-minutes", 60, "accepted for full rdev parity; renewal is handled by full rdev")
 	workspaceLockStore := fs.String("workspace-lock-store", "", "optional local workspace lock store directory")
 	captureRuntimeFixture := fs.Bool("capture-runtime-fixture", false, "append an adapter runtime fixture artifact")
 	keepAwake := fs.Bool("keep-awake", true, "best-effort prevention of idle sleep/display sleep while host serve is running")
@@ -144,32 +134,28 @@ func (a App) serve(ctx context.Context, args []string) error {
 		return err
 	}
 	return a.runServe(ctx, serveOptions{
-		Mode:                       *mode,
-		GatewayURL:                 *gateway,
-		JoinCode:                   *joinCode,
-		Name:                       *name,
-		Once:                       *once,
-		Transport:                  *transport,
-		PollInterval:               *pollInterval,
-		LongPollTimeout:            *longPollTimeout,
-		MaxTasks:                   *maxTasks,
-		TrustPin:                   *trustPin,
-		GatewayCACertPath:          *gatewayCA,
-		GatewayClientCertPath:      *gatewayClientCert,
-		GatewayClientKeyPath:       *gatewayClientKey,
-		TrustStorePath:             *trustStore,
-		IdentityStorePath:          *identityStore,
-		IdentityKeyID:              *identityKeyID,
-		EnrollmentCertificatePath:  *enrollmentCertificate,
-		FetchEnrollmentRevocations: *fetchEnrollmentRevocations,
-		RenewEnrollmentCertificate: *renewEnrollmentCertificate,
-		OperatorTokenFile:          *operatorTokenFile,
-		WorkspaceLockStore:         *workspaceLockStore,
-		CaptureRuntimeFixture:      *captureRuntimeFixture,
-		KeepAwake:                  *keepAwake,
-		ReleaseBundlePath:          *releaseBundle,
-		ReleaseRootPublicKey:       *releaseRootPublicKey,
-		ReleaseRequiredArtifacts:   splitCommaList(*releaseRequiredArtifacts),
+		Mode:                     *mode,
+		GatewayURL:               *gateway,
+		JoinCode:                 *joinCode,
+		Name:                     *name,
+		Once:                     *once,
+		Transport:                *transport,
+		PollInterval:             *pollInterval,
+		LongPollTimeout:          *longPollTimeout,
+		MaxTasks:                 *maxTasks,
+		TrustPin:                 *trustPin,
+		GatewayCACertPath:        *gatewayCA,
+		GatewayClientCertPath:    *gatewayClientCert,
+		GatewayClientKeyPath:     *gatewayClientKey,
+		TrustStorePath:           *trustStore,
+		IdentityStorePath:        *identityStore,
+		IdentityKeyID:            *identityKeyID,
+		WorkspaceLockStore:       *workspaceLockStore,
+		CaptureRuntimeFixture:    *captureRuntimeFixture,
+		KeepAwake:                *keepAwake,
+		ReleaseBundlePath:        *releaseBundle,
+		ReleaseRootPublicKey:     *releaseRootPublicKey,
+		ReleaseRequiredArtifacts: splitCommaList(*releaseRequiredArtifacts),
 	})
 }
 
@@ -178,9 +164,6 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 	case "temporary", "managed", "break-glass":
 	default:
 		return fmt.Errorf("unsupported host mode %q", opts.Mode)
-	}
-	if opts.FetchEnrollmentRevocations || opts.RenewEnrollmentCertificate || strings.TrimSpace(opts.OperatorTokenFile) != "" {
-		return fmt.Errorf("rdev-host lightweight helper does not perform enrollment renewal/revocation operations; use full rdev for managed enrollment maintenance")
 	}
 	if opts.Transport == "" {
 		opts.Transport = "poll"
@@ -240,14 +223,6 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 	if opts.Transport == "poll" {
 		endpointSpec.Transport = controlplane.TransportPoll
 	}
-	var enrollmentCertificateSummary *model.HostEnrollmentCertificate
-	if opts.EnrollmentCertificatePath != "" {
-		certificate, err := readEnrollmentCertificateFile(opts.EnrollmentCertificatePath)
-		if err != nil {
-			return err
-		}
-		enrollmentCertificateSummary = &certificate
-	}
 	joinCtx, cancelJoin := context.WithTimeout(ctx, 30*time.Second)
 	session, endpoint, lease, initialEvents, err := joinSessionByCode(joinCtx, gatewayClient, opts.GatewayURL, opts.JoinCode, endpointSpec)
 	cancelJoin()
@@ -277,13 +252,6 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 		"note":                  "joined Control Plane v1 session; task transport starts when --once=false",
 	}
 
-	if enrollmentCertificateSummary != nil {
-		payload["enrollment_certificate"] = map[string]any{
-			"schema":        enrollmentCertificateSummary.SchemaVersion,
-			"issuer_key_id": enrollmentCertificateSummary.IssuerKeyID,
-			"not_after":     enrollmentCertificateSummary.NotAfter,
-		}
-	}
 	if releaseGate != nil {
 		payload["release_gate"] = releaseGate
 	}
@@ -422,34 +390,6 @@ func isLocalDevGatewayURL(value string) bool {
 
 func isSessionGatewayURL(value string) bool {
 	return safeRouteURL(value)
-}
-
-func readEnrollmentCertificateFile(path string) (model.HostEnrollmentCertificate, error) {
-	if path == "" {
-		return model.HostEnrollmentCertificate{}, fmt.Errorf("certificate is required")
-	}
-	content, err := os.ReadFile(path)
-	if err != nil {
-		return model.HostEnrollmentCertificate{}, err
-	}
-	var certificate model.HostEnrollmentCertificate
-	if err := json.Unmarshal(content, &certificate); err == nil && certificate.SchemaVersion == model.HostEnrollmentCertificateSchemaVersion {
-		return certificate, nil
-	}
-	var wrapped struct {
-		Certificate           model.HostEnrollmentCertificate `json:"certificate"`
-		EnrollmentCertificate model.HostEnrollmentCertificate `json:"enrollment_certificate"`
-	}
-	if err := json.Unmarshal(content, &wrapped); err != nil {
-		return model.HostEnrollmentCertificate{}, err
-	}
-	if wrapped.Certificate.SchemaVersion == model.HostEnrollmentCertificateSchemaVersion {
-		return wrapped.Certificate, nil
-	}
-	if wrapped.EnrollmentCertificate.SchemaVersion == model.HostEnrollmentCertificateSchemaVersion {
-		return wrapped.EnrollmentCertificate, nil
-	}
-	return model.HostEnrollmentCertificate{}, fmt.Errorf("unsupported enrollment certificate schema")
 }
 
 type retryingRoundTripper struct {
