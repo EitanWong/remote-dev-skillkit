@@ -6467,6 +6467,18 @@ func TestMCPServeProcessesInitialize(t *testing.T) {
 	}
 }
 
+func TestMCPServeValidatesGatewayOperatorTokenFile(t *testing.T) {
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	err := app.Run(context.Background(), []string{
+		"mcp", "serve",
+		"--gateway-url", "https://gateway.example.test",
+		"--gateway-operator-token-file", filepath.Join(t.TempDir(), "missing.token"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "read gateway operator token file") {
+		t.Fatalf("expected gateway operator token-file read failure, got %v", err)
+	}
+}
+
 func TestHostInstallServiceWritesMacOSLaunchAgentPlist(t *testing.T) {
 	dir := t.TempDir()
 	plistPath := filepath.Join(dir, "LaunchAgents", "com.example.rdev-host.plist")

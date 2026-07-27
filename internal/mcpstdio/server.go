@@ -55,7 +55,10 @@ type Server struct {
 	// Set automatically from RDEV_HOSTED_GATEWAY_URL (or any RDEV_*_GATEWAY_URL)
 	// by the CLI when those environment variables are present.
 	RemoteGateway string
-	httpClient    *http.Client
+	// remoteOperatorToken authenticates only requests sent to RemoteGateway.
+	// Per-call gateway_url overrides intentionally never receive this token.
+	remoteOperatorToken string
+	httpClient          *http.Client
 }
 
 func NewServer(gw *gateway.MemoryGateway) Server {
@@ -67,14 +70,49 @@ func NewServer(gw *gateway.MemoryGateway) Server {
 // The HTTP client uses a retrying transport so that transient TLS EOF errors
 // from Cloudflare Quick Tunnels or similar reverse proxies are handled silently.
 func NewServerWithRemoteGateway(gw *gateway.MemoryGateway, remoteURL string) Server {
-	return Server{
-		Gateway:       gw,
-		RemoteGateway: strings.TrimRight(strings.TrimSpace(remoteURL), "/"),
-		httpClient: &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: retryingMCPTransport{Base: http.DefaultTransport, MaxRetries: 3},
-		},
+	return NewServerWithRemoteGatewayAndOperatorToken(gw, remoteURL, "")
+}
+
+// NewServerWithRemoteGatewayAndOperatorToken returns a remote gateway proxy
+// that sends the supplied operator bearer token only to the configured gateway.
+// The token is deliberately withheld from per-call gateway_url overrides.
+func NewServerWithRemoteGatewayAndOperatorToken(gw *gateway.MemoryGateway, remoteURL, operatorToken string) Server {
+	operatorToken = strings.TrimSpace(operatorToken)
+	client := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: retryingMCPTransport{Base: http.DefaultTransport, MaxRetries: 3},
 	}
+	if operatorToken != "" {
+		client.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
+	return Server{
+		Gateway:             gw,
+		RemoteGateway:       normalizeGatewayBaseURL(remoteURL),
+		remoteOperatorToken: operatorToken,
+		httpClient:          client,
+	}
+}
+
+func normalizeGatewayBaseURL(raw string) string {
+	value := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if value == "" {
+		return ""
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return value
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	if path == "/v1" {
+		parsed.Path = ""
+		parsed.RawPath = ""
+	} else if strings.HasSuffix(path, "/v1") {
+		parsed.Path = strings.TrimSuffix(path, "/v1")
+		parsed.RawPath = ""
+	}
+	return strings.TrimRight(parsed.String(), "/")
 }
 
 // retryingMCPTransport wraps http.DefaultTransport and retries GET/HEAD and
@@ -159,25 +197,54 @@ func (s Server) remoteClient() *http.Client {
 	return http.DefaultClient
 }
 
-// effectiveGatewayURL returns the gateway base URL to use for a given tool
-// call.  The lookup order is:
-//  1. "gateway_url" key in the per-call args (lets the agent override on
-//     every call without restarting the MCP server).
-//  2. s.RemoteGateway set at server construction time (from --gateway-url
-//     flag or RDEV_*_GATEWAY_URL environment variables).
-//
-// Returns "" when no gateway is configured; callers should fall back to the
-// local in-memory gateway.
-func (s Server) effectiveGatewayURL(args map[string]any) string {
+type gatewayTarget struct {
+	URL              string
+	useOperatorToken bool
+}
+
+// effectiveGatewayTarget returns the gateway base URL and whether it came from
+// the configured server-level gateway. Per-call overrides must not inherit the
+// configured gateway's bearer token, even when both URLs are identical.
+func (s Server) effectiveGatewayTarget(args map[string]any) gatewayTarget {
 	if v := stringArg(args, "gateway_url", ""); v != "" {
-		return strings.TrimRight(strings.TrimSpace(v), "/")
+		return gatewayTarget{URL: normalizeGatewayBaseURL(v)}
 	}
-	return s.RemoteGateway
+	return gatewayTarget{URL: s.RemoteGateway, useOperatorToken: true}
+}
+
+// effectiveGatewayURL preserves the legacy URL-only helper for callers that do
+// not need to decide whether a bearer token may be attached.
+func (s Server) effectiveGatewayURL(args map[string]any) string {
+	return s.effectiveGatewayTarget(args).URL
+}
+
+func (s Server) remoteGatewayAuthorization(baseURL string, useOperatorToken bool) string {
+	if !useOperatorToken {
+		return ""
+	}
+	if strings.TrimSpace(s.remoteOperatorToken) == "" {
+		return ""
+	}
+	if normalizeGatewayBaseURL(baseURL) != s.RemoteGateway {
+		return ""
+	}
+	return "Bearer " + s.remoteOperatorToken
 }
 
 // proxyGETTo sends a GET to baseURL+path and decodes the response.
 func (s Server) proxyGETTo(baseURL, path string) (any, error) {
-	resp, err := s.remoteClient().Get(baseURL + path)
+	return s.proxyGETToTarget(baseURL, path, true)
+}
+
+func (s Server) proxyGETToTarget(baseURL, path string, useOperatorToken bool) (any, error) {
+	req, err := http.NewRequest(http.MethodGet, baseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if authorization := s.remoteGatewayAuthorization(baseURL, useOperatorToken); authorization != "" {
+		req.Header.Set("Authorization", authorization)
+	}
+	resp, err := s.remoteClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("remote gateway GET %s: %w", path, err)
 	}
@@ -191,6 +258,10 @@ func (s Server) proxyGETTo(baseURL, path string) (any, error) {
 
 // proxyPOSTTo sends a POST to baseURL+path and decodes the response.
 func (s Server) proxyPOSTTo(baseURL, path string, payload any) (any, error) {
+	return s.proxyPOSTToTarget(baseURL, path, payload, true)
+}
+
+func (s Server) proxyPOSTToTarget(baseURL, path string, payload any, useOperatorToken bool) (any, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -200,6 +271,9 @@ func (s Server) proxyPOSTTo(baseURL, path string, payload any) (any, error) {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if authorization := s.remoteGatewayAuthorization(baseURL, useOperatorToken); authorization != "" {
+		req.Header.Set("Authorization", authorization)
+	}
 	if body, ok := payload.(map[string]any); ok {
 		if key, _ := body["idempotency_key"].(string); strings.TrimSpace(key) != "" {
 			req.Header.Set("Idempotency-Key", strings.TrimSpace(key))
@@ -218,6 +292,9 @@ func (s Server) proxyPOSTTo(baseURL, path string, payload any) (any, error) {
 }
 
 func (s Server) decodeRemoteResponse(resp *http.Response) (any, error) {
+	if resp.StatusCode >= http.StatusMultipleChoices && resp.StatusCode < http.StatusBadRequest {
+		return nil, fmt.Errorf("remote gateway returned redirect HTTP %d", resp.StatusCode)
+	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20)) // 8 MiB cap
 	if err != nil {
 		return nil, fmt.Errorf("read remote gateway response: %w", err)
@@ -366,8 +443,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 }
 
 func (s Server) createSession(args map[string]any) (any, error) {
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyPOSTTo(gwURL, "/v1/sessions", sessionSpecFromArgs(args))
+	if target := s.effectiveGatewayTarget(args); target.URL != "" {
+		return s.proxyPOSTToTarget(target.URL, "/v1/sessions", sessionSpecFromArgs(args), target.useOperatorToken)
 	}
 	session, err := s.Gateway.CreateSession(sessionSpecFromArgs(args))
 	if err != nil {
@@ -382,8 +459,8 @@ func (s Server) createSession(args map[string]any) (any, error) {
 
 func (s Server) sessionStatus(args map[string]any) (any, error) {
 	sessionID := requiredString(args, "session_id")
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyGETTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID))
+	if target := s.effectiveGatewayTarget(args); target.URL != "" {
+		return s.proxyGETToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID), target.useOperatorToken)
 	}
 	session, err := s.Gateway.Session(sessionID)
 	if err != nil {
@@ -400,7 +477,7 @@ func (s Server) sessionEvents(args map[string]any) (any, error) {
 	sessionID := requiredString(args, "session_id")
 	afterSeq := uint64(intArg(args, "after_seq", 0))
 	limit := intArg(args, "limit", 100)
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+	if target := s.effectiveGatewayTarget(args); target.URL != "" {
 		query := url.Values{}
 		query.Set("after_seq", fmt.Sprintf("%d", afterSeq))
 		query.Set("limit", fmt.Sprintf("%d", limit))
@@ -413,7 +490,7 @@ func (s Server) sessionEvents(args map[string]any) (any, error) {
 		if processed := intArg(args, "processed_seq", 0); processed > 0 {
 			query.Set("processed_seq", fmt.Sprintf("%d", processed))
 		}
-		return s.proxyGETTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/events?"+query.Encode())
+		return s.proxyGETToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/events?"+query.Encode(), target.useOperatorToken)
 	}
 	events, replay, err := s.Gateway.SessionEventsAfterForAgent(sessionID, afterSeq, limit)
 	if err != nil {
@@ -447,8 +524,8 @@ func (s Server) sessionTask(args map[string]any) (any, error) {
 			"checkpoint_id":   requiredString(args, "checkpoint_id"),
 			"idempotency_key": requiredString(args, "idempotency_key"),
 		}
-		if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-			return s.proxyPOSTTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/tasks/"+url.PathEscape(taskID)+"/resume", request)
+		if target := s.effectiveGatewayTarget(args); target.URL != "" {
+			return s.proxyPOSTToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/tasks/"+url.PathEscape(taskID)+"/resume", request, target.useOperatorToken)
 		}
 		task, event, err := s.Gateway.ResumeSessionTask(sessionID, taskID, request["checkpoint_id"].(string), request["idempotency_key"].(string))
 		if err != nil {
@@ -468,8 +545,8 @@ func (s Server) sessionTask(args map[string]any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyPOSTTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/tasks", spec)
+	if target := s.effectiveGatewayTarget(args); target.URL != "" {
+		return s.proxyPOSTToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/tasks", spec, target.useOperatorToken)
 	}
 	task, event, err := s.Gateway.SubmitSessionTask(sessionID, spec)
 	if err != nil {
@@ -601,8 +678,8 @@ func (s Server) sessionInterrupt(args map[string]any) (any, error) {
 		IdempotencyKey: requiredString(args, "idempotency_key"),
 		Payload:        payload,
 	}
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyPOSTTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/events", event)
+	if target := s.effectiveGatewayTarget(args); target.URL != "" {
+		return s.proxyPOSTToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/events", event, target.useOperatorToken)
 	}
 	appended, err := s.Gateway.AppendSessionEvent(sessionID, event)
 	if err != nil {
@@ -622,8 +699,8 @@ func (s Server) sessionInterrupt(args map[string]any) (any, error) {
 func (s Server) sessionArtifacts(args map[string]any) (any, error) {
 	sessionID := requiredString(args, "session_id")
 	if stringArg(args, "id", "") == "" && stringArg(args, "task_id", "") == "" {
-		if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-			return s.proxyGETTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/artifacts")
+		if target := s.effectiveGatewayTarget(args); target.URL != "" {
+			return s.proxyGETToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/artifacts", target.useOperatorToken)
 		}
 		session, err := s.Gateway.Session(sessionID)
 		if err != nil {
@@ -646,8 +723,8 @@ func (s Server) sessionArtifacts(args map[string]any) (any, error) {
 		UploadOffset: int64(intArg(args, "upload_offset", 0)),
 		Complete:     boolArg(args, "complete", false),
 	}
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyPOSTTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/artifacts", ref)
+	if target := s.effectiveGatewayTarget(args); target.URL != "" {
+		return s.proxyPOSTToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/artifacts", ref, target.useOperatorToken)
 	}
 	artifact, event, err := s.Gateway.UpsertSessionArtifact(sessionID, ref)
 	if err != nil {
@@ -667,11 +744,11 @@ func (s Server) sessionArtifacts(args map[string]any) (any, error) {
 
 func (s Server) sessionClose(args map[string]any) (any, error) {
 	sessionID := requiredString(args, "session_id")
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyPOSTTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/close", map[string]any{
+	if target := s.effectiveGatewayTarget(args); target.URL != "" {
+		return s.proxyPOSTToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/close", map[string]any{
 			"reason":          stringArg(args, "reason", ""),
 			"idempotency_key": stringArg(args, "idempotency_key", ""),
-		})
+		}, target.useOperatorToken)
 	}
 	session, event, err := s.Gateway.CloseSession(sessionID)
 	if err != nil {

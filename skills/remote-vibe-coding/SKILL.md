@@ -108,6 +108,12 @@ are CLI-only and must use their corresponding `rdev ...` command.
   first configured `RDEV_*_GATEWAY_URL` when no explicit gateway URL was
   supplied; do not ask the human to choose a gateway URL when the runtime has
   one configured.
+  When the hosted gateway requires operator auth, register the stdio server
+  with `rdev mcp serve --gateway-url <base-url> --gateway-operator-token-file
+  <local-0600-token-file>`. Keep the bearer out of tool arguments, prompts,
+  Skill files, and logs. A per-call `gateway_url` override intentionally does
+  not receive the configured bearer; use a separately configured MCP server
+  for another authenticated gateway.
   Do not persist `https://*.trycloudflare.com` Quick Tunnel URLs as durable
   configuration. They are fallback URLs for the current foreground session. For
   repeated sessions, configure `RDEV_HOSTED_GATEWAY_URL` on a cloud/VPS host

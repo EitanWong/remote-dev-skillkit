@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -145,6 +146,82 @@ func TestProxyPOSTToRetriesSessionTaskWithIdempotencyKey(t *testing.T) {
 	}
 }
 
+func TestRemoteGatewayForwardsBearerOnlyToConfiguredGateway(t *testing.T) {
+	configuredAuthorization := []string{}
+	configured := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		configuredAuthorization = append(configuredAuthorization, r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer configured.Close()
+
+	overrideAuthorization := ""
+	override := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		overrideAuthorization = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer override.Close()
+
+	server := NewServerWithRemoteGatewayAndOperatorToken(gateway.NewMemoryGateway(), configured.URL, "operator-secret")
+	if _, err := server.proxyPOSTTo(configured.URL, "/v1/sessions", map[string]any{"reason": "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.proxyGETTo(configured.URL, "/v1/sessions/session_1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(configuredAuthorization) != 2 {
+		t.Fatalf("expected two configured gateway requests, got %#v", configuredAuthorization)
+	}
+	for _, authorization := range configuredAuthorization {
+		if authorization != "Bearer operator-secret" {
+			t.Fatalf("configured gateway did not receive bearer token: %#v", configuredAuthorization)
+		}
+	}
+	if _, err := server.createSession(map[string]any{
+		"reason":      "same endpoint override",
+		"gateway_url": configured.URL,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(configuredAuthorization) != 3 || configuredAuthorization[2] != "" {
+		t.Fatalf("operator bearer token leaked to same-endpoint per-call override: %#v", configuredAuthorization)
+	}
+
+	if _, err := server.proxyPOSTTo(override.URL, "/v1/sessions", map[string]any{"reason": "override"}); err != nil {
+		t.Fatal(err)
+	}
+	if overrideAuthorization != "" {
+		t.Fatalf("operator bearer token leaked to per-call gateway override: %q", overrideAuthorization)
+	}
+}
+
+func TestRemoteGatewayWithOperatorTokenDoesNotFollowRedirects(t *testing.T) {
+	redirectTargetCalls := 0
+	redirectTarget := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		redirectTargetCalls++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer redirectTarget.Close()
+
+	configured := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Location", redirectTarget.URL+"/v1/sessions/session_1")
+		w.WriteHeader(http.StatusFound)
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer configured.Close()
+
+	server := NewServerWithRemoteGatewayAndOperatorToken(gateway.NewMemoryGateway(), configured.URL, "operator-secret")
+	if _, err := server.proxyGETTo(configured.URL, "/v1/sessions/session_1"); err == nil {
+		t.Fatal("operator-authenticated remote request should reject redirect")
+	}
+	if redirectTargetCalls != 0 {
+		t.Fatalf("operator-authenticated request followed redirect %d times", redirectTargetCalls)
+	}
+}
+
 func TestMCPProviderPolicyValidationAndRegionalEvidence(t *testing.T) {
 	known := map[string]bool{"cloudflare-quick": true, "configured-gateway": true}
 	valid := mcpTunnelProviderPolicyFile{AllowedProviderIDs: ptrStrings([]string{"cloudflare-quick"})}
@@ -238,7 +315,7 @@ func TestMCPArgumentAndProtocolHelpers(t *testing.T) {
 
 func TestMCPRemoteAndSessionArgumentBranches(t *testing.T) {
 	server := NewServerWithRemoteGateway(gateway.NewMemoryGateway(), "https://default.example.test/v1")
-	if server.effectiveGatewayURL(nil) != "https://default.example.test/v1" || server.effectiveGatewayURL(map[string]any{"gateway_url": "https://override.example.test/v1"}) != "https://override.example.test/v1" {
+	if server.effectiveGatewayURL(nil) != "https://default.example.test" || server.effectiveGatewayURL(map[string]any{"gateway_url": "https://override.example.test/v1"}) != "https://override.example.test" {
 		t.Fatal("gateway URL override selection failed")
 	}
 	if _, err := server.decodeRemoteResponse(&http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("not-json"))}); err == nil {
@@ -263,6 +340,24 @@ func TestMCPRemoteAndSessionArgumentBranches(t *testing.T) {
 	artifacts := callSessionTool(t, local, "rdev.sessions.artifacts", map[string]any{"session_id": sessionID})
 	if _, ok := artifacts["artifacts"]; !ok {
 		t.Fatalf("local artifact listing failed: %#v", artifacts)
+	}
+}
+
+func TestRemoteGatewayNormalizesV1BaseURLBeforeProxying(t *testing.T) {
+	path := ""
+	configured := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer configured.Close()
+
+	server := NewServerWithRemoteGateway(gateway.NewMemoryGateway(), configured.URL+"/v1")
+	if _, err := server.createSession(map[string]any{"reason": "normalize gateway base"}); err != nil {
+		t.Fatal(err)
+	}
+	if path != "/v1/sessions" {
+		t.Fatalf("gateway API path = %q, want /v1/sessions", path)
 	}
 }
 

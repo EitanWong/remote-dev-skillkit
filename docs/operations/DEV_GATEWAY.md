@@ -47,6 +47,21 @@ enrollment issuance, hosted renewal, and hosted revocation fetch require an
 `admin` or `issuer` token; audit/read-only operator views require an `admin`,
 `operator`, or `auditor` token.
 
+For a local stdio MCP client that controls this authenticated gateway, point to
+the gateway base URL and the local token file; never pass the token itself as a
+tool argument:
+
+```bash
+rdev mcp serve \
+  --gateway-url https://gateway.example.test \
+  --gateway-operator-token-file .rdev/operator-auth/tokens/operator.token
+```
+
+The stdio proxy attaches that bearer only to its configured gateway URL. A
+per-call `gateway_url` override receives no bearer, and bearer-configured
+clients do not follow redirects. Gateway URLs ending in `/v1` are accepted for
+compatibility but normalized to the API base before `/v1/...` routes are added.
+
 Hosted operator auth can be configured with an EdDSA JWT issuer file:
 
 ```bash

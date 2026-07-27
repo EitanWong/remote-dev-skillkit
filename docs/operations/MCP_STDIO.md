@@ -62,9 +62,33 @@ clients submit only policy-bound session tasks.
 Set a server-level gateway URL or pass `gateway_url` on a session tool call:
 
 ```bash
-rdev mcp serve --gateway-url https://gateway.example.test/v1
+rdev mcp serve --gateway-url https://gateway.example.test
 ```
 
 The per-call `gateway_url` overrides the server-level value for that request.
 The gateway URL must be selected through the normal trust and connection-entry
 workflow; MCP does not bypass gateway, host, or local OS authorization.
+
+Use the gateway base URL, not its `/v1` API suffix. For compatibility, a value
+ending in `/v1` is normalized before Control Plane paths are appended.
+
+### Authenticated Hosted Gateway
+
+When the hosted gateway enables `--operator-auth`, give the stdio server a
+local token file rather than an inline token:
+
+```bash
+rdev mcp serve \
+  --gateway-url https://gateway.example.test \
+  --gateway-operator-token-file /secure/local/operator.token
+```
+
+`rdev operator-auth init` writes generated token files with `0600` permissions.
+Keep the selected token file local to the Agent runtime; do not put its content
+in MCP configuration, Skill files, prompts, tool arguments, or logs.
+
+The bearer is sent only to the normalized server-level `--gateway-url` base.
+It is deliberately withheld from a per-call `gateway_url` override, and an
+authenticated stdio server refuses HTTP redirects rather than forwarding a
+credential to another endpoint. To use a different authenticated gateway,
+configure a distinct stdio MCP server with its own reviewed URL and token file.

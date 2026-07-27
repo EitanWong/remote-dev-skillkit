@@ -6595,6 +6595,7 @@ func (a App) mcp(args []string) error {
 		gatewayURL := fs.String("gateway-url", "", "proxy session/task/artifact/audit MCP tool calls to this gateway URL; "+
 			"overrides RDEV_*_GATEWAY_URL environment variables. "+
 			"Per-call gateway_url arguments in tool inputs still take highest precedence.")
+		gatewayOperatorTokenFile := fs.String("gateway-operator-token-file", "", "optional file containing the operator bearer token for the configured remote gateway")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -6605,7 +6606,17 @@ func (a App) mcp(args []string) error {
 		}
 		var server mcpstdio.Server
 		if remoteURL != "" {
-			server = mcpstdio.NewServerWithRemoteGateway(gateway.NewMemoryGateway(), remoteURL)
+			token := ""
+			if tokenFile := strings.TrimSpace(*gatewayOperatorTokenFile); tokenFile != "" {
+				var err error
+				token, err = readTokenFile(tokenFile)
+				if err != nil {
+					return fmt.Errorf("read gateway operator token file: %w", err)
+				}
+			}
+			server = mcpstdio.NewServerWithRemoteGatewayAndOperatorToken(gateway.NewMemoryGateway(), remoteURL, token)
+		} else if strings.TrimSpace(*gatewayOperatorTokenFile) != "" {
+			return fmt.Errorf("--gateway-operator-token-file requires a configured remote gateway")
 		} else {
 			server = mcpstdio.NewServer(gateway.NewMemoryGateway())
 		}

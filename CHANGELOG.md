@@ -47,6 +47,12 @@ reviewable evidence without widening target-host authority.
   credential literals, unsafe archive paths, profile traversal, and profile/tool
   mismatches. Managed Node PATH is scoped to provisioning and Agent children,
   never the target host globally.
+- Added authenticated hosted-gateway support for `rdev mcp serve` through a
+  local operator-token file. Bearers are scoped to the configured gateway only,
+  are withheld from every per-call `gateway_url` override, and authenticated
+  requests reject redirects rather than forwarding credentials.
+- Normalized gateway base URLs ending in `/v1`, preventing MCP proxy calls from
+  forming a duplicate `/v1/v1/...` API prefix during hosted deployment.
 
 ## 0.1.43-dev
 
