@@ -107,6 +107,10 @@ func (g *MemoryGateway) CancelSessionTask(sessionID, taskID, reason, idempotency
 	return g.controlPlane().CancelTask(sessionID, taskID, reason, idempotencyKey)
 }
 
+func (g *MemoryGateway) ResumeSessionTask(sessionID, taskID, checkpointID, idempotencyKey string) (controlplane.Task, controlplane.Event, error) {
+	return g.controlPlane().ResumeTask(sessionID, taskID, checkpointID, idempotencyKey)
+}
+
 func (g *MemoryGateway) CompleteSessionTask(sessionID, taskID string, result map[string]any) (controlplane.Task, controlplane.Event, error) {
 	return g.controlPlane().CompleteTask(sessionID, taskID, result)
 }

@@ -181,3 +181,26 @@ func TestValidateWindowsPrivateSecurityStateRejectsEveryNonExactDACL(t *testing.
 		})
 	}
 }
+
+func TestValidateWindowsPrivateSecurityStateDeduplicatesSystemCurrentUser(t *testing.T) {
+	trustees := windowsPrivateTrustees{
+		current:        "S-1-5-18",
+		administrators: "S-1-5-32-544",
+		system:         "S-1-5-18",
+	}
+	state := winSecurityState{
+		control: winSEDACLPresent | winSEDACLProtected,
+		owner:   trustees.current,
+		aces: []winACE{
+			{typeID: winAccessAllowedACEType, flags: 3, mask: winPrivateFullControl, sid: trustees.current},
+			{typeID: winAccessAllowedACEType, flags: 3, mask: winPrivateFullControl, sid: trustees.administrators},
+		},
+	}
+	if err := validateWindowsPrivateSecurityState(state, true, 3, trustees); err != nil {
+		t.Fatalf("SYSTEM-token protected DACL was rejected: %v", err)
+	}
+	state.aces = append(state.aces, state.aces[0])
+	if err := validateWindowsPrivateSecurityState(state, true, 3, trustees); err == nil {
+		t.Fatal("duplicate SYSTEM ACE was accepted")
+	}
+}

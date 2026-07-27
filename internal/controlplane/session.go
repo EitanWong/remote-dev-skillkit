@@ -74,16 +74,17 @@ const (
 type EventType string
 
 const (
-	EventTypeHello      EventType = "hello"
-	EventTypeHelper     EventType = "helper"
-	EventTypeGateway    EventType = "gateway"
-	EventTypeTransport  EventType = "transport"
-	EventTypeStatus     EventType = "status"
-	EventTypeTask       EventType = "task"
-	EventTypeTaskResult EventType = "task.result"
-	EventTypeArtifact   EventType = "artifact"
-	EventTypeInterrupt  EventType = "interrupt"
-	EventTypeClose      EventType = "close"
+	EventTypeHello        EventType = "hello"
+	EventTypeHelper       EventType = "helper"
+	EventTypeGateway      EventType = "gateway"
+	EventTypeTransport    EventType = "transport"
+	EventTypeStatus       EventType = "status"
+	EventTypeTask         EventType = "task"
+	EventTypeTaskProgress EventType = "task.progress"
+	EventTypeTaskResult   EventType = "task.result"
+	EventTypeArtifact     EventType = "artifact"
+	EventTypeInterrupt    EventType = "interrupt"
+	EventTypeClose        EventType = "close"
 )
 
 type TaskStatus string
@@ -128,6 +129,7 @@ const (
 	ErrTooManyEvents          ErrorCode = "too_many_events"
 	ErrArtifactOffsetMismatch ErrorCode = "artifact_offset_mismatch"
 	ErrChecksumMismatch       ErrorCode = "checksum_mismatch"
+	ErrInvalidTask            ErrorCode = "invalid_task"
 	ErrTaskNotFound           ErrorCode = "task_not_found"
 	ErrTaskAlreadyTerminal    ErrorCode = "task_already_terminal"
 	ErrSessionClosed          ErrorCode = "session_closed"

@@ -16,7 +16,10 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 )
 
-const ManagedMacVerificationSchemaVersion = "rdev.acceptance-verification.managed-mac.v1"
+const (
+	ManagedMacVerificationSchemaVersion               = "rdev.acceptance-verification.managed-mac.v1"
+	FreshAgentSupportSessionVerificationSchemaVersion = "rdev.acceptance-verification.fresh-agent-support-session.v1"
+)
 
 type ManagedMacVerification struct {
 	SchemaVersion      string                      `json:"schema_version"`
@@ -27,6 +30,15 @@ type ManagedMacVerification struct {
 	ProbeEvidence      SessionEvidenceVerification `json:"side_effect_probe_evidence"`
 	Checks             []Check                     `json:"checks"`
 	RecommendedActions []string                    `json:"recommended_actions,omitempty"`
+}
+
+type FreshAgentSupportSessionVerification struct {
+	SchemaVersion      string    `json:"schema_version"`
+	ReportPath         string    `json:"report_path"`
+	ReportSchema       string    `json:"report_schema"`
+	GeneratedAt        time.Time `json:"generated_at"`
+	Checks             []Check   `json:"checks"`
+	RecommendedActions []string  `json:"recommended_actions,omitempty"`
 }
 
 type SessionEvidenceVerification struct {
@@ -58,6 +70,47 @@ func (v ManagedMacVerification) OK() bool {
 		}
 	}
 	return true
+}
+
+func (v FreshAgentSupportSessionVerification) OK() bool {
+	return v.ReportSchema == FreshAgentSupportSessionReportSchemaVersion && allChecksPassed(v.Checks)
+}
+
+func VerifyFreshAgentSupportSessionReport(reportPath string) (FreshAgentSupportSessionVerification, error) {
+	if strings.TrimSpace(reportPath) == "" {
+		return FreshAgentSupportSessionVerification{}, fmt.Errorf("report path is required")
+	}
+	abs, err := filepath.Abs(reportPath)
+	if err != nil {
+		return FreshAgentSupportSessionVerification{}, err
+	}
+	content, err := os.ReadFile(abs)
+	if err != nil {
+		return FreshAgentSupportSessionVerification{}, err
+	}
+	var report FreshAgentSupportSessionReport
+	if err := json.Unmarshal(content, &report); err != nil {
+		return FreshAgentSupportSessionVerification{}, err
+	}
+	verification := FreshAgentSupportSessionVerification{
+		SchemaVersion: FreshAgentSupportSessionVerificationSchemaVersion,
+		ReportPath:    abs,
+		ReportSchema:  report.SchemaVersion,
+		GeneratedAt:   time.Now().UTC(),
+	}
+	add := func(name string, passed bool, detail string) {
+		verification.Checks = append(verification.Checks, Check{Name: name, Passed: passed, Detail: detail})
+	}
+	add("report_schema", report.SchemaVersion == FreshAgentSupportSessionReportSchemaVersion, report.SchemaVersion)
+	add("report_generated_at", !report.GeneratedAt.IsZero(), report.GeneratedAt.UTC().Format(time.RFC3339))
+	add("report_checks_passed", allChecksPassed(report.Checks), failedCheckNames(report.Checks))
+	if !verification.OK() {
+		verification.RecommendedActions = []string{
+			"Re-run the fresh-Agent support-session acceptance command in a fresh output directory.",
+			"Inspect report.json for the first failed contract check before publishing the report as acceptance evidence.",
+		}
+	}
+	return verification, nil
 }
 
 func VerifyManagedMacReport(reportPath string) (ManagedMacVerification, error) {

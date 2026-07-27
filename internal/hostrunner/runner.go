@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 	"github.com/EitanWong/remote-dev-skillkit/internal/workspace"
 )
@@ -20,14 +21,21 @@ type Result struct {
 }
 
 type Options struct {
-	IdentityFingerprint   string
-	WorkspaceLockStore    string
-	WorkspaceLockTTL      time.Duration
-	CaptureRuntimeFixture bool
+	IdentityFingerprint           string
+	ToolchainRoot                 string
+	WorkspaceLockStore            string
+	WorkspaceLockTTL              time.Duration
+	CaptureRuntimeFixture         bool
+	EngineeringCheckpointStore    string
+	EngineeringProgressReporter   EngineeringProgressReporter
+	EngineeringResumeCheckpointID string
+	EngineeringResumeSourceTaskID string
+	engineeringResume             *engineeringResumeState
 }
 
 type SessionTaskSpec struct {
 	TaskID              string
+	AttemptID           string
 	EndpointID          string
 	IdentityFingerprint string
 	Adapter             string
@@ -41,6 +49,7 @@ type SessionTaskSpec struct {
 type taskEnvelope struct {
 	SchemaVersion      string
 	TaskID             string
+	AttemptID          string
 	EndpointID         string
 	EndpointIdentity   string
 	Adapter            string
@@ -87,6 +96,18 @@ func (e DenialError) Unwrap() error {
 }
 
 func RunSessionTaskWithOptionsContext(ctx context.Context, spec SessionTaskSpec, now time.Time, opts Options) (Result, error) {
+	normalizedSpec, err := normalizeEngineeringSessionTaskSpec(spec)
+	if err != nil {
+		ref := taskRef{TaskID: spec.TaskID, EndpointID: spec.EndpointID, Adapter: spec.Adapter}
+		return denyTask(ref, denialSpec{
+			Code:      "invalid_engineering_task",
+			Summary:   "Engineering task preflight failed on the host.",
+			Detail:    err.Error(),
+			Adapter:   spec.Adapter,
+			Retryable: false,
+		}, err)
+	}
+	spec = normalizedSpec
 	envelope := sessionTaskEnvelope(spec, now)
 	ref := taskRef{TaskID: envelope.TaskID, EndpointID: envelope.EndpointID, Adapter: envelope.Adapter}
 	if !supportedAdapter(envelope.Adapter) {
@@ -117,9 +138,50 @@ func RunSessionTaskWithOptionsContext(ctx context.Context, spec SessionTaskSpec,
 			Retryable:  true,
 		}, fmt.Errorf("missing %s capability", missing))
 	}
-	releaseWorkspaceLock, err := acquireWorkspaceLock(spec.EndpointID, envelope, opts, now)
+	if _, engineering := engineeringTaskFromEnvelope(envelope); engineering {
+		resumedOptions, resumeErr := prepareEngineeringResume(envelope, opts)
+		if resumeErr != nil {
+			return denyTask(ref, denialSpec{
+				Code:      "resume_checkpoint_invalid",
+				Summary:   "Engineering task resume checkpoint is unavailable or does not match this task.",
+				Detail:    "Request a fresh task or a checkpoint produced by the same bounded engineering task.",
+				Adapter:   envelope.Adapter,
+				Retryable: false,
+			}, resumeErr)
+		}
+		opts = resumedOptions
+	}
+	wantsWorktree, isolationErr := wantsGitWorktree(envelope)
+	if isolationErr != nil {
+		return denyTask(ref, denialSpec{
+			Code:      "workspace_invalid",
+			Summary:   "Task requested an unsupported workspace isolation policy.",
+			Detail:    isolationErr.Error(),
+			Adapter:   envelope.Adapter,
+			Retryable: false,
+		}, isolationErr)
+	}
+	if wantsWorktree && !hasCapability(envelope.Capabilities, "git.diff") {
+		missing := "git.diff"
+		return denyTask(ref, denialSpec{
+			Code:       "missing_capability",
+			Summary:    fmt.Sprintf("Task is missing the %s capability.", missing),
+			Detail:     "Git worktree isolation requires git.diff before host-local Git commands may run.",
+			Adapter:    envelope.Adapter,
+			Capability: missing,
+			Retryable:  true,
+		}, fmt.Errorf("missing %s capability", missing))
+	}
+	worktreeLease, err := prepareGitWorktreeLease(ctx, &envelope, opts, now)
 	if err != nil {
 		return denyTask(ref, workspaceLockDenial(err), err)
+	}
+	releaseWorkspaceLock := func() {}
+	if worktreeLease == nil {
+		releaseWorkspaceLock, err = acquireWorkspaceLock(spec.EndpointID, envelope, opts, now)
+		if err != nil {
+			return denyTask(ref, workspaceLockDenial(err), err)
+		}
 	}
 	releasedWorkspaceLock := false
 	releaseWorkspaceLockOnce := func() {
@@ -130,18 +192,174 @@ func RunSessionTaskWithOptionsContext(ctx context.Context, spec SessionTaskSpec,
 		releaseWorkspaceLock()
 	}
 	defer releaseWorkspaceLockOnce()
-	execution, err := executeJobAdapter(ctx, envelope, opts.CaptureRuntimeFixture, releaseWorkspaceLockOnce)
+	var scopeLease *workspaceScopeLease
+	if worktreeLease == nil && wantsWorktree {
+		scopeLease, err = prepareWorkspaceScopeLease(envelope)
+		if err != nil {
+			return denyTask(ref, workspaceLockDenial(err), err)
+		}
+		if scopeLease.before.Truncated && len(scopeLease.declaredWriteScope) > 0 {
+			err := fmt.Errorf("non-Git workspace snapshot is truncated; cannot verify declared write scope")
+			return denyTask(ref, denialSpec{
+				Code:      "write_scope_unverifiable",
+				Summary:   "Task write scope cannot be verified for this workspace.",
+				Detail:    err.Error(),
+				Adapter:   envelope.Adapter,
+				Retryable: false,
+			}, err)
+		}
+	}
+	runtimeRelease := releaseWorkspaceLockOnce
+	if worktreeLease != nil || scopeLease != nil {
+		runtimeRelease = nil
+	}
+	var execution adapterExecution
+	var executionErr error
+	if _, engineering := engineeringTaskFromEnvelope(envelope); engineering && isEngineeringRepairAdapter(envelope.Adapter) {
+		execution, executionErr = executeEngineeringTask(ctx, envelope, opts.CaptureRuntimeFixture, opts)
+	} else {
+		execution, executionErr = executeJobAdapterWithToolchainRoot(ctx, envelope, opts.CaptureRuntimeFixture, runtimeRelease, opts.ToolchainRoot)
+	}
 	result := Result{
 		ArtifactContent:       execution.ArtifactContent,
 		RuntimeFixtureContent: execution.RuntimeFixtureContent,
 	}
-	if err != nil {
-		if denial, ok := adapterDenial(envelope.Adapter, err); ok {
-			return denyTask(ref, denial, err)
+	if worktreeLease != nil {
+		liveScopeErr := validateLiveWriteScope(envelope.Workspace.Root, envelope.Workspace.WriteScope)
+		evidence, finalizeErr := worktreeLease.finalize(ctx, envelope.Payload)
+		result.ArtifactContent = attachGitWorktreeEvidence(result.ArtifactContent, evidence)
+		if finalizeErr != nil {
+			if executionErr != nil {
+				return result, fmt.Errorf("%v; additionally failed to finalize task worktree: %w", executionErr, finalizeErr)
+			}
+			return result, finalizeErr
 		}
-		return result, err
+		if liveScopeErr != nil {
+			return preserveExecutionDenial(result, ref, denialSpec{
+				Code:      "write_scope_violation",
+				Summary:   "Task changed files outside its declared write scope.",
+				Detail:    liveScopeErr.Error(),
+				Adapter:   envelope.Adapter,
+				Retryable: false,
+			}, liveScopeErr)
+		}
+		if scopeErr := validateWorktreeWriteScope(evidence, envelope.Workspace.Root, envelope.Workspace.WriteScope); scopeErr != nil {
+			return preserveExecutionDenial(result, ref, denialSpec{
+				Code:      "write_scope_violation",
+				Summary:   "Task changed files outside its declared write scope.",
+				Detail:    scopeErr.Error(),
+				Adapter:   envelope.Adapter,
+				Retryable: false,
+			}, scopeErr)
+		}
+	}
+	if scopeLease != nil {
+		evidence, finalizeErr := scopeLease.finalize()
+		result.ArtifactContent = attachWorkspaceScopeEvidence(result.ArtifactContent, evidence)
+		if finalizeErr != nil {
+			if executionErr != nil {
+				return result, fmt.Errorf("%v; additionally failed to snapshot non-Git workspace scope: %w", executionErr, finalizeErr)
+			}
+			return result, finalizeErr
+		}
+		if scopeErr := validateWorkspaceScopeWriteScope(evidence, envelope.Workspace.Root, envelope.Workspace.WriteScope); scopeErr != nil {
+			return preserveExecutionDenial(result, ref, denialSpec{
+				Code:      "write_scope_violation",
+				Summary:   "Task changed files outside its declared write scope.",
+				Detail:    scopeErr.Error(),
+				Adapter:   envelope.Adapter,
+				Retryable: false,
+			}, scopeErr)
+		}
+	}
+	if executionErr != nil {
+		if denial, ok := adapterDenial(envelope.Adapter, executionErr); ok {
+			return preserveExecutionDenial(result, ref, denial, executionErr)
+		}
+		return result, executionErr
 	}
 	return result, nil
+}
+
+func normalizeEngineeringSessionTaskSpec(spec SessionTaskSpec) (SessionTaskSpec, error) {
+	raw, ok := spec.Payload["engineering_task"]
+	if !ok || raw == nil {
+		return spec, nil
+	}
+	engineering, err := contracts.DecodeEngineeringTask(raw)
+	if err != nil {
+		return SessionTaskSpec{}, err
+	}
+	if err := engineering.ValidateForAdapter(spec.Adapter); err != nil {
+		return SessionTaskSpec{}, err
+	}
+	if strings.TrimSpace(spec.Intent) != "" && strings.TrimSpace(spec.Intent) != engineering.Goal {
+		return SessionTaskSpec{}, fmt.Errorf("intent must match engineering_task.goal when engineering_task is present")
+	}
+	if strings.TrimSpace(spec.Workspace.Root) != "" && strings.TrimSpace(spec.Workspace.Root) != engineering.Workspace.Root {
+		return SessionTaskSpec{}, fmt.Errorf("workspace.root must match engineering_task.workspace.root")
+	}
+	if strings.TrimSpace(spec.Workspace.Branch) != "" && strings.TrimSpace(spec.Workspace.Branch) != engineering.Workspace.Branch {
+		return SessionTaskSpec{}, fmt.Errorf("workspace.branch must match engineering_task.workspace.branch")
+	}
+	if strings.TrimSpace(spec.Workspace.BaseSHA) != "" && strings.TrimSpace(spec.Workspace.BaseSHA) != engineering.Workspace.BaseSHA {
+		return SessionTaskSpec{}, fmt.Errorf("workspace.base_sha must match engineering_task.workspace.base_sha")
+	}
+	if strings.TrimSpace(spec.Workspace.Isolation) != "" && strings.TrimSpace(spec.Workspace.Isolation) != engineering.Workspace.Isolation {
+		return SessionTaskSpec{}, fmt.Errorf("workspace.isolation must match engineering_task.workspace.isolation")
+	}
+	if strings.TrimSpace(spec.Workspace.DirtyPolicy) != "" && strings.TrimSpace(spec.Workspace.DirtyPolicy) != engineering.Workspace.DirtyPolicy {
+		return SessionTaskSpec{}, fmt.Errorf("workspace.dirty_policy must match engineering_task.workspace.dirty_policy")
+	}
+	if len(spec.Workspace.WriteScope) > 0 && !sameStringSet(spec.Workspace.WriteScope, engineering.Workspace.WriteScope) {
+		return SessionTaskSpec{}, fmt.Errorf("workspace.write_scope must match engineering_task.workspace.write_scope")
+	}
+	if len(spec.Capabilities) > 0 && !sameStringSet(spec.Capabilities, engineering.RequiredCapabilities) {
+		return SessionTaskSpec{}, fmt.Errorf("capabilities must exactly match engineering_task.required_capabilities")
+	}
+	if spec.Limits.MaxDurationSeconds != 0 && spec.Limits.MaxDurationSeconds != engineering.Limits.MaxDurationSeconds {
+		return SessionTaskSpec{}, fmt.Errorf("limits.max_duration_seconds must match engineering_task.limits.max_duration_seconds")
+	}
+	if spec.Limits.MaxOutputBytes != 0 && spec.Limits.MaxOutputBytes != engineering.Limits.MaxOutputBytes {
+		return SessionTaskSpec{}, fmt.Errorf("limits.max_output_bytes must match engineering_task.limits.max_output_bytes")
+	}
+	if strings.TrimSpace(spec.Limits.Network) != "" && strings.TrimSpace(spec.Limits.Network) != engineering.NetworkPolicy {
+		return SessionTaskSpec{}, fmt.Errorf("limits.network must match engineering_task.network_policy")
+	}
+	spec.Intent = engineering.Goal
+	spec.Workspace.Root = engineering.Workspace.Root
+	spec.Workspace.Branch = engineering.Workspace.Branch
+	spec.Workspace.BaseSHA = engineering.Workspace.BaseSHA
+	spec.Workspace.Isolation = engineering.Workspace.Isolation
+	spec.Workspace.DirtyPolicy = engineering.Workspace.DirtyPolicy
+	spec.Workspace.WriteScope = append([]string(nil), engineering.Workspace.WriteScope...)
+	spec.Capabilities = append([]string(nil), engineering.RequiredCapabilities...)
+	spec.Limits = model.TaskLimits{
+		MaxDurationSeconds: engineering.Limits.MaxDurationSeconds,
+		MaxOutputBytes:     engineering.Limits.MaxOutputBytes,
+		Network:            engineering.NetworkPolicy,
+	}
+	spec.Payload = engineering.TaskPayload(spec.Payload)
+	return spec, nil
+}
+
+func sameStringSet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	seen := make(map[string]bool, len(left))
+	for _, value := range left {
+		if value == "" || seen[value] {
+			return false
+		}
+		seen[value] = true
+	}
+	for _, value := range right {
+		if !seen[value] {
+			return false
+		}
+	}
+	return true
 }
 
 func sessionTaskEnvelope(spec SessionTaskSpec, now time.Time) taskEnvelope {
@@ -156,16 +374,18 @@ func sessionTaskEnvelope(spec SessionTaskSpec, now time.Time) taskEnvelope {
 		limits.Network = "default-deny"
 	}
 	return taskEnvelope{
-		SchemaVersion:    "rdev.session-task.v1",
-		TaskID:           spec.TaskID,
-		EndpointID:       spec.EndpointID,
-		EndpointIdentity: spec.IdentityFingerprint,
-		Adapter:          spec.Adapter,
-		Intent:           spec.Intent,
-		Workspace:        spec.Workspace,
-		Capabilities:     append([]string(nil), spec.Capabilities...),
-		Limits:           limits,
-		Payload:          cloneMap(spec.Payload),
+		SchemaVersion:      "rdev.session-task.v1",
+		TaskID:             spec.TaskID,
+		AttemptID:          firstNonEmptyString(spec.AttemptID, "attempt:"+spec.TaskID),
+		EndpointID:         spec.EndpointID,
+		EndpointIdentity:   spec.IdentityFingerprint,
+		Adapter:            spec.Adapter,
+		Intent:             spec.Intent,
+		Workspace:          spec.Workspace,
+		Capabilities:       append([]string(nil), spec.Capabilities...),
+		Limits:             limits,
+		Payload:            cloneMap(spec.Payload),
+		InterruptsRequired: stringSliceValue(spec.Payload, "interrupts_required"),
 	}
 }
 
@@ -182,7 +402,7 @@ func cloneMap(source map[string]any) map[string]any {
 
 func supportedAdapter(adapter string) bool {
 	switch adapter {
-	case "shell", "powershell", "codex", "claude-code", "acpx", "file", "desktop":
+	case "shell", "powershell", "codex", "claude-code", "acpx", "toolchain", "file", "desktop":
 		return true
 	default:
 		return false
@@ -220,6 +440,10 @@ func missingAdapterCapability(envelope taskEnvelope) string {
 		if !hasCapability(envelope.Capabilities, "git.diff") {
 			return "git.diff"
 		}
+	case "toolchain":
+		if !hasCapability(envelope.Capabilities, "package.install.requiresAuthorization") {
+			return "package.install.requiresAuthorization"
+		}
 	case "file":
 		return missingFileCapability(envelope)
 	case "desktop":
@@ -229,8 +453,16 @@ func missingAdapterCapability(envelope taskEnvelope) string {
 }
 
 func missingFileCapability(envelope taskEnvelope) string {
-	switch normalizeAdapterAction(stringValue(envelope.Payload, "action", "")) {
-	case "list", "read", "download":
+	action := normalizeAdapterAction(stringValue(envelope.Payload, "action", ""))
+	switch action {
+	case "describe":
+		if !hasCapability(envelope.Capabilities, "file.transfer.read") {
+			return "file.transfer.read"
+		}
+		if !hasCapability(envelope.Capabilities, "git.diff") {
+			return "git.diff"
+		}
+	case "list", "read", "download", "search", "read.slice", "symbols", "diagnostics":
 		if !hasCapability(envelope.Capabilities, "file.transfer.read") {
 			return "file.transfer.read"
 		}
@@ -482,6 +714,24 @@ func denyTask(task taskRef, spec denialSpec, cause error) (Result, error) {
 		Explanation: explanation,
 		Cause:       cause,
 	}
+}
+
+// preserveExecutionDenial retains adapter and workspace evidence collected
+// before a policy denial. Preflight denials still use denyTask directly.
+func preserveExecutionDenial(result Result, task taskRef, spec denialSpec, cause error) (Result, error) {
+	_, err := denyTask(task, spec, cause)
+	var denial DenialError
+	if !errors.As(err, &denial) {
+		return result, err
+	}
+	artifact := make(map[string]any)
+	if strings.TrimSpace(result.ArtifactContent) != "" && json.Unmarshal([]byte(result.ArtifactContent), &artifact) == nil {
+		artifact["task_denial"] = denial.Explanation
+		if content, marshalErr := json.MarshalIndent(artifact, "", "  "); marshalErr == nil {
+			result.ArtifactContent = string(content)
+		}
+	}
+	return result, denial
 }
 
 func firstNonEmptyString(values ...string) string {

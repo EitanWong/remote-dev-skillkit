@@ -99,6 +99,7 @@ func ExecuteContext(ctx context.Context, spec Spec) (Result, error) {
 	// of `ver`) are captured correctly instead of appearing as garbled bytes.
 	argv := windowsForceUTF8Argv(spec.Argv)
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	configureCommandCancellation(cmd)
 	cmd.Dir = workspaceRoot
 	// Explicitly close stdin so the subprocess cannot block waiting for terminal
 	// input. Without this, some shells (notably PowerShell on Windows) may stall
@@ -265,70 +266,7 @@ func safeWindowsWorkspaceRoot(root string) string {
 }
 
 func verifyWriteScope(root string, scopes []string) error {
-	for _, scope := range scopes {
-		if strings.TrimSpace(scope) == "" {
-			continue
-		}
-		resolved, err := resolveScope(root, scope)
-		if err != nil {
-			return err
-		}
-		if !pathWithin(root, resolved) {
-			return fmt.Errorf("write scope %q escapes workspace root", scope)
-		}
-	}
-	return nil
-}
-
-func resolveScope(root, scope string) (string, error) {
-	path := scope
-	if !filepath.IsAbs(path) {
-		path = root + string(filepath.Separator) + path
-	}
-	resolved, err := resolveExistingPrefix(path)
-	if err != nil {
-		return "", fmt.Errorf("resolve write scope: %w", err)
-	}
-	return resolved, nil
-}
-
-func resolveExistingPrefix(path string) (string, error) {
-	volume := filepath.VolumeName(path)
-	rest := strings.TrimPrefix(path, volume)
-	current := volume + string(filepath.Separator)
-	// Resolve path components in order so symlink/.. keeps filesystem semantics.
-	parts := strings.FieldsFunc(rest, func(r rune) bool {
-		return r == '/' || r == '\\'
-	})
-	for _, part := range parts {
-		switch part {
-		case "", ".":
-			continue
-		case "..":
-			current = filepath.Dir(current)
-			continue
-		}
-		next := filepath.Join(current, part)
-		resolved, err := filepath.EvalSymlinks(next)
-		if err == nil {
-			current = resolved
-			continue
-		}
-		if os.IsNotExist(err) {
-			current = next
-			continue
-		}
-		return "", err
-	}
-	return filepath.Clean(current), nil
-}
-
-func pathWithin(root, path string) bool {
-	rel, err := filepath.Rel(root, path)
-	if err != nil {
-		return false
-	}
-	return rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..")
+	return workspace.ValidateWriteScopes(root, scopes)
 }
 
 func allowedCommand(command string, allowlist []string) bool {

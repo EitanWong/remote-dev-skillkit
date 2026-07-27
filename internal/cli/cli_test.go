@@ -1362,6 +1362,28 @@ func TestAcceptanceFreshAgentSupportSession(t *testing.T) {
 	if !strings.Contains(payload.Note, "local contract gate only") {
 		t.Fatalf("expected local-gate note, got %q", payload.Note)
 	}
+
+	stdout.Reset()
+	stderr.Reset()
+	if err := app.Run(context.Background(), []string{
+		"acceptance", "verify",
+		"--report", payload.Report,
+	}); err != nil {
+		t.Fatalf("expected fresh-Agent acceptance verification to pass: %v\n%s", err, stdout.String())
+	}
+	var verification struct {
+		OK           bool   `json:"ok"`
+		Schema       string `json:"schema"`
+		ReportSchema string `json:"report_schema"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &verification); err != nil {
+		t.Fatalf("invalid fresh-Agent verification JSON: %v\n%s", err, stdout.String())
+	}
+	if !verification.OK ||
+		verification.Schema != "rdev.acceptance-verification.fresh-agent-support-session.v1" ||
+		verification.ReportSchema != "rdev.acceptance.fresh-agent-support-session.v1" {
+		t.Fatalf("unexpected fresh-Agent verification: %#v", verification)
+	}
 }
 
 func TestSupportSessionConnectReturnsForegroundStartWithoutGateway(t *testing.T) {

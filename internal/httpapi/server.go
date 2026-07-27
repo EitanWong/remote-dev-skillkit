@@ -22,6 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
@@ -39,6 +40,11 @@ type Server struct {
 	Assets          AssetConfig
 	stateMu         *sync.Mutex
 	gatewayInstance string
+}
+
+type sessionTaskRequest struct {
+	controlplane.TaskSpec
+	EngineeringTask any `json:"engineering_task"`
 }
 
 var gatewayInstanceFallbackCounter atomic.Uint64
@@ -259,6 +265,8 @@ func (s Server) sessionRoute(w http.ResponseWriter, r *http.Request) {
 		s.submitSessionTask(w, r, sessionID)
 	case r.Method == http.MethodPost && resource == "tasks" && taskID != "" && action == "result":
 		s.completeSessionTask(w, r, sessionID, taskID)
+	case r.Method == http.MethodPost && resource == "tasks" && taskID != "" && action == "resume":
+		s.resumeSessionTask(w, r, sessionID, taskID)
 	case r.Method == http.MethodPost && resource == "artifacts":
 		s.upsertSessionArtifact(w, r, sessionID)
 	case r.Method == http.MethodGet && resource == "artifacts":
@@ -468,9 +476,14 @@ func (s Server) submitSessionTask(w http.ResponseWriter, r *http.Request, sessio
 		writeProtocolError(w, http.StatusForbidden, protocolHTTPError(controlplane.ErrUnauthorizedEndpoint, "operator role is required", false))
 		return
 	}
-	var spec controlplane.TaskSpec
-	if err := json.NewDecoder(r.Body).Decode(&spec); err != nil {
+	var request sessionTaskRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrPayloadTooLarge, "invalid JSON body", false))
+		return
+	}
+	spec := request.TaskSpec
+	if err := normalizeEngineeringTaskSpec(&spec, request.EngineeringTask); err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrInvalidTask, err.Error(), false))
 		return
 	}
 	task, event, err := s.Gateway.SubmitSessionTask(sessionID, spec)
@@ -482,6 +495,69 @@ func (s Server) submitSessionTask(w http.ResponseWriter, r *http.Request, sessio
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"task": task, "event": event})
+}
+
+func normalizeEngineeringTaskSpec(spec *controlplane.TaskSpec, topLevel any) error {
+	if spec == nil {
+		return fmt.Errorf("task spec is required")
+	}
+	if topLevel != nil {
+		if spec.Payload == nil {
+			spec.Payload = map[string]any{}
+		}
+		if _, exists := spec.Payload["engineering_task"]; exists {
+			return fmt.Errorf("engineering_task must be supplied either at the top level or inside payload, not both")
+		}
+		spec.Payload["engineering_task"] = topLevel
+	}
+	raw, ok := spec.Payload["engineering_task"]
+	if !ok || raw == nil {
+		return nil
+	}
+	engineering, err := contracts.DecodeEngineeringTask(raw)
+	if err != nil {
+		return err
+	}
+	if err := engineering.ValidateForAdapter(spec.Adapter); err != nil {
+		return err
+	}
+	if strings.TrimSpace(spec.Intent) != "" && strings.TrimSpace(spec.Intent) != engineering.Goal {
+		return fmt.Errorf("intent must match engineering_task.goal when engineering_task is present")
+	}
+	if strings.TrimSpace(spec.IdempotencyKey) != "" && strings.TrimSpace(spec.IdempotencyKey) != engineering.IdempotencyKey {
+		return fmt.Errorf("idempotency_key must match engineering_task.idempotency_key")
+	}
+	if len(spec.Capabilities) > 0 && !sameCapabilitySet(spec.Capabilities, engineering.RequiredCapabilities) {
+		return fmt.Errorf("capabilities must exactly match engineering_task.required_capabilities")
+	}
+	if len(spec.Limits) > 0 {
+		return fmt.Errorf("limits must be omitted when engineering_task is present")
+	}
+	spec.Intent = engineering.Goal
+	spec.Capabilities = append([]string(nil), engineering.RequiredCapabilities...)
+	spec.Payload = engineering.TaskPayload(spec.Payload)
+	spec.Limits = engineering.TaskLimits()
+	spec.IdempotencyKey = engineering.IdempotencyKey
+	return nil
+}
+
+func sameCapabilitySet(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	seen := make(map[string]bool, len(left))
+	for _, value := range left {
+		if value == "" || seen[value] {
+			return false
+		}
+		seen[value] = true
+	}
+	for _, value := range right {
+		if !seen[value] {
+			return false
+		}
+	}
+	return true
 }
 
 func (s Server) completeSessionTask(w http.ResponseWriter, r *http.Request, sessionID, taskID string) {
@@ -499,6 +575,30 @@ func (s Server) completeSessionTask(w http.ResponseWriter, r *http.Request, sess
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"task": task, "event": event})
+}
+
+func (s Server) resumeSessionTask(w http.ResponseWriter, r *http.Request, sessionID, taskID string) {
+	if !s.authorizeOperator(r, operatorauth.RoleOperator) {
+		writeProtocolError(w, http.StatusForbidden, protocolHTTPError(controlplane.ErrUnauthorizedEndpoint, "operator role is required", false))
+		return
+	}
+	var request struct {
+		CheckpointID   string `json:"checkpoint_id"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrPayloadTooLarge, "invalid JSON body", false))
+		return
+	}
+	task, event, err := s.Gateway.ResumeSessionTask(sessionID, taskID, request.CheckpointID, request.IdempotencyKey)
+	if err != nil {
+		writeControlPlaneError(w, err)
+		return
+	}
+	if !s.persistState(w) {
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"task": task, "event": event})
 }
 
 func (s Server) upsertSessionArtifact(w http.ResponseWriter, r *http.Request, sessionID string) {

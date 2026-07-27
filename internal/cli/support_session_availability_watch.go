@@ -40,6 +40,10 @@ type foregroundSupportSessionOptions struct {
 }
 
 func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregroundSupportSessionOptions) {
+	published := opts.Published
+	if cancelForegroundSupportSessionIfDone(ctx, opts, published) {
+		return
+	}
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	seenPending := false
@@ -52,7 +56,6 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 	} else {
 		writeSupportSessionEvent(opts.Out, opts.StatusFile, "waiting", initialStatus)
 	}
-	published := opts.Published
 	var runtimeChanges <-chan struct{}
 	if opts.Runtime != nil {
 		runtimeChanges = opts.Runtime.Changes()
@@ -74,19 +77,17 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 	}
 	consecutiveLivenessFailures := 0
 	for {
+		if cancelForegroundSupportSessionIfDone(ctx, opts, published) {
+			return
+		}
 		select {
 		case <-ctx.Done():
-			status := foregroundSupportStatus(opts)
-			if status["connected"] == true {
-				writeConnectedSupportSession(opts, status)
-				return
-			}
-			if canInvalidatePublishedSupportSession(opts) {
-				live := availabilityWithoutCandidates(published, "support-session-canceled")
-				_, _ = invalidatePublishedSupportSession(opts, live, "support_session_canceled")
-			}
+			cancelForegroundSupportSessionIfDone(ctx, opts, published)
 			return
 		case <-runtimeChanges:
+			if cancelForegroundSupportSessionIfDone(ctx, opts, published) {
+				return
+			}
 			status := foregroundSupportStatus(opts)
 			if status["connected"] == true {
 				writeConnectedSupportSession(opts, status)
@@ -113,6 +114,9 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 				logTunnelAvailabilityLoss(opts.Out, live, "tunnel-redundancy-reduced")
 				continue
 			}
+			if cancelForegroundSupportSessionIfDone(ctx, opts, published) {
+				return
+			}
 			if opts.BeforeInvalidation != nil {
 				opts.BeforeInvalidation()
 			}
@@ -134,6 +138,9 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 			}
 			return
 		case <-liveness:
+			if cancelForegroundSupportSessionIfDone(ctx, opts, published) {
+				return
+			}
 			status := foregroundSupportStatus(opts)
 			if status["connected"] == true {
 				writeConnectedSupportSession(opts, status)
@@ -141,6 +148,9 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 			if err := opts.LivenessProbe(ctx); err == nil {
 				consecutiveLivenessFailures = 0
 				continue
+			}
+			if cancelForegroundSupportSessionIfDone(ctx, opts, published) {
+				return
 			}
 			consecutiveLivenessFailures++
 			if consecutiveLivenessFailures < failureThreshold {
@@ -176,6 +186,22 @@ func watchForegroundSupportSessionAvailability(ctx context.Context, opts foregro
 			}
 		}
 	}
+}
+
+func cancelForegroundSupportSessionIfDone(ctx context.Context, opts foregroundSupportSessionOptions, published tunnel.AvailabilitySet) bool {
+	if ctx.Err() == nil {
+		return false
+	}
+	status := foregroundSupportStatus(opts)
+	if status["connected"] == true {
+		writeConnectedSupportSession(opts, status)
+		return true
+	}
+	if canInvalidatePublishedSupportSession(opts) {
+		live := availabilityWithoutCandidates(published, "support-session-canceled")
+		_, _ = invalidatePublishedSupportSession(opts, live, "support_session_canceled")
+	}
+	return true
 }
 
 func publicSupportSessionInvalidationError(message string, detail error) error {

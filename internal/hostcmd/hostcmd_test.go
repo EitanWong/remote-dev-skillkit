@@ -12,11 +12,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
@@ -114,6 +116,171 @@ func TestHostServeSessionCompletesTask(t *testing.T) {
 	}
 	if !foundResult {
 		t.Fatalf("expected task.result event, got %#v", events)
+	}
+}
+
+func TestAppendSessionEventReportsEngineeringProgressWithLease(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	session, err := gw.CreateSession(controlplane.SessionSpec{Reason: "engineering progress", Capabilities: []string{"shell.user"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, endpoint, lease, err := gw.JoinSession(session.ID, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Name:                "progress-host",
+		Platform:            "linux/amd64",
+		IdentityFingerprint: "progress-host",
+		Capabilities:        []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _, err := gw.SubmitSessionTask(session.ID, controlplane.TaskSpec{
+		TargetEndpointID: endpoint.ID,
+		Adapter:          "shell",
+		Capabilities:     []string{"shell.user"},
+		IdempotencyKey:   "progress-task",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	event, err := appendSessionEvent(context.Background(), server.Client(), server.URL, session.ID, lease.Secret, controlplane.Event{
+		Type:           controlplane.EventTypeTaskProgress,
+		FromEndpointID: endpoint.ID,
+		TaskID:         task.ID,
+		IdempotencyKey: "engineering-progress:checkpoint-1",
+		Payload: map[string]any{
+			"schema_version": "rdev.engineering-progress.v1",
+			"phase":          "inspect",
+			"attempt":        0,
+			"summary":        "Host project context inspection completed.",
+			"checkpoint_id":  "checkpoint-1",
+			"recoverable":    true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Type != controlplane.EventTypeTaskProgress || event.TaskID != task.ID || event.Payload["checkpoint_id"] != "checkpoint-1" {
+		t.Fatalf("unexpected engineering progress event: %#v", event)
+	}
+	snapshot, err := gw.Session(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Tasks) != 1 || snapshot.Tasks[0].Status != controlplane.TaskStatusRunning {
+		t.Fatalf("progress event must mark the assigned task running: %#v", snapshot.Tasks)
+	}
+}
+
+func TestHostRunnerEngineeringTaskPublishesPhaseProgress(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git is required: %v", err)
+	}
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skipf("sh is required: %v", err)
+	}
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("# progress fixture\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	hostcmdGit(t, repo, "init")
+	hostcmdGit(t, repo, "config", "user.email", "rdev@example.test")
+	hostcmdGit(t, repo, "config", "user.name", "Remote Dev")
+	hostcmdGit(t, repo, "add", ".")
+	hostcmdGit(t, repo, "commit", "-m", "progress fixture")
+	baseSHA := strings.TrimSpace(hostcmdGitOutput(t, repo, "rev-parse", "HEAD"))
+	fakeCodex := filepath.Join(t.TempDir(), "fake-codex")
+	if err := os.WriteFile(fakeCodex, []byte("#!/bin/sh\nset -eu\nprintf 'done\\n' > result.txt\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	gw := gateway.NewMemoryGateway()
+	session, err := gw.CreateSession(controlplane.SessionSpec{Reason: "engineering progress", Capabilities: []string{"codex.run", "git.diff"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, endpoint, lease, err := gw.JoinSession(session.ID, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Name:                "engineering-host",
+		Platform:            "linux/amd64",
+		IdentityFingerprint: "engineering-host",
+		Capabilities:        []string{"codex.run", "git.diff"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _, err := gw.SubmitSessionTask(session.ID, controlplane.TaskSpec{
+		TargetEndpointID: endpoint.ID,
+		Adapter:          "codex",
+		Capabilities:     []string{"codex.run", "git.diff"},
+		Payload: map[string]any{
+			"codex_command": fakeCodex,
+			"engineering_task": map[string]any{
+				"schema_version": contracts.EngineeringTaskSchemaVersion,
+				"goal":           "Write the scoped fixture result and verify it.",
+				"workspace": map[string]any{
+					"root":         repo,
+					"base_sha":     baseSHA,
+					"branch":       "rdev/host-progress",
+					"isolation":    contracts.EngineeringIsolationGitWorktree,
+					"dirty_policy": contracts.EngineeringDirtyPolicyPreserve,
+					"cleanup":      contracts.EngineeringWorktreeCleanupPreserve,
+					"read_scope":   []string{"."},
+					"write_scope":  []string{"."},
+				},
+				"plan":       []string{"Inspect the fixture.", "Write the result."},
+				"acceptance": []string{"The declared verification passes."},
+				"verification": map[string]any{
+					"commands":       [][]string{{"sh", "-c", "test -f result.txt"}},
+					"allow_commands": []string{"sh"},
+				},
+				"limits": map[string]any{
+					"max_duration_seconds": 30,
+					"max_output_bytes":     64 * 1024,
+					"max_attempts":         1,
+				},
+				"network_policy":        contracts.EngineeringNetworkDefaultDeny,
+				"required_capabilities": []string{"codex.run", "git.diff"},
+				"idempotency_key":       "host-progress-engineering",
+			},
+		},
+		IdempotencyKey: "host-progress-engineering",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+	app := New(io.Discard, io.Discard)
+	err = app.runSessionTaskWithRoutes(context.Background(), serveOptions{
+		GatewayURL:         server.URL,
+		Transport:          "poll",
+		WorkspaceLockStore: filepath.Join(t.TempDir(), "workspace-locks"),
+	}, server.Client(), session.ID, endpoint.ID, "engineering-host", lease.Secret, task, newGatewayCandidateSet(server.URL, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, _, err := gw.SessionEventsAfterForAgent(session.ID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPhases := []string{"inspect", "plan", "edit", "verify", "finalize"}
+	gotPhases := make([]string, 0, len(wantPhases))
+	for _, event := range events {
+		if event.Type != controlplane.EventTypeTaskProgress || event.TaskID != task.ID {
+			continue
+		}
+		phase, _ := event.Payload["phase"].(string)
+		if event.Payload["checkpoint_id"] == "" || event.Payload["summary"] == "" || event.Payload["schema_version"] != "rdev.engineering-progress.v1" {
+			t.Fatalf("progress event is missing bounded checkpoint metadata: %#v", event)
+		}
+		gotPhases = append(gotPhases, phase)
+	}
+	if strings.Join(gotPhases, ",") != strings.Join(wantPhases, ",") {
+		t.Fatalf("engineering progress phases = %v, want %v; events=%#v", gotPhases, wantPhases, events)
 	}
 }
 
@@ -963,6 +1130,43 @@ func TestFetchJoinManifestUsesGatewayDateForClockSkew(t *testing.T) {
 	if got.TicketCode != ticket.Code {
 		t.Fatalf("unexpected manifest ticket code %q", got.TicketCode)
 	}
+}
+
+func TestSessionTaskSpecMapsGitWorktreeFields(t *testing.T) {
+	spec := sessionTaskSpec(controlplane.Task{
+		ID:      "task-worktree",
+		Adapter: "codex",
+		Payload: map[string]any{
+			"workspace_root": "/workspace/repo",
+			"write_scope":    []string{"internal"},
+			"branch":         "rdev/task-worktree",
+			"base_sha":       "0123456789abcdef0123456789abcdef01234567",
+			"isolation":      "git-worktree",
+			"dirty_policy":   "require-clean",
+		},
+	}, "endpoint-worktree", "identity-worktree")
+	if spec.Workspace.Root != "/workspace/repo" || spec.Workspace.Branch != "rdev/task-worktree" || spec.Workspace.BaseSHA != "0123456789abcdef0123456789abcdef01234567" || spec.Workspace.Isolation != "git-worktree" || spec.Workspace.DirtyPolicy != "require-clean" {
+		t.Fatalf("session task spec lost Git worktree fields: %#v", spec.Workspace)
+	}
+	if len(spec.Workspace.WriteScope) != 1 || spec.Workspace.WriteScope[0] != "internal" {
+		t.Fatalf("session task spec lost write scope: %#v", spec.Workspace)
+	}
+}
+
+func hostcmdGit(t *testing.T, repo string, args ...string) {
+	t.Helper()
+	if output, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
+	}
+}
+
+func hostcmdGitOutput(t *testing.T, repo string, args ...string) string {
+	t.Helper()
+	output, err := exec.Command("git", append([]string{"-C", repo}, args...)...).Output()
+	if err != nil {
+		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
+	}
+	return string(output)
 }
 
 func waitForSessionEndpoint(t *testing.T, gw *gateway.MemoryGateway, sessionID string) controlplane.Endpoint {

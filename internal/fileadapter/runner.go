@@ -21,6 +21,7 @@ const ResultSchemaVersion = "rdev.file-result.v1"
 
 type Spec struct {
 	WorkspaceRoot      string
+	ReadScope          []string
 	WriteScope         []string
 	Action             string
 	Path               string
@@ -33,6 +34,12 @@ type Spec struct {
 	ChunkBytes         int
 	MaxDurationSeconds int
 	MaxOutputBytes     int
+	Query              string
+	Glob               string
+	MaxResults         int
+	ResultOffset       int
+	ExpectedHash       string
+	AllowGitInspection bool
 }
 
 type Entry struct {
@@ -44,31 +51,32 @@ type Entry struct {
 }
 
 type ResultArtifact struct {
-	SchemaVersion   string  `json:"schema_version"`
-	Adapter         string  `json:"adapter"`
-	Action          string  `json:"action"`
-	WorkspaceRoot   string  `json:"workspace_root"`
-	Path            string  `json:"path,omitempty"`
-	ResolvedPath    string  `json:"resolved_path,omitempty"`
-	Entries         []Entry `json:"entries,omitempty"`
-	ContentBase64   string  `json:"content_base64,omitempty"`
-	ContentText     string  `json:"content_text,omitempty"`
-	Encoding        string  `json:"encoding,omitempty"`
-	Bytes           int     `json:"bytes,omitempty"`
-	SHA256          string  `json:"sha256,omitempty"`
-	ChunkSHA256     string  `json:"chunk_sha256,omitempty"`
-	Offset          int64   `json:"offset"`
-	NextOffset      int64   `json:"next_offset"`
-	TotalBytes      int64   `json:"total_bytes"`
-	Complete        bool    `json:"complete"`
-	ExpectedBytes   int     `json:"expected_bytes,omitempty"`
-	ExpectedSHA256  string  `json:"expected_sha256,omitempty"`
-	ByteCompare     string  `json:"byte_compare,omitempty"`
-	Deleted         bool    `json:"deleted,omitempty"`
-	OutputTruncated bool    `json:"output_truncated"`
-	StartedAt       string  `json:"started_at"`
-	EndedAt         string  `json:"ended_at"`
-	DurationMillis  int64   `json:"duration_millis"`
+	SchemaVersion   string                  `json:"schema_version"`
+	Adapter         string                  `json:"adapter"`
+	Action          string                  `json:"action"`
+	WorkspaceRoot   string                  `json:"workspace_root"`
+	Path            string                  `json:"path,omitempty"`
+	ResolvedPath    string                  `json:"resolved_path,omitempty"`
+	Entries         []Entry                 `json:"entries,omitempty"`
+	ContentBase64   string                  `json:"content_base64,omitempty"`
+	ContentText     string                  `json:"content_text,omitempty"`
+	Encoding        string                  `json:"encoding,omitempty"`
+	Bytes           int                     `json:"bytes,omitempty"`
+	SHA256          string                  `json:"sha256,omitempty"`
+	ChunkSHA256     string                  `json:"chunk_sha256,omitempty"`
+	Offset          int64                   `json:"offset"`
+	NextOffset      int64                   `json:"next_offset"`
+	TotalBytes      int64                   `json:"total_bytes"`
+	Complete        bool                    `json:"complete"`
+	ExpectedBytes   int                     `json:"expected_bytes,omitempty"`
+	ExpectedSHA256  string                  `json:"expected_sha256,omitempty"`
+	ByteCompare     string                  `json:"byte_compare,omitempty"`
+	Deleted         bool                    `json:"deleted,omitempty"`
+	ProjectContext  *ProjectContextArtifact `json:"project_context,omitempty"`
+	OutputTruncated bool                    `json:"output_truncated"`
+	StartedAt       string                  `json:"started_at"`
+	EndedAt         string                  `json:"ended_at"`
+	DurationMillis  int64                   `json:"duration_millis"`
 }
 
 func Execute(spec Spec) (ResultArtifact, error) {
@@ -117,6 +125,13 @@ func ExecuteContext(ctx context.Context, spec Spec) (ResultArtifact, error) {
 	}
 
 	switch action {
+	case "describe", "search", "read.slice", "symbols", "diagnostics":
+		projectContext, err := executeProjectContext(ctx, root, spec, action)
+		if err != nil {
+			return finish(), err
+		}
+		artifact.ProjectContext = projectContext
+		artifact.OutputTruncated = projectContext.OutputTruncated
 	case "list":
 		resolved, err := resolveExistingPath(root, spec.Path)
 		if err != nil {
@@ -191,6 +206,7 @@ func (r ResultArtifact) ArtifactContent() string {
 func normalizeAction(action string) string {
 	action = strings.ToLower(strings.TrimSpace(action))
 	action = strings.ReplaceAll(action, "_", ".")
+	action = strings.ReplaceAll(action, "-", ".")
 	return action
 }
 
@@ -221,6 +237,9 @@ func resolveWritablePath(root, raw string, writeScope []string) (string, error) 
 	if len(writeScope) == 0 {
 		return "", fmt.Errorf("write_scope is required")
 	}
+	if err := workspace.ValidateWriteScopes(root, writeScope); err != nil {
+		return "", fmt.Errorf("validate write_scope: %w", err)
+	}
 	target, err := cleanTarget(root, raw)
 	if err != nil {
 		return "", err
@@ -236,21 +255,34 @@ func resolveWritablePath(root, raw string, writeScope []string) (string, error) 
 		if err != nil {
 			return "", fmt.Errorf("target parent ancestor must resolve: %w", err)
 		}
+		relativeParent, relErr := filepath.Rel(ancestor, parent)
+		if relErr != nil {
+			return "", fmt.Errorf("resolve target parent relative path: %w", relErr)
+		}
+		parentCanonical = filepath.Join(parentCanonical, relativeParent)
 	}
 	if !pathWithin(root, parentCanonical) {
 		return "", fmt.Errorf("target parent escapes workspace root")
 	}
-	for _, scope := range writeScope {
-		scopeTarget, err := cleanTarget(root, scope)
+	targetCanonical := filepath.Join(parentCanonical, filepath.Base(target))
+	if info, statErr := os.Lstat(target); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		targetCanonical, err = filepath.EvalSymlinks(target)
 		if err != nil {
-			continue
+			return "", fmt.Errorf("target symlink must resolve inside workspace: %w", err)
 		}
-		scopeCanonical := scopeTarget
-		if existing, err := filepath.EvalSymlinks(scopeTarget); err == nil {
-			scopeCanonical = existing
+	} else if statErr != nil && !os.IsNotExist(statErr) {
+		return "", fmt.Errorf("inspect target path: %w", statErr)
+	}
+	if !pathWithin(root, targetCanonical) {
+		return "", fmt.Errorf("target path escapes workspace root")
+	}
+	for _, scope := range writeScope {
+		scopeCanonical, err := workspace.ResolveWriteScope(root, scope)
+		if err != nil {
+			return "", fmt.Errorf("resolve write_scope: %w", err)
 		}
-		if pathWithin(scopeCanonical, target) || pathWithin(scopeCanonical, parentCanonical) {
-			return target, nil
+		if pathWithin(scopeCanonical, targetCanonical) {
+			return targetCanonical, nil
 		}
 	}
 	return "", fmt.Errorf("target path is outside declared write_scope")

@@ -55,6 +55,96 @@ func TestRunSessionTaskRejectsMissingCapabilityWithDenial(t *testing.T) {
 	assertDenial(t, result, err, "missing_capability")
 }
 
+func TestRunSessionTaskRejectsMalformedEngineeringTaskBeforeExecution(t *testing.T) {
+	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	repo := t.TempDir()
+	spec := shellSessionTask(repo, []string{"shell.user"})
+	spec.Payload["engineering_task"] = map[string]any{
+		"schema_version": "rdev.engineering-task.v1",
+		"goal":           "Reject before running a host process.",
+		"workspace": map[string]any{
+			"root":         repo,
+			"base_sha":     "not-a-sha",
+			"isolation":    "git-worktree",
+			"dirty_policy": "preserve",
+			"read_scope":   []string{"."},
+			"write_scope":  []string{"."},
+		},
+		"plan":       []string{"Inspect."},
+		"acceptance": []string{"Tests pass."},
+		"verification": map[string]any{
+			"commands":       [][]string{{"go", "test", "./..."}},
+			"allow_commands": []string{"go"},
+		},
+		"limits": map[string]any{
+			"max_duration_seconds": 30,
+			"max_output_bytes":     4096,
+			"max_attempts":         1,
+		},
+		"network_policy":        "default-deny",
+		"required_capabilities": []string{"shell.user"},
+		"idempotency_key":       "host-invalid-engineering-task",
+	}
+
+	result, err := RunSessionTaskWithOptionsContext(context.Background(), spec, now, Options{})
+	assertDenial(t, result, err, "invalid_engineering_task")
+}
+
+func TestNormalizeEngineeringSessionTaskSpecMapsContractFields(t *testing.T) {
+	repo := t.TempDir()
+	spec := SessionTaskSpec{
+		Adapter: "shell",
+		Payload: map[string]any{
+			"engineering_task": map[string]any{
+				"schema_version": "rdev.engineering-task.v1",
+				"goal":           "Run the scoped engineering task.",
+				"workspace": map[string]any{
+					"root":         repo,
+					"base_sha":     "0123456789abcdef0123456789abcdef01234567",
+					"branch":       "rdev/task-shell",
+					"isolation":    "git-worktree",
+					"dirty_policy": "preserve",
+					"read_scope":   []string{"."},
+					"write_scope":  []string{"."},
+				},
+				"plan":       []string{"Inspect."},
+				"acceptance": []string{"Tests pass."},
+				"verification": map[string]any{
+					"commands":       [][]string{{"go", "test", "./..."}},
+					"allow_commands": []string{"go"},
+				},
+				"limits": map[string]any{
+					"max_duration_seconds": 30,
+					"max_output_bytes":     4096,
+					"max_attempts":         2,
+				},
+				"network_policy":        "default-deny",
+				"required_capabilities": []string{"shell.user"},
+				"interrupts_required":   []string{"interrupt.network"},
+				"idempotency_key":       "host-engineering-task",
+			},
+		},
+	}
+
+	normalized, err := normalizeEngineeringSessionTaskSpec(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if normalized.Intent != "Run the scoped engineering task." || normalized.Workspace.Root != repo || normalized.Workspace.Branch != "rdev/task-shell" || normalized.Workspace.BaseSHA != "0123456789abcdef0123456789abcdef01234567" || normalized.Workspace.Isolation != "git-worktree" || normalized.Workspace.DirtyPolicy != "preserve" {
+		t.Fatalf("contract did not normalize task workspace: %#v", normalized)
+	}
+	if normalized.Payload["worktree_cleanup"] != "preserve" || normalized.Payload["max_attempts"] != 2 {
+		t.Fatalf("contract did not normalize bounded worktree execution values: %#v", normalized.Payload)
+	}
+	if normalized.Limits.MaxDurationSeconds != 30 || normalized.Limits.MaxOutputBytes != 4096 || normalized.Limits.Network != "default-deny" {
+		t.Fatalf("contract did not normalize limits: %#v", normalized.Limits)
+	}
+	envelope := sessionTaskEnvelope(normalized, time.Now())
+	if len(envelope.InterruptsRequired) != 1 || envelope.InterruptsRequired[0] != "interrupt.network" {
+		t.Fatalf("contract did not carry required interrupts to the runtime: %#v", envelope)
+	}
+}
+
 func TestRunSessionTaskAcquiresAndReleasesWorkspaceLock(t *testing.T) {
 	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
 	repo := t.TempDir()

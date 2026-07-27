@@ -145,11 +145,18 @@
     },
     {
       "name": "rdev.sessions.task",
-      "description": "Submit or inspect a Control Plane v1 task through the session event stream and return task, event, user_summary, agent_next_action, recoverable, and retry_after_ms. Tasks are routed through session endpoints.",
-      "safety": "Creates a routed task event for an already joined session endpoint. Adapter payloads remain policy-bound by the target runtime and session capabilities.",
+      "description": "Submit a Control Plane v1 task, including typed engineering or user-scoped toolchain bootstrap requests, or resume a terminal/paused typed engineering task from a bounded host checkpoint. Submit returns task, event, user_summary, agent_next_action, recoverable, and retry_after_ms; resume creates a fresh routed attempt bound to the supplied checkpoint without adding an MCP top-level tool.",
+      "safety": "Creates a routed task event for an already joined session endpoint. Toolchain installation is typed, user-scoped, and requires package-install authorization; credentials remain host-local environment references. Resume only reuses a checkpoint from the same typed engineering task; adapter payloads remain policy-bound by the target runtime and session capabilities.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "action": {
+            "enum": [
+              "submit",
+              "resume"
+            ],
+            "type": "string"
+          },
           "adapter": {
             "minLength": 1,
             "type": "string"
@@ -160,6 +167,311 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "checkpoint_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "engineering_task": {
+            "additionalProperties": false,
+            "properties": {
+              "acceptance": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "goal": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "idempotency_key": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "interrupts_required": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "limits": {
+                "additionalProperties": false,
+                "properties": {
+                  "max_attempts": {
+                    "maximum": 10,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "max_duration_seconds": {
+                    "maximum": 86400,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "max_output_bytes": {
+                    "maximum": 16777216,
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "max_duration_seconds",
+                  "max_output_bytes",
+                  "max_attempts"
+                ],
+                "type": "object"
+              },
+              "network_policy": {
+                "enum": [
+                  "default-deny",
+                  "deny",
+                  "allow"
+                ],
+                "type": "string"
+              },
+              "plan": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "required_capabilities": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "schema_version": {
+                "const": "rdev.engineering-task.v1",
+                "type": "string"
+              },
+              "verification": {
+                "additionalProperties": false,
+                "properties": {
+                  "allow_commands": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "commands": {
+                    "items": {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "commands",
+                  "allow_commands"
+                ],
+                "type": "object"
+              },
+              "workspace": {
+                "additionalProperties": false,
+                "properties": {
+                  "base_sha": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "branch": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "cleanup": {
+                    "enum": [
+                      "preserve",
+                      "remove",
+                      "rollback"
+                    ],
+                    "type": "string"
+                  },
+                  "dirty_policy": {
+                    "enum": [
+                      "preserve",
+                      "require-clean"
+                    ],
+                    "type": "string"
+                  },
+                  "handle": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "isolation": {
+                    "enum": [
+                      "git-worktree",
+                      "workspace-lock"
+                    ],
+                    "type": "string"
+                  },
+                  "read_scope": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "root": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "write_scope": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "root",
+                  "isolation",
+                  "dirty_policy",
+                  "read_scope",
+                  "write_scope"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "schema_version",
+              "goal",
+              "workspace",
+              "plan",
+              "acceptance",
+              "verification",
+              "limits",
+              "network_policy",
+              "required_capabilities",
+              "idempotency_key"
+            ],
+            "type": "object",
+            "x-rdev-adapter-profiles": [
+              {
+                "adapter": "shell",
+                "schema_version": "rdev.shell-result.v1",
+                "required_capabilities": [
+                  "shell.user"
+                ],
+                "payload_example": {
+                  "allow_commands": [
+                    "go"
+                  ],
+                  "argv": [
+                    "go",
+                    "test",
+                    "./..."
+                  ]
+                }
+              },
+              {
+                "adapter": "powershell",
+                "schema_version": "rdev.powershell-result.v1",
+                "required_capabilities": [
+                  "powershell.user"
+                ],
+                "payload_example": {
+                  "allow_commands": [
+                    "dotnet"
+                  ],
+                  "command": "dotnet test"
+                }
+              },
+              {
+                "adapter": "codex",
+                "schema_version": "rdev.codex-result.v1",
+                "required_capabilities": [
+                  "codex.run",
+                  "git.diff"
+                ],
+                "payload_example": {
+                  "allow_verification_commands": [
+                    "go"
+                  ],
+                  "prompt": "Implement the accepted change.",
+                  "verification_commands": [
+                    [
+                      "go",
+                      "test",
+                      "./..."
+                    ]
+                  ]
+                }
+              },
+              {
+                "adapter": "claude-code",
+                "schema_version": "rdev.claude-code-result.v1",
+                "required_capabilities": [
+                  "claude-code.run",
+                  "git.diff"
+                ],
+                "payload_example": {
+                  "allow_verification_commands": [
+                    "go"
+                  ],
+                  "prompt": "Implement the accepted change.",
+                  "verification_commands": [
+                    [
+                      "go",
+                      "test",
+                      "./..."
+                    ]
+                  ]
+                }
+              },
+              {
+                "adapter": "acpx",
+                "schema_version": "rdev.acpx-result.v1",
+                "required_capabilities": [
+                  "acpx.run",
+                  "git.diff"
+                ],
+                "payload_example": {
+                  "allow_verification_commands": [
+                    "go"
+                  ],
+                  "prompt": "Implement the accepted change.",
+                  "verification_commands": [
+                    [
+                      "go",
+                      "test",
+                      "./..."
+                    ]
+                  ]
+                }
+              },
+              {
+                "adapter": "file",
+                "schema_version": "rdev.file-result.v1",
+                "required_capabilities": [
+                  "file.transfer.read"
+                ],
+                "payload_example": {
+                  "action": "read",
+                  "chunk_bytes": 4096,
+                  "path": "README.md"
+                }
+              },
+              {
+                "adapter": "desktop",
+                "schema_version": "rdev.desktop-result.v1",
+                "required_capabilities": [
+                  "window.inspect"
+                ],
+                "payload_example": {
+                  "action": "window.inspect"
+                }
+              }
+            ]
           },
           "gateway_url": {
             "description": "Optional gateway base URL to proxy this session call. Overrides the server-level gateway URL for this single MCP request.",
@@ -189,11 +501,195 @@
           "target_endpoint_id": {
             "minLength": 1,
             "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "toolchain_request": {
+            "additionalProperties": false,
+            "properties": {
+              "execute": {
+                "type": "boolean"
+              },
+              "policy": {
+                "additionalProperties": false,
+                "properties": {
+                  "endpoint": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "auth_mode": {
+                        "enum": [
+                          "api-key",
+                          "bearer"
+                        ],
+                        "type": "string"
+                      },
+                      "base_url": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "credential_env": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "model": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "node_bootstrap": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "max_archive_bytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "max_extracted_bytes": {
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      "sources": {
+                        "items": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "format": {
+                              "enum": [
+                                "zip",
+                                "tar.gz"
+                              ],
+                              "type": "string"
+                            },
+                            "id": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "regions": {
+                              "items": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "type": "array"
+                            },
+                            "sha256": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "url": {
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "url",
+                            "sha256",
+                            "format",
+                            "regions"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "version": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "version",
+                      "max_archive_bytes",
+                      "max_extracted_bytes",
+                      "sources"
+                    ],
+                    "type": "object"
+                  },
+                  "proxy_mode": {
+                    "enum": [
+                      "inherit",
+                      "disabled"
+                    ],
+                    "type": "string"
+                  },
+                  "region": {
+                    "enum": [
+                      "global",
+                      "cn-mainland"
+                    ],
+                    "type": "string"
+                  },
+                  "registries": {
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "id": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "regions": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "url": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "url",
+                        "regions"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "schema_version": {
+                    "const": "rdev.toolchain-policy.v1",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "schema_version",
+                  "region",
+                  "proxy_mode",
+                  "registries"
+                ],
+                "type": "object"
+              },
+              "schema_version": {
+                "const": "rdev.toolchain-request.v1",
+                "type": "string"
+              },
+              "tool": {
+                "enum": [
+                  "codex",
+                  "claude-code"
+                ],
+                "type": "string"
+              },
+              "version": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "schema_version",
+              "tool",
+              "version",
+              "execute",
+              "policy"
+            ],
+            "type": "object"
           }
         },
         "required": [
           "session_id",
-          "adapter",
           "idempotency_key"
         ],
         "type": "object"

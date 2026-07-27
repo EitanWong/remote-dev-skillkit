@@ -7,9 +7,12 @@ const (
 )
 
 type TaskWorkspace struct {
-	Root       string   `json:"root,omitempty"`
-	WriteScope []string `json:"write_scope,omitempty"`
-	Branch     string   `json:"branch,omitempty"`
+	Root        string   `json:"root,omitempty"`
+	WriteScope  []string `json:"write_scope,omitempty"`
+	Branch      string   `json:"branch,omitempty"`
+	BaseSHA     string   `json:"base_sha,omitempty"`
+	Isolation   string   `json:"isolation,omitempty"`
+	DirtyPolicy string   `json:"dirty_policy,omitempty"`
 }
 
 type TaskLimits struct {

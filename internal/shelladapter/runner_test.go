@@ -117,6 +117,32 @@ func TestExecuteRejectsSymlinkWriteScopeEscape(t *testing.T) {
 	}
 }
 
+func TestExecuteRejectsNestedSymlinkWriteScopeEscape(t *testing.T) {
+	workspace := t.TempDir()
+	allowed := filepath.Join(workspace, "allowed")
+	if err := os.MkdirAll(allowed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(allowed, "outside-link")); err != nil {
+		t.Skipf("symlink creation is not available: %v", err)
+	}
+	_, err := Execute(Spec{
+		WorkspaceRoot:      workspace,
+		WriteScope:         []string{"allowed"},
+		Argv:               []string{"go", "env", "GOOS"},
+		AllowCommands:      []string{"go"},
+		MaxDurationSeconds: 10,
+		MaxOutputBytes:     1024,
+	})
+	if err == nil {
+		t.Fatal("expected nested symlink escaping write scope to fail")
+	}
+	if !strings.Contains(err.Error(), "escapes workspace root") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestExecuteRejectsSymlinkWriteScopeEscapeForMissingChild(t *testing.T) {
 	workspace := t.TempDir()
 	outside := t.TempDir()

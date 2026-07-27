@@ -129,6 +129,94 @@ func TestSessionsMCPCreateStatusTaskEventsAndClose(t *testing.T) {
 	}
 }
 
+func TestSessionsMCPPreflightsEngineeringTask(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	created := callSessionTool(t, server, "rdev.sessions.create", map[string]any{"reason": "engineering task preflight"})
+	session := mapValue(t, created, "session")
+	sessionID := stringValue(t, session, "id")
+	joinCode := stringValue(t, session, "join_code")
+	if _, _, _, _, err := gw.JoinSessionByCode(joinCode, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Platform:            "linux/amd64",
+		IdentityFingerprint: "fp-engineering",
+		Capabilities:        []string{"codex.run", "git.diff"},
+		Transport:           controlplane.TransportLongPoll,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	taskResult := callSessionTool(t, server, "rdev.sessions.task", map[string]any{
+		"session_id":       sessionID,
+		"adapter":          "codex",
+		"capabilities":     []any{"codex.run", "git.diff"},
+		"idempotency_key":  "engineering-task-1",
+		"engineering_task": validEngineeringTaskArgs(),
+	})
+	task := mapValue(t, taskResult, "task")
+	payload := mapValue(t, task, "payload")
+	if stringValue(t, payload, "workspace_root") != "/tmp/engineering-repo" {
+		t.Fatalf("engineering workspace did not normalize into task payload: %#v", task)
+	}
+	limits := mapValue(t, task, "limits")
+	if limits["max_attempts"] != float64(2) {
+		t.Fatalf("engineering limits did not normalize into task limits: %#v", task)
+	}
+
+	invalid := validEngineeringTaskArgs()
+	invalid["workspace"].(map[string]any)["base_sha"] = "not-a-sha"
+	message := callSessionToolError(t, server, "rdev.sessions.task", map[string]any{
+		"session_id":       sessionID,
+		"adapter":          "codex",
+		"capabilities":     []any{"codex.run", "git.diff"},
+		"idempotency_key":  "engineering-task-invalid",
+		"engineering_task": invalid,
+	})
+	if !strings.Contains(message, "base_sha") {
+		t.Fatalf("invalid engineering task should fail before routing: %q", message)
+	}
+}
+
+func TestSessionsMCPResumesTerminalEngineeringTaskFromCheckpoint(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	created := callSessionTool(t, server, "rdev.sessions.create", map[string]any{"reason": "engineering resume"})
+	sessionID := stringValue(t, mapValue(t, created, "session"), "id")
+	joinCode := stringValue(t, mapValue(t, created, "session"), "join_code")
+	if _, _, _, _, err := gw.JoinSessionByCode(joinCode, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Platform:            "linux/amd64",
+		IdentityFingerprint: "fp-resume",
+		Capabilities:        []string{"codex.run", "git.diff"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sourceResult := callSessionTool(t, server, "rdev.sessions.task", map[string]any{
+		"session_id":       sessionID,
+		"adapter":          "codex",
+		"capabilities":     []any{"codex.run", "git.diff"},
+		"idempotency_key":  "engineering-task-1",
+		"engineering_task": validEngineeringTaskArgs(),
+	})
+	source := mapValue(t, sourceResult, "task")
+	sourceID := stringValue(t, source, "id")
+	if _, _, err := gw.CancelSessionTask(sessionID, sourceID, "connection lost", "resume-source-cancel"); err != nil {
+		t.Fatal(err)
+	}
+	resumed := callSessionTool(t, server, "rdev.sessions.task", map[string]any{
+		"action":          "resume",
+		"session_id":      sessionID,
+		"task_id":         sourceID,
+		"checkpoint_id":   "ecp_fixture",
+		"idempotency_key": "engineering-resume-request",
+	})
+	task := mapValue(t, resumed, "task")
+	payload := mapValue(t, task, "payload")
+	if stringValue(t, task, "id") == sourceID || stringValue(t, payload, "engineering_resume_checkpoint_id") != "ecp_fixture" || stringValue(t, payload, "engineering_resume_task_id") != sourceID {
+		t.Fatalf("MCP resume did not create a checkpoint-bound fresh task: %#v", resumed)
+	}
+}
+
 func TestSessionsMCPInterruptAndArtifactAppend(t *testing.T) {
 	server := NewServer(gateway.NewMemoryGateway())
 	created := callSessionTool(t, server, "rdev.sessions.create", map[string]any{"reason": "interrupt test"})
@@ -223,6 +311,51 @@ func callSessionTool(t *testing.T, server Server, tool string, args map[string]a
 	}
 	result := lines[0]["result"].(map[string]any)
 	return result["structuredContent"].(map[string]any)
+}
+
+func callSessionToolError(t *testing.T, server Server, tool string, args map[string]any) string {
+	t.Helper()
+	var out bytes.Buffer
+	if err := server.Serve(context.Background(), strings.NewReader(mcpRequestLine(t, tool, args)), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	errPayload, ok := lines[0]["error"].(map[string]any)
+	if !ok {
+		t.Fatalf("%s unexpectedly succeeded: %#v", tool, lines[0])
+	}
+	message, _ := errPayload["message"].(string)
+	return message
+}
+
+func validEngineeringTaskArgs() map[string]any {
+	return map[string]any{
+		"schema_version": "rdev.engineering-task.v1",
+		"goal":           "Add the smallest typed task path.",
+		"workspace": map[string]any{
+			"root":         "/tmp/engineering-repo",
+			"base_sha":     "0123456789abcdef0123456789abcdef01234567",
+			"branch":       "rdev/task_engineering",
+			"isolation":    "git-worktree",
+			"dirty_policy": "preserve",
+			"read_scope":   []any{"."},
+			"write_scope":  []any{"internal"},
+		},
+		"plan":       []any{"Inspect.", "Implement."},
+		"acceptance": []any{"Focused tests pass."},
+		"verification": map[string]any{
+			"commands":       []any{[]any{"go", "test", "./internal/contracts"}},
+			"allow_commands": []any{"go"},
+		},
+		"limits": map[string]any{
+			"max_duration_seconds": 600,
+			"max_output_bytes":     65536,
+			"max_attempts":         2,
+		},
+		"network_policy":        "default-deny",
+		"required_capabilities": []any{"codex.run", "git.diff"},
+		"idempotency_key":       "engineering-task-1",
+	}
 }
 
 func mapValue(t *testing.T, values map[string]any, key string) map[string]any {

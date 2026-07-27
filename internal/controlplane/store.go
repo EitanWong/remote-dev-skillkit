@@ -230,7 +230,38 @@ func (s *MemoryStore) AppendEvent(sessionID string, event Event) (Event, error) 
 		s.expireSessionLocked(sessionID)
 		return Event{}, s.err(ErrTerminalSession, "session is expired", false)
 	}
-	return s.appendEventLocked(sessionID, event, true)
+	if event.Type != EventTypeTaskProgress {
+		return s.appendEventLocked(sessionID, event, true)
+	}
+	task, taskIndex, _, err := s.findTaskLocked(sessionID, event.TaskID)
+	if err != nil {
+		return Event{}, err
+	}
+	if event.FromEndpointID != task.TargetEndpointID {
+		return Event{}, s.err(ErrUnauthorizedEndpoint, "task progress must be reported by the assigned target endpoint", false)
+	}
+	if task.Terminal() {
+		return Event{}, s.err(ErrTaskAlreadyTerminal, "task is already terminal", false)
+	}
+	updated := task
+	transitioned := false
+	if task.Status == TaskStatusOffered || task.Status == TaskStatusPaused {
+		updated, err = task.Transition(TaskStatusRunning, s.now())
+		if err != nil {
+			return Event{}, err
+		}
+		transitioned = true
+	}
+	appended, err := s.appendEventLocked(sessionID, event, true)
+	if err != nil {
+		return Event{}, err
+	}
+	if transitioned {
+		current := s.sessions[sessionID].clone()
+		current.Tasks[taskIndex] = updated
+		s.sessions[sessionID] = current
+	}
+	return appended, nil
 }
 
 func (s *MemoryStore) AppendEventBatch(sessionID string, batch []Event) ([]Event, error) {
@@ -522,6 +553,51 @@ func (s *MemoryStore) CancelTask(sessionID, taskID, reason, idempotencyKey strin
 	s.sessions[sessionID] = session
 	s.cancelIdempotency[key] = taskRecord{TaskID: canceled.ID, EventID: event.ID}
 	return canceled, event, nil
+}
+
+func (s *MemoryStore) ResumeTask(sessionID, taskID, checkpointID, idempotencyKey string) (Task, Event, error) {
+	checkpointID = strings.TrimSpace(checkpointID)
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if checkpointID == "" || idempotencyKey == "" {
+		return Task{}, Event{}, s.err(ErrInvalidTask, "resume checkpoint id and idempotency key are required", false)
+	}
+	if len(checkpointID) > 256 || len(idempotencyKey) > 256 {
+		return Task{}, Event{}, s.err(ErrInvalidTask, "resume checkpoint id or idempotency key is too long", false)
+	}
+	s.mu.Lock()
+	if session, ok := s.sessions[sessionID]; ok && s.sessionExpired(session) {
+		s.expireSessionLocked(sessionID)
+		s.mu.Unlock()
+		return Task{}, Event{}, s.err(ErrTerminalSession, "session is expired", false)
+	}
+	source, _, _, err := s.findTaskLocked(sessionID, taskID)
+	if err != nil {
+		s.mu.Unlock()
+		return Task{}, Event{}, err
+	}
+	if source.Status != TaskStatusPaused && !source.Terminal() {
+		s.mu.Unlock()
+		return Task{}, Event{}, s.err(ErrInvalidTask, "only a paused or terminal task can be resumed", false)
+	}
+	if source.Payload == nil || source.Payload["engineering_task"] == nil {
+		s.mu.Unlock()
+		return Task{}, Event{}, s.err(ErrInvalidTask, "task does not carry an engineering checkpoint contract", false)
+	}
+	payload := cloneMap(source.Payload)
+	payload["engineering_resume_checkpoint_id"] = checkpointID
+	payload["engineering_resume_task_id"] = source.ID
+	spec := TaskSpec{
+		TargetEndpointID: source.TargetEndpointID,
+		TargetSelector:   source.TargetSelector,
+		Adapter:          source.Adapter,
+		Intent:           source.Intent,
+		Capabilities:     append([]string(nil), source.Capabilities...),
+		Payload:          payload,
+		Limits:           cloneMap(source.Limits),
+		IdempotencyKey:   "resume:" + source.ID + ":" + checkpointID + ":" + idempotencyKey,
+	}
+	s.mu.Unlock()
+	return s.SubmitTask(sessionID, spec)
 }
 
 func (s *MemoryStore) CompleteTask(sessionID, taskID string, result map[string]any) (Task, Event, error) {
