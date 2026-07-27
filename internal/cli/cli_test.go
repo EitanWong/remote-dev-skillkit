@@ -771,6 +771,50 @@ func TestDoctorFailsClosedOnUnverifiableSkillkitInstallManifest(t *testing.T) {
 	}
 }
 
+func TestRuntimeInfoDoesNotDuplicateSymlinkedSkillkitTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("directory symlink creation requires privileges that are not guaranteed on Windows")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, envName := range []string{
+		"RDEV_CODEX_SKILLS_DIR",
+		"RDEV_CLAUDE_CODE_SKILLS_DIR",
+		"RDEV_HERMES_SKILLS_DIR",
+		"RDEV_OPENCLAW_SKILLS_DIR",
+		"RDEV_OPENCODE_SKILLS_DIR",
+		"RDEV_GENERIC_AGENT_SKILLS_DIR",
+	} {
+		t.Setenv(envName, "")
+	}
+	root, target := writeRuntimeInfoSkillFixture(t, "source safe remote support\n")
+	t.Setenv("RDEV_SOURCE_ROOT", root)
+	if err := os.Symlink(filepath.Dir(target), filepath.Join(home, ".codex")); err != nil {
+		t.Skipf("create skill target alias: %v", err)
+	}
+	refDir := filepath.Join(root, ".remote-dev-skillkit")
+	if err := os.MkdirAll(refDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := json.Marshal(map[string]any{
+		"schema_version": "rdev.skillkit-install-manifest.v1",
+		"target_dir":     target,
+		"framework":      "codex",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(refDir, "install.json"), manifest, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, detected := range mapSliceFromAny(rdevRuntimeInfo(root)["detected_skill_install_targets"]) {
+		if detected["framework"] == "codex" {
+			t.Fatalf("symlink alias for an installed Codex Skillkit target must not be reported as legacy: %#v", detected)
+		}
+	}
+}
+
 func writeRuntimeInfoSkillFixture(t *testing.T, safeRemoteInstalledContent string) (string, string) {
 	t.Helper()
 	root := t.TempDir()

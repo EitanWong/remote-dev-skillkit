@@ -2881,17 +2881,20 @@ func detectedSkillInstallTargets(sourceRoot string, manifests []map[string]any) 
 	if strings.TrimSpace(sourceRoot) == "" {
 		return nil
 	}
-	manifestTargets := map[string]bool{}
+	manifestTargets := []string{}
 	for _, manifest := range manifests {
 		targetDir := strings.TrimSpace(stringFromMap(manifest, "target_dir"))
 		if targetDir != "" {
-			manifestTargets[targetDir] = true
+			manifestTargets = append(manifestTargets, targetDir)
 		}
 	}
 	out := []map[string]any{}
+candidateLoop:
 	for _, candidate := range commonSkillTargetCandidates() {
-		if manifestTargets[candidate.Path] {
-			continue
+		for _, manifestTarget := range manifestTargets {
+			if samePath(candidate.Path, manifestTarget) {
+				continue candidateLoop
+			}
 		}
 		status := skillInstallStatus(sourceRoot, map[string]any{"target_dir": candidate.Path})
 		if status == nil {
