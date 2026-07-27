@@ -9643,6 +9643,77 @@ func TestSkillkitInstallDryRunAndExecute(t *testing.T) {
 	}
 }
 
+func TestDoctorFindsManifestAtConfiguredSkillTarget(t *testing.T) {
+	bundle := filepath.Join(t.TempDir(), "skillkit")
+	exportApp := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := exportApp.Run(context.Background(), []string{
+		"skillkit", "export",
+		"--source-root", filepath.Join("..", ".."),
+		"--out", bundle,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	target := filepath.Join(t.TempDir(), "profile", "codex", "skills")
+	installApp := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	if err := installApp.Run(context.Background(), []string{
+		"skillkit", "install",
+		"--bundle", bundle,
+		"--framework", "codex",
+		"--target", target,
+		"--execute",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	sourceRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("RDEV_SOURCE_ROOT", sourceRoot)
+	t.Setenv("RDEV_CODEX_SKILLS_DIR", target)
+	for _, envName := range []string{
+		"RDEV_CLAUDE_CODE_SKILLS_DIR",
+		"RDEV_HERMES_SKILLS_DIR",
+		"RDEV_OPENCLAW_SKILLS_DIR",
+		"RDEV_OPENCODE_SKILLS_DIR",
+		"RDEV_GENERIC_AGENT_SKILLS_DIR",
+	} {
+		t.Setenv(envName, "")
+	}
+
+	var stdout bytes.Buffer
+	doctorApp := NewApp(&stdout, &bytes.Buffer{})
+	if err := doctorApp.Run(context.Background(), []string{"doctor"}); err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		OK   bool `json:"ok"`
+		Rdev struct {
+			InstallManifestCount     int `json:"install_manifest_count"`
+			DetectedSkillTargetCount int `json:"detected_skill_target_count"`
+			InstallManifests         []struct {
+				Path      string `json:"path"`
+				TargetDir string `json:"target_dir"`
+				Framework string `json:"framework"`
+			} `json:"install_manifests"`
+		} `json:"rdev"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid doctor JSON: %v\n%s", err, stdout.String())
+	}
+	if !payload.OK ||
+		payload.Rdev.InstallManifestCount != 1 ||
+		payload.Rdev.DetectedSkillTargetCount != 0 ||
+		len(payload.Rdev.InstallManifests) != 1 ||
+		payload.Rdev.InstallManifests[0].Framework != "codex" ||
+		payload.Rdev.InstallManifests[0].TargetDir != target ||
+		payload.Rdev.InstallManifests[0].Path != filepath.Join(target, ".remote-dev-skillkit", "install.json") {
+		t.Fatalf("doctor should discover the configured Skillkit manifest after HOME changes, got %s", stdout.String())
+	}
+}
+
 func TestAdapterVerifyResultAcceptsShellArtifact(t *testing.T) {
 	dir := t.TempDir()
 	artifactPath := filepath.Join(dir, "shell-result.json")

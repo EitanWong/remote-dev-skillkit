@@ -2841,6 +2841,9 @@ func installManifestCandidates(sourceRoot string) []string {
 			filepath.Join(home, ".opencode", "skills", ".remote-dev-skillkit", "install.json"),
 		)
 	}
+	for _, target := range commonSkillTargetCandidates() {
+		candidates = append(candidates, filepath.Join(target.Path, ".remote-dev-skillkit", "install.json"))
+	}
 	if wd, err := os.Getwd(); err == nil {
 		for dir := wd; ; dir = filepath.Dir(dir) {
 			candidates = append(candidates, filepath.Join(dir, ".remote-dev-skillkit", "install.json"))
