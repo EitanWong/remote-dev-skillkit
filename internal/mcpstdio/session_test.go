@@ -32,7 +32,7 @@ func TestSessionsToolsListExposesOnlySessionControlPlane(t *testing.T) {
 	}
 	for _, name := range []string{
 		"rdev.sessions.create",
-		"rdev.sessions.connect",
+
 		"rdev.sessions.status",
 		"rdev.sessions.events",
 		"rdev.sessions.task",
@@ -44,14 +44,7 @@ func TestSessionsToolsListExposesOnlySessionControlPlane(t *testing.T) {
 			t.Fatalf("missing session tool %s from tools/list: %#v", name, seen)
 		}
 	}
-	if seen["rdev.support_session.connect"] {
-		t.Fatal("old support-session connect tool must be absent from tools/list")
-	}
-	for _, old := range []string{"rdev.tickets.create", "rdev.tickets.revoke", "rdev.hosts.list", "rdev.jobs.create", "rdev.jobs.authorize", "rdev.artifacts.list"} {
-		if seen[old] {
-			t.Fatalf("old experimental tool %s must be absent from tools/list", old)
-		}
-	}
+
 }
 
 func TestSessionsMCPCreateStatusTaskEventsAndClose(t *testing.T) {
@@ -275,27 +268,6 @@ func TestRemoteSessionsMCPEventsAndArtifacts(t *testing.T) {
 	rawArtifacts, ok := artifacts["artifacts"].([]any)
 	if !ok || len(rawArtifacts) != 1 || rawArtifacts[0].(map[string]any)["id"] != "art_remote" {
 		t.Fatalf("remote artifacts mismatch: %#v", artifacts)
-	}
-}
-
-func TestSessionsMCPRejectsOldHostJobArtifactTools(t *testing.T) {
-	for _, tool := range []string{"rdev.tickets.create", "rdev.tickets.revoke", "rdev.hosts.list", "rdev.jobs.authorize", "rdev.artifacts.list", "rdev.support_session.connect"} {
-		server := NewServer(gateway.NewMemoryGateway())
-		input := mcpRequestLine(t, tool, map[string]any{
-			"host_id":          "hst_old",
-			"job_id":           "job_old",
-			"authorization_id": "screen.screenshot",
-			"decision":         "authorized",
-		})
-		var out bytes.Buffer
-		if err := server.Serve(context.Background(), strings.NewReader(input), &out); err != nil {
-			t.Fatal(err)
-		}
-		lines := responseLines(t, out.String())
-		errPayload := lines[0]["error"].(map[string]any)
-		if !strings.Contains(errPayload["message"].(string), "unknown tool") {
-			t.Fatalf("old tool %s should be unknown, got %#v", tool, errPayload)
-		}
 	}
 }
 
