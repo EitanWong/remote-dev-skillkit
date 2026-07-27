@@ -2834,12 +2834,10 @@ func installManifestCandidates(sourceRoot string) []string {
 		candidates = append(candidates, filepath.Join(sourceRoot, ".remote-dev-skillkit", "install.json"))
 	}
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
-		candidates = append(candidates,
-			filepath.Join(home, ".remote-dev-skillkit", "install.json"),
-			filepath.Join(home, ".codex", "skills", ".remote-dev-skillkit", "install.json"),
-			filepath.Join(home, ".claude", "skills", ".remote-dev-skillkit", "install.json"),
-			filepath.Join(home, ".opencode", "skills", ".remote-dev-skillkit", "install.json"),
-		)
+		candidates = append(candidates, filepath.Join(home, ".remote-dev-skillkit", "install.json"))
+		if strings.TrimSpace(os.Getenv("RDEV_OPENCODE_SKILLS_DIR")) == "" {
+			candidates = append(candidates, filepath.Join(home, ".opencode", "skills", ".remote-dev-skillkit", "install.json"))
+		}
 	}
 	for _, target := range commonSkillTargetCandidates() {
 		candidates = append(candidates, filepath.Join(target.Path, ".remote-dev-skillkit", "install.json"))
@@ -2926,29 +2924,30 @@ func commonSkillTargetCandidates() []skillTargetCandidate {
 	if err != nil || strings.TrimSpace(home) == "" {
 		return nil
 	}
-	candidates := []skillTargetCandidate{
-		{Framework: "codex", Path: filepath.Join(home, ".codex", "skills")},
-		{Framework: "claude-code", Path: filepath.Join(home, ".claude", "skills")},
-		{Framework: "hermes", Path: filepath.Join(home, ".hermes", "skills")},
-		{Framework: "openclaw", Path: filepath.Join(home, ".openclaw", "skills")},
-	}
+	opencodePath := filepath.Join(home, ".config", "opencode", "skills")
 	if appData := strings.TrimSpace(os.Getenv("APPDATA")); appData != "" {
-		candidates = append(candidates, skillTargetCandidate{Framework: "opencode", Path: filepath.Join(appData, "opencode", "skills")})
-	} else {
-		candidates = append(candidates, skillTargetCandidate{Framework: "opencode", Path: filepath.Join(home, ".config", "opencode", "skills")})
+		opencodePath = filepath.Join(appData, "opencode", "skills")
 	}
-	envs := map[string]string{
-		"codex":             "RDEV_CODEX_SKILLS_DIR",
-		"claude-code":       "RDEV_CLAUDE_CODE_SKILLS_DIR",
-		"hermes":            "RDEV_HERMES_SKILLS_DIR",
-		"openclaw":          "RDEV_OPENCLAW_SKILLS_DIR",
-		"opencode":          "RDEV_OPENCODE_SKILLS_DIR",
-		"generic-mcp-agent": "RDEV_GENERIC_AGENT_SKILLS_DIR",
+	defaults := []struct {
+		framework string
+		path      string
+		envName   string
+	}{
+		{framework: "codex", path: filepath.Join(home, ".codex", "skills"), envName: "RDEV_CODEX_SKILLS_DIR"},
+		{framework: "claude-code", path: filepath.Join(home, ".claude", "skills"), envName: "RDEV_CLAUDE_CODE_SKILLS_DIR"},
+		{framework: "hermes", path: filepath.Join(home, ".hermes", "skills"), envName: "RDEV_HERMES_SKILLS_DIR"},
+		{framework: "openclaw", path: filepath.Join(home, ".openclaw", "skills"), envName: "RDEV_OPENCLAW_SKILLS_DIR"},
+		{framework: "opencode", path: opencodePath, envName: "RDEV_OPENCODE_SKILLS_DIR"},
 	}
-	for framework, envName := range envs {
-		if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
-			candidates = append(candidates, skillTargetCandidate{Framework: framework, Path: value})
+	candidates := make([]skillTargetCandidate, 0, len(defaults)+1)
+	for _, candidate := range defaults {
+		if value := strings.TrimSpace(os.Getenv(candidate.envName)); value != "" {
+			candidate.path = value
 		}
+		candidates = append(candidates, skillTargetCandidate{Framework: candidate.framework, Path: candidate.path})
+	}
+	if value := strings.TrimSpace(os.Getenv("RDEV_GENERIC_AGENT_SKILLS_DIR")); value != "" {
+		candidates = append(candidates, skillTargetCandidate{Framework: "generic-mcp-agent", Path: value})
 	}
 	deduped := []skillTargetCandidate{}
 	seen := map[string]bool{}

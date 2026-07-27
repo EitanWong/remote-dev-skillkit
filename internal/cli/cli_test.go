@@ -1177,6 +1177,20 @@ func TestCommonSkillTargetCandidatesExpandHomePaths(t *testing.T) {
 	t.Fatalf("expected expanded codex skill target %s, got %#v", want, candidates)
 }
 
+func TestInstallManifestCandidatesKeepLegacyOpenCodePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("RDEV_OPENCODE_SKILLS_DIR", "")
+
+	want := filepath.Join(home, ".opencode", "skills", ".remote-dev-skillkit", "install.json")
+	for _, candidate := range installManifestCandidates("") {
+		if candidate == want {
+			return
+		}
+	}
+	t.Fatalf("expected legacy OpenCode manifest candidate %s", want)
+}
+
 func TestMCPToolsOutputsJSON(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -9670,7 +9684,15 @@ func TestDoctorFindsManifestAtConfiguredSkillTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	legacySkill := filepath.Join(home, ".codex", "skills", "safe-remote-support", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(legacySkill), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacySkill, []byte("legacy default skill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
 	t.Setenv("RDEV_SOURCE_ROOT", sourceRoot)
 	t.Setenv("RDEV_CODEX_SKILLS_DIR", target)
 	for _, envName := range []string{
