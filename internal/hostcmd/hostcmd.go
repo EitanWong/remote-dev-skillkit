@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
+
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
@@ -71,8 +71,8 @@ func (a App) printUsage() {
 	_, _ = fmt.Fprintln(a.Stdout, strings.TrimSpace(`rdev-host - lightweight target-side Remote Dev Skillkit host helper
 
 Usage:
-  rdev-host serve --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
-  rdev-host --gateway http://127.0.0.1:8787 --ticket-code ABCD-1234
+  rdev-host serve --gateway https://gateway.example --join-code JOIN-CODE
+  rdev-host --gateway https://gateway.example --join-code JOIN-CODE
 
 This binary intentionally exposes only the host connector path. Use full rdev
 for operator CLI, MCP, gateway, acceptance, and managed-service authoring.`))
@@ -81,8 +81,7 @@ for operator CLI, MCP, gateway, acceptance, and managed-service authoring.`))
 type serveOptions struct {
 	Mode                       string
 	GatewayURL                 string
-	TicketCode                 string
-	ManifestURL                string
+	JoinCode                   string
 	Name                       string
 	Once                       bool
 	Transport                  string
@@ -103,11 +102,9 @@ type serveOptions struct {
 	WorkspaceLockStore         string
 	CaptureRuntimeFixture      bool
 	KeepAwake                  bool
-	ManifestRootPublicKey      string
 	ReleaseBundlePath          string
 	ReleaseRootPublicKey       string
 	ReleaseRequiredArtifacts   []string
-	ManifestGatewayCandidates  []model.JoinManifestGatewayCandidate
 	CapabilityCeiling          []string
 	CapabilityCeilingSet       bool
 }
@@ -116,9 +113,8 @@ func (a App) serve(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("rdev-host serve", flag.ContinueOnError)
 	fs.SetOutput(a.Stderr)
 	mode := fs.String("mode", "temporary", "host mode: temporary, managed, or break-glass")
-	gateway := fs.String("gateway", "", "gateway URL; required with --ticket-code unless --manifest-url is used")
-	ticketCode := fs.String("ticket-code", "", "one-time ticket code for local dev registration")
-	manifestURL := fs.String("manifest-url", "", "signed join manifest URL")
+	gateway := fs.String("gateway", "", "Control Plane session gateway URL")
+	joinCode := fs.String("join-code", "", "Control Plane session join code")
 	name := fs.String("name", "", "host display name; defaults to detected hostname")
 	once := fs.Bool("once", true, "join once and exit after printing status")
 	transport := fs.String("transport", "poll", "session event transport: auto, poll, or long-poll")
@@ -141,7 +137,6 @@ func (a App) serve(ctx context.Context, args []string) error {
 	workspaceLockStore := fs.String("workspace-lock-store", "", "optional local workspace lock store directory")
 	captureRuntimeFixture := fs.Bool("capture-runtime-fixture", false, "append an adapter runtime fixture artifact")
 	keepAwake := fs.Bool("keep-awake", true, "best-effort prevention of idle sleep/display sleep while host serve is running")
-	manifestRootPublicKey := fs.String("manifest-root-public-key", "", "optional join manifest trust root, formatted key_id:base64url_public_key")
 	releaseBundle := fs.String("release-bundle", "", "optional signed release bundle index to verify before host registration")
 	releaseRootPublicKey := fs.String("release-root-public-key", "", "required release root public key for --release-bundle")
 	releaseRequiredArtifacts := fs.String("release-require-artifacts", "", "comma-separated artifact ids required in --release-bundle")
@@ -151,8 +146,7 @@ func (a App) serve(ctx context.Context, args []string) error {
 	return a.runServe(ctx, serveOptions{
 		Mode:                       *mode,
 		GatewayURL:                 *gateway,
-		TicketCode:                 *ticketCode,
-		ManifestURL:                *manifestURL,
+		JoinCode:                   *joinCode,
 		Name:                       *name,
 		Once:                       *once,
 		Transport:                  *transport,
@@ -173,7 +167,6 @@ func (a App) serve(ctx context.Context, args []string) error {
 		WorkspaceLockStore:         *workspaceLockStore,
 		CaptureRuntimeFixture:      *captureRuntimeFixture,
 		KeepAwake:                  *keepAwake,
-		ManifestRootPublicKey:      *manifestRootPublicKey,
 		ReleaseBundlePath:          *releaseBundle,
 		ReleaseRootPublicKey:       *releaseRootPublicKey,
 		ReleaseRequiredArtifacts:   splitCommaList(*releaseRequiredArtifacts),
@@ -205,42 +198,18 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 	if err != nil {
 		return err
 	}
-	if opts.ManifestURL != "" {
-		if !safeRouteURL(strings.TrimSpace(opts.ManifestURL)) {
-			return fmt.Errorf("join manifest URL must use HTTPS or an explicit loopback development endpoint")
-		}
-		configuredGateway := strings.TrimRight(strings.TrimSpace(opts.GatewayURL), "/")
-		manifestCtx, cancelManifest := context.WithTimeout(ctx, 30*time.Second)
-		manifest, err := fetchJoinManifest(manifestCtx, gatewayClient, opts.ManifestURL, opts.TrustPin, opts.ManifestRootPublicKey)
-		cancelManifest()
-		if err != nil {
-			return fmt.Errorf("join manifest verification failed")
-		}
-		if configuredGateway != "" && !joinManifestContainsGateway(manifest, configuredGateway) {
-			return fmt.Errorf("configured gateway is not present in the verified join manifest")
-		}
-		opts.ManifestGatewayCandidates = manifest.GatewayCandidates
-		if strings.TrimSpace(opts.GatewayURL) == "" {
-			opts.GatewayURL = manifest.GatewayURL
-		}
-		opts.TicketCode = manifest.TicketCode
-		opts.TrustPin = manifest.TrustFingerprint
-		opts.CapabilityCeiling = append([]string(nil), manifest.Capabilities...)
-		opts.CapabilityCeilingSet = true
-	}
-	if opts.TicketCode == "" {
-		_, err := fmt.Fprintf(a.Stdout, "rdev-host foreground placeholder\nmode=%s\ngateway=%s\nstatus=not-connected\nnote=provide --gateway and --ticket-code, or --manifest-url for a signed join manifest\n", opts.Mode, opts.GatewayURL)
+	if opts.JoinCode == "" {
+		_, err := fmt.Fprintf(a.Stdout, "rdev-host foreground placeholder\nmode=%s\ngateway=%s\nstatus=not-connected\nnote=provide --gateway and --join-code for a Control Plane session\n", opts.Mode, opts.GatewayURL)
 		return err
 	}
 	if strings.TrimSpace(opts.GatewayURL) == "" {
-		return fmt.Errorf("gateway is required when --ticket-code is provided")
+		return fmt.Errorf("gateway is required when --join-code is provided")
 	}
-	manifestRootVerified := opts.ManifestURL != "" && strings.TrimSpace(opts.ManifestRootPublicKey) != ""
-	if !isLocalDevGatewayURL(opts.GatewayURL) && !isSignedManifestGatewayURL(opts.GatewayURL, manifestRootVerified) {
-		return fmt.Errorf("non-local gateway registration requires --manifest-url with --manifest-root-public-key and an HTTPS or private/LAN gateway URL")
+	if !isSessionGatewayURL(opts.GatewayURL) {
+		return fmt.Errorf("session gateway must use HTTPS or an explicit loopback development endpoint")
 	}
-	routes := newGatewayCandidateSet(opts.GatewayURL, opts.ManifestGatewayCandidates, opts.Transport)
-	if err := validateGatewayCandidateSet(routes, manifestRootVerified); err != nil {
+	routes := newGatewayCandidateSet(opts.GatewayURL, nil, opts.Transport)
+	if err := validateSessionGatewayCandidateSet(routes); err != nil {
 		return err
 	}
 	selectedRoute, err := routes.initialize(ctx, gatewayClient, opts.TrustPin)
@@ -262,7 +231,7 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 		Name:                inventory.Name,
 		Platform:            inventory.OS + "/" + inventory.Arch,
 		IdentityFingerprint: identity.Fingerprint(),
-		Capabilities:        ConstrainCapabilities(RegistrationCapabilities(inventory), opts.CapabilityCeiling, opts.CapabilityCeilingSet),
+		Capabilities:        RegistrationCapabilities(inventory),
 		Transport:           controlplane.TransportLongPoll,
 		LeaseTTLMS:          60_000,
 		RenewAfterMS:        20_000,
@@ -280,12 +249,14 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 		enrollmentCertificateSummary = &certificate
 	}
 	joinCtx, cancelJoin := context.WithTimeout(ctx, 30*time.Second)
-	session, endpoint, lease, initialEvents, err := joinSessionByCode(joinCtx, gatewayClient, opts.GatewayURL, opts.TicketCode, endpointSpec)
+	session, endpoint, lease, initialEvents, err := joinSessionByCode(joinCtx, gatewayClient, opts.GatewayURL, opts.JoinCode, endpointSpec)
 	cancelJoin()
 	if err != nil {
 		return err
 	}
-	remoteControlEntry := buildRemoteControlEntry(opts.GatewayURL, opts.TicketCode, endpoint)
+	opts.CapabilityCeiling = append([]string(nil), session.Capabilities...)
+	opts.CapabilityCeilingSet = true
+	sessionControlEntry := buildSessionControlEntry(session, endpoint)
 	payload := map[string]any{
 		"mode":      opts.Mode,
 		"gateway":   opts.GatewayURL,
@@ -300,15 +271,12 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 			"stored":             opts.IdentityStorePath != "",
 			"registration_proof": false,
 		},
-		"remote_control_entry": remoteControlEntry,
-		"status":               "session-joined",
-		"transport":            opts.Transport,
-		"note":                 "joined Control Plane v1 session; task transport starts when --once=false",
+		"session_control_entry": sessionControlEntry,
+		"status":                "session-joined",
+		"transport":             opts.Transport,
+		"note":                  "joined Control Plane v1 session; task transport starts when --once=false",
 	}
-	if opts.ManifestURL != "" {
-		payload["manifest_url"] = opts.ManifestURL
-		payload["manifest_gateway_selection"] = map[string]any{"selected_gateway_url": opts.GatewayURL, "source": "signed-join-manifest-candidates"}
-	}
+
 	if enrollmentCertificateSummary != nil {
 		payload["enrollment_certificate"] = map[string]any{
 			"schema":        enrollmentCertificateSummary.SchemaVersion,
@@ -324,7 +292,7 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 	if opts.Once {
 		return enc.Encode(payload)
 	}
-	writeRemoteControlCard(a.Stderr, remoteControlEntry)
+	writeSessionControlCard(a.Stderr, sessionControlEntry)
 	keepAwake := hostawake.Disabled()
 	if opts.KeepAwake {
 		keepAwake = hostawake.Acquire(ctx)
@@ -384,86 +352,23 @@ func verifyReleaseGate(opts serveOptions) (*releaseGateResult, error) {
 	}, nil
 }
 
-func writeRemoteControlCard(out io.Writer, entry map[string]any) {
-	deviceID, _ := entry["support_device_id"].(string)
-	passcode, _ := entry["session_passcode"].(string)
-	_, _ = fmt.Fprintln(out, "[rdev] Remote control connector is ready.")
-	if strings.TrimSpace(deviceID) != "" {
-		_, _ = fmt.Fprintf(out, "[rdev] Device ID: %s\n", deviceID)
+func writeSessionControlCard(out io.Writer, entry map[string]any) {
+	_, _ = fmt.Fprintln(out, "[rdev] Control Plane session connector is ready.")
+	if endpointID, _ := entry["endpoint_id"].(string); strings.TrimSpace(endpointID) != "" {
+		_, _ = fmt.Fprintf(out, "[rdev] Endpoint: %s\n", endpointID)
 	}
-	if strings.TrimSpace(passcode) != "" {
-		_, _ = fmt.Fprintf(out, "[rdev] Session Password: %s\n", passcode)
-	}
-	_, _ = fmt.Fprintln(out, "[rdev] Keep this visible connector open. The Agent must not disconnect it unless the operator explicitly asks.")
+	_, _ = fmt.Fprintln(out, "[rdev] Keep this visible connector open until the operator closes the session.")
 }
 
-func buildRemoteControlEntry(gatewayURL, ticketCode string, endpoint controlplane.Endpoint) map[string]any {
-	ticketCode = strings.TrimSpace(ticketCode)
-	gatewayURL = strings.TrimRight(strings.TrimSpace(gatewayURL), "/")
-	deviceID, deviceIDSource := remoteControlDeviceID(ticketCode, endpoint)
-	passcode := strings.ToUpper(ticketCode)
-	endpointCounts := map[string]int{
-		"online": 0,
-		"total":  0,
+func buildSessionControlEntry(session controlplane.Session, endpoint controlplane.Endpoint) map[string]any {
+	return map[string]any{
+		"schema_version": "rdev.session-control-entry.v1",
+		"session_id":     session.ID,
+		"profile":        session.Profile,
+		"endpoint_id":    endpoint.ID,
+		"endpoint_state": endpoint.State,
+		"capabilities":   append([]string(nil), session.Capabilities...),
 	}
-	if strings.TrimSpace(endpoint.ID) != "" {
-		endpointCounts["total"] = 1
-		if endpoint.State == controlplane.EndpointStateOnline {
-			endpointCounts["online"] = 1
-		}
-	}
-	entry := map[string]any{
-		"schema_version":               "rdev.support-session-remote-control-entry.v1",
-		"product_model":                "remote-control-style support device entry for AI Agents",
-		"entry_name":                   "Support Device Entry",
-		"support_device_id":            deviceID,
-		"support_device_id_source":     deviceIDSource,
-		"session_passcode":             passcode,
-		"session_passcode_kind":        "ticket-scoped session passcode",
-		"session_passcode_rotates":     true,
-		"gateway_url":                  gatewayURL,
-		"ephemeral_gateway":            strings.Contains(strings.ToLower(gatewayURL), ".trycloudflare.com"),
-		"stable_gateway_required_for":  []string{"same address across Agent sessions", "managed service reconnect", "owned recurring host"},
-		"connector_persistence":        "visible-attended-connector-with-persistent-host-identity",
-		"explicit_disconnect_required": true,
-		"agent_rule":                   "Treat this like a remote-control app entry: use support_device_id plus session_passcode/status/report fields, keep the connector online after work, and disconnect/revoke/stop only after an explicit operator request.",
-		"human_rule":                   "The target-side person opens the visible connector and keeps it open; closing the connector or revoking the ticket ends access.",
-		"temporary_support_policy":     "Temporary customer support remains visible and attended but is not auto-disconnected when the Agent finishes a task.",
-		"managed_upgrade_policy":       "For an operator-owned recurring machine, ask for explicit managed-service authorization and require a stable gateway before installing service persistence.",
-		"forbidden": []string{
-			"Agent-initiated disconnect after task completion",
-			"hidden install",
-			"unauthorized service persistence",
-			"long-lived shared host password",
-		},
-		"endpoint_count": endpointCounts,
-	}
-	if ticketCode != "" {
-		entry["ticket_code"] = ticketCode
-	}
-	if endpoint.State == controlplane.EndpointStateOnline && strings.TrimSpace(endpoint.ID) != "" {
-		entry["recommended_session_endpoint_id"] = endpoint.ID
-	}
-	return entry
-}
-
-func remoteControlDeviceID(ticketCode string, endpoint controlplane.Endpoint) (string, string) {
-	if value := strings.TrimSpace(endpoint.IdentityFingerprint); value != "" {
-		return remoteControlHumanCode("RDEV", value), "endpoint_identity_fingerprint"
-	}
-	if value := strings.TrimSpace(endpoint.ID); value != "" {
-		return remoteControlHumanCode("RDEV", value), "endpoint_id"
-	}
-	if ticketCode = strings.TrimSpace(ticketCode); ticketCode != "" {
-		return "RDEV-" + strings.ToUpper(strings.ReplaceAll(ticketCode, "_", "-")), "connection_entry_ticket"
-	}
-	return "RDEV-PENDING", "pending-target-connector"
-}
-
-func remoteControlHumanCode(prefix, seed string) string {
-	sum := sha256.Sum256([]byte(strings.TrimSpace(seed)))
-	value := strings.ToUpper(hex.EncodeToString(sum[:]))[:12]
-	return prefix + "-" + value[0:4] + "-" + value[4:8] + "-" + value[8:12]
 }
 
 func gatewayHTTPClient(opts serveOptions) (*http.Client, error) {
@@ -515,18 +420,8 @@ func isLocalDevGatewayURL(value string) bool {
 		(parsed.Hostname() == "127.0.0.1" || parsed.Hostname() == "::1" || parsed.Hostname() == "localhost") && parsed.Port() != ""
 }
 
-func isSignedManifestGatewayURL(value string, manifestRootVerified bool) bool {
-	if !manifestRootVerified {
-		return false
-	}
-	parsed, err := url.Parse(value)
-	if err != nil || parsed.Hostname() == "" {
-		return false
-	}
-	if parsed.Scheme == "https" {
-		return true
-	}
-	return isLocalDevGatewayURL(value)
+func isSessionGatewayURL(value string) bool {
+	return safeRouteURL(value)
 }
 
 func readEnrollmentCertificateFile(path string) (model.HostEnrollmentCertificate, error) {
@@ -723,7 +618,7 @@ func (a App) runSessionTasksWithEvents(ctx context.Context, opts serveOptions, c
 	if interval <= 0 {
 		interval = time.Second
 	}
-	routes := newGatewayCandidateSet(opts.GatewayURL, opts.ManifestGatewayCandidates, opts.Transport)
+	routes := newGatewayCandidateSet(opts.GatewayURL, nil, opts.Transport)
 	if providedRoutes != nil {
 		routes = providedRoutes
 	}
@@ -913,14 +808,14 @@ pollLoop:
 }
 
 func (a App) runSessionTask(ctx context.Context, opts serveOptions, client *http.Client, sessionID, endpointID, identityFingerprint, leaseSecret string, task controlplane.Task) error {
-	return a.runSessionTaskWithRoutes(ctx, opts, client, sessionID, endpointID, identityFingerprint, leaseSecret, task, newGatewayCandidateSet(opts.GatewayURL, opts.ManifestGatewayCandidates))
+	return a.runSessionTaskWithRoutes(ctx, opts, client, sessionID, endpointID, identityFingerprint, leaseSecret, task, newGatewayCandidateSet(opts.GatewayURL, nil))
 }
 
 func (a App) runSessionTaskWithRoutes(ctx context.Context, opts serveOptions, client *http.Client, sessionID, endpointID, identityFingerprint, leaseSecret string, task controlplane.Task, routes *gatewayCandidateSet) error {
 	result := hostrunner.Result{}
 	var err error
 	if !CapabilitiesAllowed(task.Capabilities, opts.CapabilityCeiling, opts.CapabilityCeilingSet) {
-		err = fmt.Errorf("task capabilities exceed the signed join manifest ceiling")
+		err = fmt.Errorf("task capabilities exceed the joined session ceiling")
 	} else {
 		progressReporter := a.engineeringProgressReporter(opts, client, sessionID, endpointID, leaseSecret, task, routes)
 		result, err = hostrunner.RunSessionTaskWithOptionsContext(ctx, sessionTaskSpec(task, endpointID, identityFingerprint), time.Now(), hostrunner.Options{
@@ -1353,132 +1248,19 @@ func sleepOrDone(ctx context.Context, interval time.Duration) error {
 	}
 }
 
-func fetchJoinManifest(ctx context.Context, client *http.Client, manifestURL, trustPin, manifestRootPublicKey string) (model.JoinManifest, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestURL, nil)
-	if err != nil {
-		return model.JoinManifest{}, fmt.Errorf("join manifest request is invalid")
-	}
-	resp, err := doGatewayRequest(client, req)
-	if err != nil {
-		return model.JoinManifest{}, fmt.Errorf("join manifest request failed")
-	}
-	defer resp.Body.Close()
-	var payload struct {
-		Manifest         model.JoinManifest     `json:"manifest"`
-		GatewayTimeProof model.GatewayTimeProof `json:"gateway_time_proof"`
-		Error            string                 `json:"error"`
-	}
-	if err := decodeBoundedGatewayJSON(resp.Body, 256*1024, &payload); err != nil {
-		return model.JoinManifest{}, err
-	}
-	if len(payload.Manifest.GatewayCandidates) > maxManifestCandidates {
-		return model.JoinManifest{}, fmt.Errorf("join manifest contains too many gateway candidates")
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		if payload.Error == "" {
-			payload.Error = resp.Status
-		}
-		return model.JoinManifest{}, fmt.Errorf("fetch join manifest failed: %s", payload.Error)
-	}
-	verifyTime := responseGatewayTime(resp)
-	if verifyTime.IsZero() {
-		verifyTime = time.Now()
-	}
-	if manifestRootPublicKey != "" {
-		root, err := parseRootPublicKey(manifestRootPublicKey)
-		if err != nil {
-			return model.JoinManifest{}, err
-		}
-		if payload.GatewayTimeProof.SchemaVersion != "" {
-			verifyTime, err = payload.GatewayTimeProof.Verify(root, model.GatewayTimeProofPurposeJoinManifest, payload.Manifest)
-			if err != nil {
-				return model.JoinManifest{}, fmt.Errorf("verify gateway time proof: %w", err)
-			}
-		}
-		if err := payload.Manifest.VerifyWithRoot(root, verifyTime); err != nil {
-			return model.JoinManifest{}, err
-		}
-	} else {
-		if payload.GatewayTimeProof.SchemaVersion != "" {
-			var err error
-			verifyTime, err = payload.GatewayTimeProof.Verify(payload.Manifest.Trust, model.GatewayTimeProofPurposeJoinManifest, payload.Manifest)
-			if err != nil {
-				return model.JoinManifest{}, fmt.Errorf("verify gateway time proof: %w", err)
-			}
-		}
-		if err := payload.Manifest.Verify(verifyTime); err != nil {
-			return model.JoinManifest{}, err
-		}
-	}
-	if err := payload.Manifest.Trust.VerifyPin(trustPin); err != nil {
-		return model.JoinManifest{}, err
-	}
-	if !safeRouteURL(payload.Manifest.GatewayURL) {
-		return model.JoinManifest{}, fmt.Errorf("join manifest contains an invalid gateway URL")
-	}
-	for _, candidate := range payload.Manifest.GatewayCandidates {
-		if !safeRouteURL(candidate.URL) {
-			return model.JoinManifest{}, fmt.Errorf("join manifest contains an invalid gateway candidate")
-		}
-	}
-	return payload.Manifest, nil
-}
-
-func responseGatewayTime(resp *http.Response) time.Time {
-	if resp == nil {
-		return time.Time{}
-	}
-	value := strings.TrimSpace(resp.Header.Get("Date"))
-	if value == "" {
-		return time.Time{}
-	}
-	parsed, err := http.ParseTime(value)
-	if err != nil {
-		return time.Time{}
-	}
-	return parsed.UTC()
-}
-
-func selectJoinManifestGatewayURL(ctx context.Context, client *http.Client, manifest model.JoinManifest) string {
-	fallback := strings.TrimRight(strings.TrimSpace(manifest.GatewayURL), "/")
-	for _, candidate := range manifest.GatewayCandidates {
-		gatewayURL := strings.TrimRight(strings.TrimSpace(candidate.URL), "/")
-		if gatewayURL != "" && joinManifestGatewayReachable(ctx, client, gatewayURL, manifest.TrustFingerprint) {
-			return gatewayURL
-		}
-	}
-	return fallback
-}
-
-func joinManifestContainsGateway(manifest model.JoinManifest, value string) bool {
-	value = strings.TrimRight(strings.TrimSpace(value), "/")
-	if value == "" || !safeRouteURL(value) {
-		return false
-	}
-	if strings.TrimRight(strings.TrimSpace(manifest.GatewayURL), "/") == value {
-		return true
-	}
-	for _, candidate := range manifest.GatewayCandidates {
-		if strings.TrimRight(strings.TrimSpace(candidate.URL), "/") == value {
-			return true
-		}
-	}
-	return false
-}
-
 type gatewayCandidateSet struct {
 	routes    []routeCandidate
 	pool      *routePool
 	transport string
 }
 
-func newGatewayCandidateSet(current string, candidates []model.JoinManifestGatewayCandidate, transport ...string) *gatewayCandidateSet {
+func newGatewayCandidateSet(current string, candidates []controlplane.GatewayCandidate, transport ...string) *gatewayCandidateSet {
 	selectedTransport := "poll"
 	if len(transport) > 0 && strings.TrimSpace(transport[0]) != "" {
 		selectedTransport = transport[0]
 	}
 	return &gatewayCandidateSet{
-		routes:    routeCandidatesFromManifest(current, candidates, selectedTransport),
+		routes:    routeCandidatesFromSession(current, candidates, selectedTransport),
 		transport: selectedTransport,
 	}
 }
@@ -1487,13 +1269,13 @@ func newGatewayCandidateSetWithPool(pool *routePool) *gatewayCandidateSet {
 	return &gatewayCandidateSet{pool: pool}
 }
 
-func validateGatewayCandidateSet(routes *gatewayCandidateSet, manifestRootVerified bool) error {
+func validateSessionGatewayCandidateSet(routes *gatewayCandidateSet) error {
 	if routes == nil || len(routes.routes) == 0 {
 		return errNoHealthyRoutes
 	}
 	for _, route := range routes.routes {
-		if !isLocalDevGatewayURL(route.URL) && !isSignedManifestGatewayURL(route.URL, manifestRootVerified) {
-			return fmt.Errorf("gateway route is outside the verified manifest trust boundary")
+		if !isSessionGatewayURL(route.URL) {
+			return fmt.Errorf("session gateway route is not HTTPS or an explicit loopback development endpoint")
 		}
 	}
 	return nil

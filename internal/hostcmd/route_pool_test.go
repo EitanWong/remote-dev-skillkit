@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 )
 
 type routePoolFakeClock struct {
@@ -734,8 +734,8 @@ func TestRoutePoolSharesGatewayProbeAcrossMaintainedAdapters(t *testing.T) {
 	}
 }
 
-func TestRouteCandidatesFromManifestRejectsUnsafeURLsAndUnsupportedTransports(t *testing.T) {
-	routes := routeCandidatesFromManifest("https://primary.example.test/base", []model.JoinManifestGatewayCandidate{
+func TestRouteCandidatesFromSessionRejectsUnsafeURLsAndUnsupportedTransports(t *testing.T) {
+	routes := routeCandidatesFromSession("https://primary.example.test/base", []controlplane.GatewayCandidate{
 		{URL: "https://ok.example.test/relay"},
 		{URL: "https://ok.example.test/relay?x=1"},
 		{URL: "https://ok.example.test/../escape"},
@@ -745,7 +745,7 @@ func TestRouteCandidatesFromManifestRejectsUnsafeURLsAndUnsupportedTransports(t 
 	if len(routes) != 4 {
 		t.Fatalf("safe route expansion = %#v, want primary + one candidate across two adapters", routes)
 	}
-	if got := routeCandidatesFromManifest("https://primary.example.test", nil, "wss"); got != nil {
+	if got := routeCandidatesFromSession("https://primary.example.test", nil, "wss"); got != nil {
 		t.Fatalf("unsupported wss transport produced routes: %#v", got)
 	}
 }

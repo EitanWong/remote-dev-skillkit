@@ -55,7 +55,7 @@ func TestHostServeSessionCompletesTask(t *testing.T) {
 		done <- app.runServe(ctx, serveOptions{
 			Mode:          "temporary",
 			GatewayURL:    server.URL,
-			TicketCode:    session.JoinCode,
+			JoinCode:      session.JoinCode,
 			Transport:     "long-poll",
 			PollInterval:  time.Millisecond,
 			MaxTasks:      1,
@@ -116,6 +116,45 @@ func TestHostServeSessionCompletesTask(t *testing.T) {
 	}
 	if !foundResult {
 		t.Fatalf("expected task.result event, got %#v", events)
+	}
+}
+
+func TestHostServeUsesSessionJoinCodeFlag(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	session, err := gw.CreateSession(controlplane.SessionSpec{
+		Profile:      "managed",
+		Reason:       "session-native host flag",
+		Capabilities: []string{"fs.read"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(httpapi.NewServer(gw).Handler())
+	defer server.Close()
+
+	var stdout bytes.Buffer
+	app := New(&stdout, &bytes.Buffer{})
+	if err := app.Run(context.Background(), []string{
+		"serve",
+		"--mode", "managed",
+		"--gateway", server.URL,
+		"--join-code", session.JoinCode,
+		"--once",
+	}); err != nil {
+		t.Fatalf("session join-code serve failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), `"status": "session-joined"`) {
+		t.Fatalf("expected session join output, got %s", stdout.String())
+	}
+}
+
+func TestHostServeRejectsLegacyTicketCodeFlag(t *testing.T) {
+	err := New(io.Discard, io.Discard).Run(context.Background(), []string{
+		"serve",
+		"--ticket-code", "legacy-code",
+	})
+	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
+		t.Fatalf("legacy ticket-code flag error = %v", err)
 	}
 }
 
@@ -436,7 +475,7 @@ func TestRegistrationCapabilitiesOmitsDesktopSupportOnNonWindows(t *testing.T) {
 	}
 }
 
-func TestRunSessionTaskRejectsCapabilityOutsideSignedManifestBeforeAdapter(t *testing.T) {
+func TestRunSessionTaskRejectsCapabilityOutsideSessionCeilingBeforeAdapter(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "must-not-exist")
 	resultPayload := make(chan map[string]any, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -471,10 +510,10 @@ func TestRunSessionTaskRejectsCapabilityOutsideSignedManifestBeforeAdapter(t *te
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Fatalf("task adapter ran outside signed capability ceiling: %v", err)
+		t.Fatalf("task adapter ran outside session capability ceiling: %v", err)
 	}
 	payload := <-resultPayload
-	if payload["status"] != string(controlplane.TaskStatusFailed) || !strings.Contains(fmt.Sprint(payload["reason"]), "signed join manifest ceiling") {
+	if payload["status"] != string(controlplane.TaskStatusFailed) || !strings.Contains(fmt.Sprint(payload["reason"]), "joined session ceiling") {
 		t.Fatalf("capability denial was not reported as a failed task: %#v", payload)
 	}
 }
@@ -609,11 +648,10 @@ func TestRunSessionTasksSelectsHealthyRouteAfterConcurrentInitialProbe(t *testin
 	defer cancel()
 	app := New(io.Discard, io.Discard)
 	processed, err := app.runSessionTasks(ctx, serveOptions{
-		GatewayURL:                "https://dead.example.test",
-		ManifestGatewayCandidates: []model.JoinManifestGatewayCandidate{{URL: "https://healthy.example.test"}},
-		PollInterval:              time.Millisecond,
-		MaxTasks:                  1,
-	}, client, "ses_test", "end_test", "fp-test", "lease-test", controlplane.Lease{})
+		GatewayURL:   "https://dead.example.test",
+		PollInterval: time.Millisecond,
+		MaxTasks:     1,
+	}, client, "ses_test", "end_test", "fp-test", "lease-test", controlplane.Lease{}, newGatewayCandidateSet("https://dead.example.test", []controlplane.GatewayCandidate{{URL: "https://healthy.example.test"}}, "poll"))
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("runSessionTasks error = %v, want context deadline after continued polling", err)
 	}
@@ -944,51 +982,22 @@ func TestRunSessionTasksRejectsNetworkEventsWithoutRenewedLease(t *testing.T) {
 	}
 }
 
-func TestJoinManifestContainsGatewayRequiresExactVerifiedCandidate(t *testing.T) {
-	manifest := model.JoinManifest{
-		GatewayURL: "https://primary.example.test/base",
-		GatewayCandidates: []model.JoinManifestGatewayCandidate{
-			{URL: "https://secondary.example.test/relay"},
-		},
-	}
-	for _, test := range []struct {
-		name  string
-		value string
-		want  bool
-	}{
-		{name: "primary", value: "https://primary.example.test/base/", want: true},
-		{name: "signed candidate", value: "https://secondary.example.test/relay", want: true},
-		{name: "unlisted host", value: "https://other.example.test/base", want: false},
-		{name: "query injection", value: "https://secondary.example.test/relay?x=1", want: false},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			if got := joinManifestContainsGateway(manifest, test.value); got != test.want {
-				t.Fatalf("joinManifestContainsGateway(%q) = %v, want %v", test.value, got, test.want)
-			}
-		})
+func TestValidateSessionGatewayCandidateSetRejectsPublicHTTP(t *testing.T) {
+	routes := newGatewayCandidateSet("http://public.example.test", nil, "poll")
+	if err := validateSessionGatewayCandidateSet(routes); err == nil {
+		t.Fatal("public HTTP session gateway was accepted")
 	}
 }
 
-func TestValidateGatewayCandidateSetRejectsUnrootedPublicCandidate(t *testing.T) {
-	routes := newGatewayCandidateSet("http://127.0.0.1:8787", []model.JoinManifestGatewayCandidate{
-		{URL: "https://public.example.test"},
-	}, "poll")
-	if err := validateGatewayCandidateSet(routes, false); err == nil {
-		t.Fatal("unrooted public manifest candidate was accepted")
-	}
-	if err := validateGatewayCandidateSet(routes, true); err != nil {
-		t.Fatalf("root-verified candidate set was rejected: %v", err)
-	}
-}
-
-func TestRunServeRejectsPublicHTTPManifestURLBeforeFetch(t *testing.T) {
+func TestRunServeRejectsPublicHTTPGateway(t *testing.T) {
 	err := New(io.Discard, io.Discard).runServe(context.Background(), serveOptions{
-		Mode:        "temporary",
-		ManifestURL: "http://192.0.2.10/v1/tickets/fixture/manifest",
-		Transport:   "poll",
+		Mode:       "managed",
+		GatewayURL: "http://192.0.2.10",
+		JoinCode:   "session-code",
+		Transport:  "poll",
 	})
 	if err == nil || !strings.Contains(err.Error(), "HTTPS") {
-		t.Fatalf("public HTTP manifest error = %v", err)
+		t.Fatalf("public HTTP session gateway error = %v", err)
 	}
 }
 
@@ -1079,56 +1088,6 @@ func TestFetchHostTrustDoesNotDowngradeInvalidSignedBundle(t *testing.T) {
 	}
 	if legacyCalls != 0 {
 		t.Fatalf("legacy trust endpoint called %d times after signed verification failure", legacyCalls)
-	}
-}
-
-func TestFetchJoinManifestUsesGatewayDateForClockSkew(t *testing.T) {
-	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	issuedAt := time.Now().UTC().Add(-2 * time.Hour)
-	ticket, err := model.NewTicket(model.HostModeAttendedTemporary, 60, []string{"shell.user"}, "repair", issuedAt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	manifest, err := model.NewJoinManifest(ticket, model.JoinManifestSpec{
-		GatewayURL:   "https://gateway.example.test",
-		Trust:        model.NewTrustBundle("manifest-root", publicKey),
-		SigningKeyID: "manifest-root",
-	}, issuedAt)
-	if err != nil {
-		t.Fatal(err)
-	}
-	manifest, err = manifest.Sign(privateKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	proof, err := model.NewGatewayTimeProof(model.GatewayTimeProofPurposeJoinManifest, manifest, "manifest-root", privateKey, issuedAt.Add(30*time.Second), time.Minute)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, err := json.Marshal(map[string]any{"manifest": manifest, "gateway_time_proof": proof})
-	if err != nil {
-		t.Fatal(err)
-	}
-	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		resp := &http.Response{
-			StatusCode: http.StatusOK,
-			Header:     make(http.Header),
-			Body:       io.NopCloser(bytes.NewReader(body)),
-			Request:    req,
-		}
-		resp.Header.Set("Date", issuedAt.Add(30*time.Second).Format(http.TimeFormat))
-		return resp, nil
-	})}
-
-	got, err := fetchJoinManifest(context.Background(), client, "https://gateway.example.test/v1/tickets/"+ticket.Code+"/manifest", "", "manifest-root:"+manifest.Trust.PublicKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.TicketCode != ticket.Code {
-		t.Fatalf("unexpected manifest ticket code %q", got.TicketCode)
 	}
 }
 

@@ -9,15 +9,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/EitanWong/remote-dev-skillkit/internal/model"
+	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 )
 
 var errNoHealthyRoutes = errors.New("no healthy gateway routes")
 
 const (
-	maxGatewayRoutes      = 16
-	maxRouteProbeWorkers  = 8
-	maxManifestCandidates = 15
+	maxGatewayRoutes     = 16
+	maxRouteProbeWorkers = 8
 )
 
 // routeCandidate is the immutable identity of a gateway and one of the
@@ -709,9 +708,9 @@ func (p *routePool) resetFastStreaksLocked() {
 	}
 }
 
-// routeCandidatesFromManifest expands only the maintained HTTP event
-// adapters. Unsupported transports are intentionally left out.
-func routeCandidatesFromManifest(current string, candidates []model.JoinManifestGatewayCandidate, transport string) []routeCandidate {
+// routeCandidatesFromSession expands the maintained HTTP event adapters for
+// the session-selected gateway and its Control Plane candidates.
+func routeCandidatesFromSession(current string, candidates []controlplane.GatewayCandidate, transport string) []routeCandidate {
 	transports := []string{}
 	switch strings.TrimSpace(strings.ToLower(transport)) {
 	case "auto":

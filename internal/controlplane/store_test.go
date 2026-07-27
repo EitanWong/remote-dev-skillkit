@@ -40,6 +40,28 @@ func TestJoinByCodeReturnsSessionEndpointLeaseAndInitialEvents(t *testing.T) {
 	}
 }
 
+func TestJoinByCodeConstrainsEndpointCapabilitiesToSession(t *testing.T) {
+	store, _ := newStoreHarness()
+	session := mustStoreSession(t, store, SessionSpec{
+		Capabilities: []string{"fs.read", "process.inspect"},
+	})
+
+	_, endpoint, _, _, err := store.JoinByCode(session.JoinCode, EndpointSpec{
+		Role:                EndpointRoleTarget,
+		Name:                "windows-host",
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-windows-host",
+		Capabilities:        []string{"fs.read", "powershell.user", "process.inspect"},
+		Transport:           TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(endpoint.Capabilities, ","); got != "fs.read,process.inspect" {
+		t.Fatalf("endpoint capabilities = %q, want session capability intersection", got)
+	}
+}
+
 func TestJoinLeaseCarriesSelectedGatewayFromCandidates(t *testing.T) {
 	store, _ := newStoreHarness()
 	session, err := store.CreateSession(SessionSpec{
