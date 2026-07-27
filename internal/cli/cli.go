@@ -6604,10 +6604,14 @@ func (a App) mcp(args []string) error {
 		if remoteURL == "" {
 			remoteURL, _ = supportsession.ConfiguredGatewayURLCandidate()
 		}
+		tokenFile := strings.TrimSpace(*gatewayOperatorTokenFile)
+		if tokenFile == "" {
+			tokenFile = strings.TrimSpace(os.Getenv("RDEV_GATEWAY_OPERATOR_TOKEN_FILE"))
+		}
 		var server mcpstdio.Server
 		if remoteURL != "" {
 			token := ""
-			if tokenFile := strings.TrimSpace(*gatewayOperatorTokenFile); tokenFile != "" {
+			if tokenFile != "" {
 				var err error
 				token, err = readTokenFile(tokenFile)
 				if err != nil {
@@ -6615,8 +6619,8 @@ func (a App) mcp(args []string) error {
 				}
 			}
 			server = mcpstdio.NewServerWithRemoteGatewayAndOperatorToken(gateway.NewMemoryGateway(), remoteURL, token)
-		} else if strings.TrimSpace(*gatewayOperatorTokenFile) != "" {
-			return fmt.Errorf("--gateway-operator-token-file requires a configured remote gateway")
+		} else if tokenFile != "" {
+			return fmt.Errorf("--gateway-operator-token-file or RDEV_GATEWAY_OPERATOR_TOKEN_FILE requires a configured remote gateway")
 		} else {
 			server = mcpstdio.NewServer(gateway.NewMemoryGateway())
 		}

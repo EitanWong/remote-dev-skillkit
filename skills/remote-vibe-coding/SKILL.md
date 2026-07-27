@@ -110,10 +110,13 @@ are CLI-only and must use their corresponding `rdev ...` command.
   one configured.
   When the hosted gateway requires operator auth, register the stdio server
   with `rdev mcp serve --gateway-url <base-url> --gateway-operator-token-file
-  <local-0600-token-file>`. Keep the bearer out of tool arguments, prompts,
-  Skill files, and logs. A per-call `gateway_url` override intentionally does
-  not receive the configured bearer; use a separately configured MCP server
-  for another authenticated gateway.
+  <local-0600-token-file>`. Managed MCP launchers that reject credential-like
+  arguments can instead set `RDEV_GATEWAY_OPERATOR_TOKEN_FILE` to that local
+  path and retain only `rdev mcp serve --gateway-url <base-url>` in argv. The
+  environment value is a path, never the bearer. Keep the bearer out of tool
+  arguments, prompts, Skill files, and logs. A per-call `gateway_url` override
+  intentionally does not receive the configured bearer; use a separately
+  configured MCP server for another authenticated gateway.
   Do not persist `https://*.trycloudflare.com` Quick Tunnel URLs as durable
   configuration. They are fallback URLs for the current foreground session. For
   repeated sessions, configure `RDEV_HOSTED_GATEWAY_URL` on a cloud/VPS host

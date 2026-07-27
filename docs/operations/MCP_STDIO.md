@@ -83,6 +83,18 @@ rdev mcp serve \
   --gateway-operator-token-file /secure/local/operator.token
 ```
 
+For managed MCP launchers that reject credential-looking CLI flags, set only
+the **local token-file path** in the subprocess environment instead. The
+bearer stays in that file:
+
+```bash
+RDEV_GATEWAY_OPERATOR_TOKEN_FILE=/secure/local/operator.token \
+  rdev mcp serve --gateway-url https://gateway.example.test
+```
+
+The explicit `--gateway-operator-token-file` flag takes precedence when both
+forms are present.
+
 `rdev operator-auth init` writes generated token files with `0600` permissions.
 Keep the selected token file local to the Agent runtime; do not put its content
 in MCP configuration, Skill files, prompts, tool arguments, or logs.

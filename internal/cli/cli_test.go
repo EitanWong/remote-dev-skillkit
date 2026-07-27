@@ -6479,6 +6479,44 @@ func TestMCPServeValidatesGatewayOperatorTokenFile(t *testing.T) {
 	}
 }
 
+func TestMCPServeReadsGatewayOperatorTokenFileFromEnvironment(t *testing.T) {
+	t.Setenv("RDEV_GATEWAY_OPERATOR_TOKEN_FILE", filepath.Join(t.TempDir(), "missing.token"))
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	err := app.Run(context.Background(), []string{
+		"mcp", "serve",
+		"--gateway-url", "https://gateway.example.test",
+	})
+	if err == nil || !strings.Contains(err.Error(), "read gateway operator token file") {
+		t.Fatalf("expected gateway operator token-file environment read failure, got %v", err)
+	}
+}
+
+func TestMCPServePrefersExplicitGatewayOperatorTokenFile(t *testing.T) {
+	t.Setenv("RDEV_GATEWAY_OPERATOR_TOKEN_FILE", filepath.Join(t.TempDir(), "missing.token"))
+	explicitTokenFile := filepath.Join(t.TempDir(), "explicit.token")
+	if err := os.WriteFile(explicitTokenFile, []byte("test-operator-token"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldStdin := os.Stdin
+	defer func() { os.Stdin = oldStdin }()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdin = reader
+	_ = writer.Close()
+
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	err = app.Run(context.Background(), []string{
+		"mcp", "serve",
+		"--gateway-url", "https://gateway.example.test",
+		"--gateway-operator-token-file", explicitTokenFile,
+	})
+	if err != nil {
+		t.Fatalf("expected explicit token file to take precedence over environment fallback, got %v", err)
+	}
+}
+
 func TestHostInstallServiceWritesMacOSLaunchAgentPlist(t *testing.T) {
 	dir := t.TempDir()
 	plistPath := filepath.Join(dir, "LaunchAgents", "com.example.rdev-host.plist")
