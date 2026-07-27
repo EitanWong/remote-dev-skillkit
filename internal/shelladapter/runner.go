@@ -99,6 +99,7 @@ func ExecuteContext(ctx context.Context, spec Spec) (Result, error) {
 	// of `ver`) are captured correctly instead of appearing as garbled bytes.
 	argv := windowsForceUTF8Argv(spec.Argv)
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	configureCommandCancellation(cmd)
 	cmd.Dir = workspaceRoot
 	// Explicitly close stdin so the subprocess cannot block waiting for terminal
 	// input. Without this, some shells (notably PowerShell on Windows) may stall

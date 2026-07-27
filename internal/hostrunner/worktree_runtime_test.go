@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -615,6 +616,10 @@ func TestHostRunnerGitWorktreeCancellationFinalizesAndReleasesLock(t *testing.T)
 		err    error
 	}
 	done := make(chan taskOutcome, 1)
+	cancellationCommand := "printf started > .rdev-cancel-started && sleep 5"
+	if runtime.GOOS != "windows" {
+		cancellationCommand = "printf started > .rdev-cancel-started; sleep 5 & wait"
+	}
 	go func() {
 		result, err := RunSessionTaskWithOptionsContext(ctx, SessionTaskSpec{
 			TaskID:     "task-worktree-cancel",
@@ -629,7 +634,7 @@ func TestHostRunnerGitWorktreeCancellationFinalizesAndReleasesLock(t *testing.T)
 			Capabilities: []string{"shell.user", "git.diff"},
 			Limits:       model.TaskLimits{MaxDurationSeconds: 30, MaxOutputBytes: 64 * 1024},
 			Payload: map[string]any{
-				"argv":           []string{"sh", "-c", "printf started > .rdev-cancel-started && sleep 5"},
+				"argv":           []string{"sh", "-c", cancellationCommand},
 				"allow_commands": []string{"sh"},
 			},
 		}, time.Now().UTC(), Options{WorkspaceLockStore: lockStore})
