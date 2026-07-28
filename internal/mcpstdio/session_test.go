@@ -32,6 +32,7 @@ func TestSessionsToolsListExposesOnlySessionControlPlane(t *testing.T) {
 	}
 	for _, name := range []string{
 		"rdev.sessions.create",
+		"rdev.sessions.handoff",
 
 		"rdev.sessions.status",
 		"rdev.sessions.events",

@@ -135,6 +135,7 @@ func wantSessionTools(t *testing.T, seen map[string]bool) {
 func sessionToolNames() []string {
 	return []string{
 		"rdev.sessions.create",
+		"rdev.sessions.handoff",
 		"rdev.sessions.status",
 		"rdev.sessions.events",
 		"rdev.sessions.task",
