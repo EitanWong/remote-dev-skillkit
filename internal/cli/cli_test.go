@@ -56,6 +56,7 @@ func TestMCPToolsExposeSessionControlPlane(t *testing.T) {
 	}
 	want := map[string]bool{
 		"rdev.sessions.create":    true,
+		"rdev.sessions.handoff":  true,
 		"rdev.sessions.status":    true,
 		"rdev.sessions.events":    true,
 		"rdev.sessions.task":      true,
@@ -219,6 +220,41 @@ func TestGatewayHandlerLoadsOperatorAuthFile(t *testing.T) {
 	localHandler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/sessions", nil))
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("local empty session create status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+}
+
+func TestGatewayServeConfiguresWindowsWebHandoff(t *testing.T) {
+	binaryPath := t.TempDir() + "/rdev-host.exe"
+	if err := os.WriteFile(binaryPath, []byte("MZ-cli-web-handoff"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var stdout bytes.Buffer
+	app := NewApp(&stdout, &bytes.Buffer{})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := app.Run(ctx, []string{
+		"gateway", "serve", "--addr", "127.0.0.1:0",
+		"--public-base-url", "https://remote.example.test",
+		"--windows-amd64-host-binary", binaryPath,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var ready map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &ready); err != nil {
+		t.Fatal(err)
+	}
+	if ready["web_handoff_enabled"] != true {
+		t.Fatalf("gateway ready payload did not report enabled web handoff: %#v", ready)
+	}
+
+	for _, args := range [][]string{
+		{"gateway", "serve", "--public-base-url", "https://remote.example.test"},
+		{"gateway", "serve", "--windows-amd64-host-binary", binaryPath},
+		{"gateway", "serve", "--public-base-url", "http://remote.example.test", "--windows-amd64-host-binary", binaryPath},
+	} {
+		if err := app.Run(context.Background(), args); err == nil {
+			t.Fatalf("invalid web handoff configuration accepted: %v", args)
+		}
 	}
 }
 
