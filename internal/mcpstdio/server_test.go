@@ -251,8 +251,14 @@ func TestMCPArgumentAndProtocolHelpers(t *testing.T) {
 
 func TestRemoteGatewayNormalizesV1BaseURLBeforeProxying(t *testing.T) {
 	path := ""
+	selectedGateway := ""
 	configured := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		selectedGateway, _ = request["selected_gateway_url"].(string)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{}`)
 	}))
@@ -264,6 +270,9 @@ func TestRemoteGatewayNormalizesV1BaseURLBeforeProxying(t *testing.T) {
 	}
 	if path != "/v1/sessions" {
 		t.Fatalf("gateway API path = %q, want /v1/sessions", path)
+	}
+	if selectedGateway != configured.URL {
+		t.Fatalf("selected gateway = %q, want %q", selectedGateway, configured.URL)
 	}
 }
 

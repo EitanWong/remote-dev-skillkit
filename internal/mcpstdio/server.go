@@ -405,7 +405,11 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 
 func (s Server) createSession(args map[string]any) (any, error) {
 	if target := s.effectiveGatewayTarget(args); target.URL != "" {
-		return s.proxyPOSTToTarget(target.URL, "/v1/sessions", sessionSpecFromArgs(args), target.useOperatorToken)
+		spec := sessionSpecFromArgs(args)
+		// A remote-proxied create must bind the session handoff to the same
+		// configured gateway that received the operator-authenticated request.
+		spec.SelectedGatewayURL = target.URL
+		return s.proxyPOSTToTarget(target.URL, "/v1/sessions", spec, target.useOperatorToken)
 	}
 	session, err := s.Gateway.CreateSession(sessionSpecFromArgs(args))
 	if err != nil {
