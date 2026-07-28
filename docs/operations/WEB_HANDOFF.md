@@ -38,8 +38,9 @@ binary is loaded and hashed at gateway startup. Readiness reports
    task.
 
 The current default link lifetime is 30 minutes. The operator may request a
-lifetime between one minute and 24 hours. Each link has exactly one claim; a
-fresh link is required after expiry or claim.
+lifetime between one minute and 24 hours. The effective lifetime is capped at
+the session expiry when the session has one. Each link has exactly one claim;
+a fresh link is required after expiry or claim.
 
 ## Capability handling
 
@@ -69,6 +70,9 @@ request, or execution-policy bypass.
 
 - A `single-target` session with an existing endpoint rejects a new web handoff.
 - A closed, revoked, failed, or expired session rejects a web handoff.
+- Claim revalidates that the session is still joinable before issuing a
+  bootstrap; an ineligible session leaves the handoff unclaimed rather than
+  issuing a script that cannot join.
 - Gateway restart invalidates active pilot sessions and in-memory handoffs.
 - `/healthz` proves that the gateway process is reachable; a browser handoff
   requires the new gateway binary and the configured host binary asset.

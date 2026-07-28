@@ -67,16 +67,21 @@ func (g *MemoryGateway) CreateWebHandoff(spec WebHandoffSpec) (WebHandoff, strin
 		return WebHandoff{}, "", fmt.Errorf("invalid web handoff specification")
 	}
 
-	now := g.webHandoffNow()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	now := g.webHandoffNowLocked()
 	if !spec.ExpiresAt.After(now) {
 		return WebHandoff{}, "", ErrWebHandoffExpired
 	}
-	session, err := g.Session(spec.SessionID)
+	session, err := g.webHandoffSessionLocked(spec.SessionID)
 	if err != nil {
 		return WebHandoff{}, "", err
 	}
 	if !webHandoffSessionJoinable(session, now) {
 		return WebHandoff{}, "", ErrWebHandoffSessionInvalid
+	}
+	if !session.ExpiresAt.IsZero() && spec.ExpiresAt.After(session.ExpiresAt) {
+		spec.ExpiresAt = session.ExpiresAt
 	}
 
 	proof, err := newWebHandoffSecret()
@@ -94,9 +99,6 @@ func (g *MemoryGateway) CreateWebHandoff(spec WebHandoffSpec) (WebHandoff, strin
 		},
 		proofHash: proofHash,
 	}
-
-	g.mu.Lock()
-	defer g.mu.Unlock()
 	if g.webHandoffs == nil {
 		g.webHandoffs = map[string]webHandoffState{}
 	}
@@ -143,6 +145,10 @@ func (g *MemoryGateway) ClaimWebHandoff(id, proof string, artifactTicketTTL time
 	proofHash := sha256.Sum256([]byte(proof))
 	if subtle.ConstantTimeCompare(state.proofHash[:], proofHash[:]) != 1 {
 		return WebHandoff{}, "", ErrWebHandoffInvalidProof
+	}
+	session, err := g.webHandoffSessionLocked(state.SessionID)
+	if err != nil || !webHandoffSessionJoinable(session, now) {
+		return WebHandoff{}, "", ErrWebHandoffSessionInvalid
 	}
 
 	ticket, err := newWebHandoffSecret()
@@ -214,6 +220,19 @@ func (g *MemoryGateway) webHandoffNowLocked() time.Time {
 		g.now = time.Now
 	}
 	return g.now().UTC()
+}
+
+// webHandoffSessionLocked returns the current session while g.mu is held. The
+// gateway lock orders web handoff mutations with the session-store lookup, so a
+// stale handoff cannot be consumed after the session has become ineligible.
+func (g *MemoryGateway) webHandoffSessionLocked(sessionID string) (controlplane.Session, error) {
+	if g.now == nil {
+		g.now = time.Now
+	}
+	if g.sessionStore == nil {
+		g.sessionStore = controlplane.NewMemoryStore(g.now)
+	}
+	return g.sessionStore.Session(sessionID)
 }
 
 func newWebHandoffIdentifier() (string, error) {

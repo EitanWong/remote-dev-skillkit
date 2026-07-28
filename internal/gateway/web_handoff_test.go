@@ -112,3 +112,57 @@ func TestWebHandoffRejectsInvalidExpiredMissingAndClosedSessions(t *testing.T) {
 		t.Fatalf("closed session error = %v, want ErrWebHandoffSessionInvalid", err)
 	}
 }
+
+func TestWebHandoffCapsExpiryAtSessionExpiry(t *testing.T) {
+	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+	session, err := gw.CreateSession(controlplane.SessionSpec{
+		Reason:    "expiring web handoff fixture",
+		ExpiresAt: now.Add(10 * time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handoff, _, err := gw.CreateWebHandoff(WebHandoffSpec{
+		SessionID: session.ID,
+		Platform:  WebHandoffPlatformWindowsAMD64,
+		ExpiresAt: now.Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !handoff.ExpiresAt.Equal(session.ExpiresAt) {
+		t.Fatalf("handoff expiry = %s, want session expiry %s", handoff.ExpiresAt, session.ExpiresAt)
+	}
+}
+
+func TestWebHandoffClaimRevalidatesSessionWithoutConsumingHandoff(t *testing.T) {
+	gw := NewMemoryGateway()
+	session, err := gw.CreateSession(controlplane.SessionSpec{
+		Reason:     "single-target claim revalidation fixture",
+		JoinPolicy: "single-target",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handoff, proof, err := gw.CreateWebHandoff(WebHandoffSpec{
+		SessionID: session.ID,
+		Platform:  WebHandoffPlatformWindowsAMD64,
+		ExpiresAt: time.Now().Add(time.Hour),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, _, err := gw.JoinSessionByCode(session.JoinCode, controlplane.EndpointSpec{
+		Role: controlplane.EndpointRoleTarget,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		if _, _, err := gw.ClaimWebHandoff(handoff.ID, proof, 10*time.Minute); err != ErrWebHandoffSessionInvalid {
+			t.Fatalf("claim attempt %d error = %v, want %v", attempt, err, ErrWebHandoffSessionInvalid)
+		}
+	}
+}

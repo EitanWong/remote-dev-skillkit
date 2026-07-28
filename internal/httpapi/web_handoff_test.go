@@ -172,3 +172,57 @@ func TestWebHandoffClaimRejectsExpiredProof(t *testing.T) {
 		t.Fatalf("expired claim status = %d, want 410: %s", claim.Code, claim.Body.String())
 	}
 }
+
+func TestWebHandoffClaimRevalidatesSessionBeforeIssuingBootstrap(t *testing.T) {
+	asset, err := NewWindowsAMD64WebHandoffAsset("rdev-host.exe", []byte("MZ"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gateway.NewMemoryGateway()
+	session, err := gw.CreateSession(controlplane.SessionSpec{
+		Profile:            "managed",
+		Reason:             "claim revalidation fixture",
+		JoinPolicy:         "single-target",
+		SelectedGatewayURL: "https://remote.example.test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := NewServerWithWebHandoff(gw, WebHandoffOptions{
+		PublicBaseURL: "https://remote.example.test",
+		WindowsAMD64:  asset,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := server.Handler()
+	created := postJSON(t, handler, "/v1/sessions/"+url.PathEscape(session.ID)+"/host-handoffs", `{"platform":"windows-amd64"}`, "")
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create web handoff status = %d body=%s", created.Code, created.Body.String())
+	}
+	var response struct {
+		Handoff struct {
+			URL string `json:"url"`
+		} `json:"handoff"`
+	}
+	decodeHTTP(t, created, &response)
+	link, err := url.Parse(response.Handoff.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, _, err := gw.JoinSessionByCode(session.JoinCode, controlplane.EndpointSpec{
+		Role: controlplane.EndpointRoleTarget,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		claim := postJSON(t, handler, link.Path+"/claim", `{"proof":"`+link.Fragment+`"}`, "")
+		if claim.Code != http.StatusConflict {
+			t.Fatalf("claim attempt %d status = %d, want 409: %s", attempt, claim.Code, claim.Body.String())
+		}
+		if strings.Contains(claim.Body.String(), "bootstrap") {
+			t.Fatalf("claim attempt %d issued a bootstrap: %s", attempt, claim.Body.String())
+		}
+	}
+}
