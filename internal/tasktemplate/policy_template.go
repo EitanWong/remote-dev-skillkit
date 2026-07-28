@@ -2,7 +2,7 @@ package tasktemplate
 
 import "strings"
 
-// PolicyTemplate returns a small, safe starter policy for common support-session
+// PolicyTemplate returns a small, safe starter policy for common session
 // probes. It is shared by CLI and MCP so fresh Agents see one contract.
 func PolicyTemplate(capability, targetOS string) map[string]any {
 	capability = strings.ToLower(strings.TrimSpace(capability))

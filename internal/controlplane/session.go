@@ -173,10 +173,10 @@ type SessionSpec struct {
 }
 
 type Session struct {
-	SchemaVersion      string             `json:"schema_version"`
-	ID                 string             `json:"id"`
-	JoinCode           string             `json:"join_code"`
-	SourceTicketID     string             `json:"source_ticket_id,omitempty"`
+	SchemaVersion string `json:"schema_version"`
+	ID            string `json:"id"`
+	JoinCode      string `json:"join_code"`
+
 	Profile            string             `json:"profile"`
 	Status             SessionStatus      `json:"status"`
 	Reason             string             `json:"reason"`
@@ -342,8 +342,8 @@ func InvalidJoinCodeError() ProtocolError {
 		Code:            ErrInvalidJoinCode,
 		Message:         "join code is invalid",
 		Recoverable:     false,
-		UserSummary:     "The support-session entry is invalid or no longer active.",
-		AgentNextAction: "create a fresh support-session entry and use its generated handoff",
+		UserSummary:     "The session join code is invalid or no longer active.",
+		AgentNextAction: "create a fresh session and use its generated join code",
 	}
 }
 

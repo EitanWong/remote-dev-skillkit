@@ -27,28 +27,25 @@ may be stale.
 - Installed service managers or launch surfaces: LaunchAgent/launchd, systemd
   user units, Windows Service Control Manager, scheduled tasks, or foreground
   shell only.
-- Existing `rdev` binary, Skillkit files, MCP configuration, and relevant
-  environment variables.
-- If `rdev` is missing, record it as recoverable before escalating: look for an
-  active checkout, current executable path, Go toolchain, and Git clone ability;
-  use `rdev bootstrap agent-plan --repo-root .` when available or
-  `go run ./cmd/rdev bootstrap agent-plan --repo-root .` from a checkout.
-- Existing runtime-memory root and safe reusable facts: gateway source,
-  workspace root, adapter availability, framework paths, proxy requirements,
-  release verifier inputs, interrupt policy, and prior residual risks.
+- Existing `rdev` binary, MCP configuration, and relevant environment variables.
+- If `rdev` is missing, record the active checkout, executable path, Go toolchain,
+  and Git clone ability before escalating. Do not infer a recovery command from a
+  stale installation guide.
+- Safe reusable facts: gateway source, workspace root, adapter availability,
+  framework paths, proxy requirements, interrupt policy, and prior residual risks.
 
 ## Adaptive Probes
 
 - Prefer read-only probes such as `rdev doctor`, `rdev mcp tools`, `uname -a`,
   `sw_vers`, `ver`, `id`, `whoami`, `command -v`, `where`, `git rev-parse`,
   and directory existence checks.
-- Do not invent a gateway URL, ticket code, root key, release URL, user home
+- Do not invent a gateway URL, session join code, trust value, user home
   path, framework install path, tunnel choice, mesh choice, or interrupt policy.
   If it cannot be discovered safely, ask.
 - Keep path and configuration neutral. Do not assume a fixed checkout path,
   user home, temp directory, workspace root, framework install directory,
   gateway URL, or release artifact location. Resolve them from read-only
-  probes, active configuration, MCP/CLI output, manifest metadata, or explicit
+  probes, active configuration, current MCP/CLI output, or explicit
   human/operator confirmation.
 - Treat example domains, POSIX paths, Windows paths, and placeholder values as
   documentation only, not deployment facts or defaults.

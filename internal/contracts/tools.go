@@ -33,6 +33,17 @@ func Tools() []Tool {
 			}, []string{"reason"}),
 		},
 		{
+			Name:        "rdev.sessions.handoff",
+			Description: "Create a short-lived browser handoff link for one Windows managed-host session. The native page adapts to browser language and Windows detection, claims a URL fragment proof once, downloads a double-click Windows launcher with a hash-checked PowerShell fallback, and returns handoff metadata plus user_summary and agent_next_action recovery fields.",
+			Safety:      "Creates a scoped, expiring distribution capability only. It does not execute on a target, expose an operator bearer token or private key, install persistence, mutate network settings, or bypass local OS controls.",
+			InputSchema: object(map[string]any{
+				"gateway_url":   gatewayURL,
+				"session_id":    sessionID,
+				"platform":      enum("windows-amd64"),
+				"expires_in_ms": integer(60000, 86400000),
+			}, []string{"session_id"}),
+		},
+		{
 			Name:        "rdev.sessions.status",
 			Description: "Read a Control Plane v1 session snapshot and derived status with user_summary, agent_next_action, recoverable, retry_after_ms, last_seq, snapshot_seq, selected gateway, endpoints, recent tasks, and artifact references.",
 			Safety:      "Read-only. Does not expose endpoint lease secrets, raw unbounded logs, or target-local credentials.",
@@ -120,27 +131,6 @@ func Tools() []Tool {
 				"reason":          stringField(),
 				"idempotency_key": stringField(),
 			}, []string{"session_id"}),
-		},
-		{
-			Name:        "rdev.sessions.connect",
-			Description: "Create or route the standard visible support-session entry, including region-aware tunnel availability, readiness, and the single human handoff contract.",
-			Safety:      "Does not bypass local controls or accept provider terms. Without an explicit start action it returns bounded commands/contracts; direct single-entry handoffs remain non-sendable unless the caller explicitly enables the degraded override.",
-			InputSchema: object(map[string]any{
-				"repo_root":                     stringField(),
-				"work_dir":                      stringField(),
-				"addr":                          stringField(),
-				"gateway_url":                   gatewayURL,
-				"target":                        enum("auto", "windows", "macos", "linux"),
-				"reason":                        stringField(),
-				"ttl_seconds":                   integer(60, 86400),
-				"auto_activate":                 boolField(),
-				"capabilities":                  stringArray(),
-				"locale":                        stringField(),
-				"rdev_command":                  stringField(),
-				"region":                        enum("global", "cn-mainland"),
-				"provider_policy":               stringField(),
-				"allow_degraded_direct_handoff": boolField(),
-			}, nil),
 		},
 	}
 }

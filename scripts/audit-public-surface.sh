@@ -21,11 +21,7 @@ public_files=(
   CODE_OF_CONDUCT.md
   TASKS.md
   AGENTS.md
-  docs/architecture
-  docs/project
-  docs/operations
-  docs/security
-  docs/i18n
+  docs
   cmd
   internal
   pkg
@@ -47,7 +43,7 @@ if rg -n --hidden --glob '!.git/**' --glob '!dist/**' --glob '!bin/**' --glob '!
 fi
 rm -f /tmp/rdev-public-private-matches.$$ /tmp/rdev-public-private-filtered.$$
 
-if rg -n --hidden --glob '!.git/**' --glob '!dist/**' --glob '!bin/**' --glob '!scripts/audit-public-surface.sh' '^(Date: 20[0-9]{2}-[0-9]{2}-[0-9]{2}|## .*20[0-9]{2}-[0-9]{2}-[0-9]{2})' README.md docs/project docs/architecture skills >/tmp/rdev-public-dated-final-matches.$$ 2>/dev/null; then
+if rg -n --hidden --glob '!.git/**' --glob '!dist/**' --glob '!bin/**' --glob '!scripts/audit-public-surface.sh' '^(Date: 20[0-9]{2}-[0-9]{2}-[0-9]{2}|## .*20[0-9]{2}-[0-9]{2}-[0-9]{2})' README.md docs skills >/tmp/rdev-public-dated-final-matches.$$ 2>/dev/null; then
   add_failure "dated public architecture labels found:\n$(cat /tmp/rdev-public-dated-final-matches.$$)"
 fi
 rm -f /tmp/rdev-public-dated-final-matches.$$

@@ -19,7 +19,7 @@ import (
 //
 // This stub writes and reads a local file tagged with the service/account
 // identity so that the rest of the system can exercise the MDM code path
-// without requiring real MDM enrollment.
+// without requiring a real managed-device configuration.
 //
 // Production deployments should replace the file operations below with:
 //   - MDM profile delivery of the signing key material to a protected preference

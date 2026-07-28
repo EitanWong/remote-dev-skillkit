@@ -1,11 +1,9 @@
 package gateway
 
 import (
-	"strings"
 	"time"
 
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
-	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
 
 func (g *MemoryGateway) CreateSession(spec controlplane.SessionSpec) (controlplane.Session, error) {
@@ -17,70 +15,15 @@ func (g *MemoryGateway) Session(sessionID string) (controlplane.Session, error) 
 }
 
 func (g *MemoryGateway) JoinSessionByCode(joinCode string, spec controlplane.EndpointSpec) (controlplane.Session, controlplane.Endpoint, controlplane.Lease, []controlplane.Event, error) {
-	joinCode = strings.TrimSpace(joinCode)
-	g.mu.Lock()
-	if g.sessionStore == nil {
-		g.sessionStore = controlplane.NewMemoryStore(g.now)
-	}
-	store := g.sessionStore
-	ticketID, ticketOwned := g.codeIndex[joinCode]
-	if !ticketOwned {
-		g.mu.Unlock()
-		return store.JoinByCode(joinCode, spec)
-	}
-	ticket, ok := g.tickets[ticketID]
-	if !ok || ticket.Status != model.TicketStatusActive || !g.now().Before(ticket.ExpiresAt) || !g.ticketSessionJoinableLocked(ticket) {
-		g.mu.Unlock()
-		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, nil, invalidTicketJoinCodeError()
-	}
-	session, endpoint, lease, events, err := store.JoinByCode(joinCode, spec)
-	g.mu.Unlock()
-	return session, endpoint, lease, events, err
-}
-
-func invalidTicketJoinCodeError() controlplane.ProtocolError {
-	return controlplane.InvalidJoinCodeError()
+	return g.controlPlane().JoinByCode(joinCode, spec)
 }
 
 func (g *MemoryGateway) JoinSession(sessionID string, spec controlplane.EndpointSpec) (controlplane.Session, controlplane.Endpoint, controlplane.Lease, error) {
-	g.mu.Lock()
-	if g.sessionStore == nil {
-		g.sessionStore = controlplane.NewMemoryStore(g.now)
-	}
-	store := g.sessionStore
-	session, err := store.Session(sessionID)
-	if err != nil {
-		g.mu.Unlock()
-		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, invalidTicketJoinCodeError()
-	}
-	if session.SourceTicketID == "" {
-		g.mu.Unlock()
-		return store.JoinSession(sessionID, spec)
-	}
-	ticket, ok := g.tickets[session.SourceTicketID]
-	if !ok || ticket.Status != model.TicketStatusActive || !g.now().Before(ticket.ExpiresAt) || !g.ticketSessionJoinableLocked(ticket) {
-		g.mu.Unlock()
-		return controlplane.Session{}, controlplane.Endpoint{}, controlplane.Lease{}, invalidTicketJoinCodeError()
-	}
-	joined, endpoint, lease, err := store.JoinSession(sessionID, spec)
-	g.mu.Unlock()
-	return joined, endpoint, lease, err
-}
-
-func (g *MemoryGateway) ticketSessionJoinableLocked(ticket model.Ticket) bool {
-	if g.validateTicketSessionBindingLocked(ticket) != nil {
-		return false
-	}
-	session, err := g.sessionStore.Session(ticket.SessionID)
-	return err == nil && !sessionTerminalStatus(session.Status)
+	return g.controlPlane().JoinSession(sessionID, spec)
 }
 
 func (g *MemoryGateway) AppendSessionEvent(sessionID string, event controlplane.Event) (controlplane.Event, error) {
 	return g.controlPlane().AppendEvent(sessionID, event)
-}
-
-func (g *MemoryGateway) AppendSessionEventBatch(sessionID string, events []controlplane.Event) ([]controlplane.Event, error) {
-	return g.controlPlane().AppendEventBatch(sessionID, events)
 }
 
 func (g *MemoryGateway) SessionEventsAfter(sessionID string, cursor controlplane.EventCursor, limit int) ([]controlplane.Event, controlplane.Lease, controlplane.EventReplayState, error) {

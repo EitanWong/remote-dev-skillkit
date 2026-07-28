@@ -30,7 +30,7 @@ jobs:
         run: ./scripts/check.sh
 
   release-smoke:
-    name: Real artifact, release candidate, and GitHub plan smoke
+    name: release-smoke
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     needs: go-checks
@@ -44,5 +44,5 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Run release smoke
+      - name: Run session Control Plane release smoke
         run: ./scripts/ci/release-smoke.sh

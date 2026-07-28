@@ -87,7 +87,7 @@ func Install(ctx context.Context, client *http.Client, opts Options) (Report, er
 	report.RecommendedActions = []string{
 		"Run with --execute only after reviewing the URL and SHA-256.",
 		"Keep helper credentials and relay addresses outside public artifacts.",
-		"Use explicit service or mesh enrollment plans for persistent or privileged networking.",
+		"Use explicit service or mesh setup plans for persistent or privileged networking.",
 	}
 	if !report.OK() {
 		return report, nil

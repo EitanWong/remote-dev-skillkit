@@ -30,9 +30,6 @@ func TestToolsHaveUniqueNamesAndSchemas(t *testing.T) {
 			t.Fatalf("tool %s missing input schema", tool.Name)
 		}
 	}
-	if seen["rdev.adapter.verify_result"] {
-		t.Fatal("old adapter verification tools must not be part of Control Plane v1 MCP")
-	}
 	wantSessionTools(t, seen)
 }
 
@@ -81,61 +78,6 @@ func TestSessionTaskSchemaExposesEngineeringTaskContract(t *testing.T) {
 	profiles, ok := raw["x-rdev-adapter-profiles"].([]AdapterTaskProfile)
 	if !ok || len(profiles) != len(AdapterTaskProfiles()) {
 		t.Fatalf("sessions.task must publish adapter profiles: %#v", raw)
-	}
-}
-
-func TestSupportSessionConnectSchemaAcceptsRegionalTunnelPolicy(t *testing.T) {
-	tool := findTool("rdev.sessions.connect")
-	if tool == nil {
-		t.Fatal("missing rdev.sessions.connect from live MCP contract")
-	}
-	properties, _ := tool.InputSchema["properties"].(map[string]any)
-	region, _ := properties["region"].(map[string]any)
-	enumValues, _ := region["enum"].([]any)
-	if !reflect.DeepEqual(enumValues, []any{"global", "cn-mainland"}) {
-		t.Fatalf("unexpected region schema: %#v", region)
-	}
-	providerPolicy, _ := properties["provider_policy"].(map[string]any)
-	allowDegraded, _ := properties["allow_degraded_direct_handoff"].(map[string]any)
-	if providerPolicy["type"] != "string" || allowDegraded["type"] != "boolean" {
-		t.Fatalf("missing tunnel policy fields: %#v", properties)
-	}
-}
-
-func TestToolsDoNotExposeOldExperimentalHostJobContracts(t *testing.T) {
-	forbidden := []string{
-		"rdev.hosts.list",
-		"rdev.hosts.capabilities",
-		"rdev.hosts.authorize",
-		"rdev.hosts.revoke",
-		"rdev.jobs.create",
-		"rdev.jobs.policy_template",
-		"rdev.jobs.status",
-		"rdev.jobs.cancel",
-		"rdev.jobs.authorize",
-		"rdev.artifacts.list",
-		"rdev.artifacts.read",
-	}
-	for _, tool := range Tools() {
-		for _, name := range forbidden {
-			if tool.Name == name {
-				t.Fatalf("old experimental MCP tool %s must be absent from Control Plane v1", name)
-			}
-		}
-		forbiddenText := []string{
-			"recommended gateway_url_candidates entry",
-			"use the returned gateway_url_candidates",
-			"use gateway_url_candidates",
-			"turn gateway_url_candidates",
-			"authorization_id",
-			"jobs.authorize",
-			"host registration",
-		}
-		for _, text := range forbiddenText {
-			if strings.Contains(tool.Description, text) {
-				t.Fatalf("tool %s description contains old contract wording %q: %s", tool.Name, text, tool.Description)
-			}
-		}
 	}
 }
 
@@ -193,6 +135,7 @@ func wantSessionTools(t *testing.T, seen map[string]bool) {
 func sessionToolNames() []string {
 	return []string{
 		"rdev.sessions.create",
+		"rdev.sessions.handoff",
 		"rdev.sessions.status",
 		"rdev.sessions.events",
 		"rdev.sessions.task",

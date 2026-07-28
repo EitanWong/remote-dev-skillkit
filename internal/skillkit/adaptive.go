@@ -35,7 +35,7 @@ func defaultAdaptiveConfigurationContract() AdaptiveConfigurationContract {
 		},
 		AskIfUnclear: []string{
 			"gateway URL",
-			"ticket code",
+			"session join code",
 			"root key",
 			"release URL",
 			"checksum",

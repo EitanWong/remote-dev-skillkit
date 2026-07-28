@@ -81,7 +81,7 @@ func auditEventsForTest(at time.Time) []model.AuditEvent {
 		{
 			Sequence: 1,
 			Actor:    "operator",
-			Action:   "ticket.create",
+			Action:   "session.create",
 			TargetID: "tkt_1",
 			Message:  "created",
 			At:       at,

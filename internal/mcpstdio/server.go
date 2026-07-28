@@ -17,64 +17,70 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/contracts"
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 	"github.com/EitanWong/remote-dev-skillkit/internal/gateway"
-	"github.com/EitanWong/remote-dev-skillkit/internal/skillkit"
-	"github.com/EitanWong/remote-dev-skillkit/internal/supportsession"
-	"github.com/EitanWong/remote-dev-skillkit/internal/tunnel"
 )
 
 const protocolVersion = "2025-11-25"
 
-const configuredGatewayProviderID = "configured-gateway"
-
-const mcpProviderPolicyRestrictedKey = "\x00restricted"
-
-type mcpTunnelProviderPolicyFile struct {
-	AllowedProviderIDs    *[]string         `json:"allowed_provider_ids"`
-	DisabledProviderIDs   []string          `json:"disabled_provider_ids"`
-	RegionalEvidencePaths []string          `json:"regional_evidence_paths"`
-	SSHKnownHostsPaths    map[string]string `json:"ssh_known_hosts_paths"`
-}
-
-type mcpRegionalEvidenceSummary struct {
-	ProviderID string                `json:"provider_id"`
-	Region     tunnel.RegionProfile  `json:"region"`
-	Status     tunnel.EvidenceStatus `json:"status"`
-	ObservedAt time.Time             `json:"observed_at"`
-	ExpiresAt  time.Time             `json:"expires_at"`
-	Fresh      bool                  `json:"fresh"`
-}
-
 type Server struct {
 	Gateway *gateway.MemoryGateway
-	// RemoteGateway, when non-empty, causes session/task/artifact/audit MCP tool
-	// calls to be proxied to a running hosted gateway over HTTP rather than
-	// operating on the local in-memory gateway.  This lets `rdev mcp serve`
-	// see sessions and tasks that were registered through a foreground support-session
-	// process or a separately-started `rdev gateway serve`.
-	//
-	// Set automatically from RDEV_HOSTED_GATEWAY_URL (or any RDEV_*_GATEWAY_URL)
-	// by the CLI when those environment variables are present.
+	// RemoteGateway, when non-empty, proxies session operations to a configured
+	// Control Plane gateway rather than the local in-memory gateway.
 	RemoteGateway string
-	httpClient    *http.Client
+	// remoteOperatorToken authenticates only requests sent to RemoteGateway.
+	// Per-call gateway_url overrides intentionally never receive this token.
+	remoteOperatorToken string
+	httpClient          *http.Client
 }
 
 func NewServer(gw *gateway.MemoryGateway) Server {
 	return Server{Gateway: gw}
 }
 
-// NewServerWithRemoteGateway returns a Server that proxies session/task/artifact/audit
-// operations to remoteURL while using the local gw for ticket creation and trust ops.
-// The HTTP client uses a retrying transport so that transient TLS EOF errors
-// from Cloudflare Quick Tunnels or similar reverse proxies are handled silently.
+// NewServerWithRemoteGateway returns a Server that proxies session operations to remoteURL.
 func NewServerWithRemoteGateway(gw *gateway.MemoryGateway, remoteURL string) Server {
-	return Server{
-		Gateway:       gw,
-		RemoteGateway: strings.TrimRight(strings.TrimSpace(remoteURL), "/"),
-		httpClient: &http.Client{
-			Timeout:   30 * time.Second,
-			Transport: retryingMCPTransport{Base: http.DefaultTransport, MaxRetries: 3},
-		},
+	return NewServerWithRemoteGatewayAndOperatorToken(gw, remoteURL, "")
+}
+
+// NewServerWithRemoteGatewayAndOperatorToken returns a remote gateway proxy
+// that sends the supplied operator bearer token only to the configured gateway.
+// The token is deliberately withheld from per-call gateway_url overrides.
+func NewServerWithRemoteGatewayAndOperatorToken(gw *gateway.MemoryGateway, remoteURL, operatorToken string) Server {
+	operatorToken = strings.TrimSpace(operatorToken)
+	client := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: retryingMCPTransport{Base: http.DefaultTransport, MaxRetries: 3},
 	}
+	if operatorToken != "" {
+		client.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
+	return Server{
+		Gateway:             gw,
+		RemoteGateway:       normalizeGatewayBaseURL(remoteURL),
+		remoteOperatorToken: operatorToken,
+		httpClient:          client,
+	}
+}
+
+func normalizeGatewayBaseURL(raw string) string {
+	value := strings.TrimRight(strings.TrimSpace(raw), "/")
+	if value == "" {
+		return ""
+	}
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return value
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	if path == "/v1" {
+		parsed.Path = ""
+		parsed.RawPath = ""
+	} else if strings.HasSuffix(path, "/v1") {
+		parsed.Path = strings.TrimSuffix(path, "/v1")
+		parsed.RawPath = ""
+	}
+	return strings.TrimRight(parsed.String(), "/")
 }
 
 // retryingMCPTransport wraps http.DefaultTransport and retries GET/HEAD and
@@ -159,25 +165,48 @@ func (s Server) remoteClient() *http.Client {
 	return http.DefaultClient
 }
 
-// effectiveGatewayURL returns the gateway base URL to use for a given tool
-// call.  The lookup order is:
-//  1. "gateway_url" key in the per-call args (lets the agent override on
-//     every call without restarting the MCP server).
-//  2. s.RemoteGateway set at server construction time (from --gateway-url
-//     flag or RDEV_*_GATEWAY_URL environment variables).
-//
-// Returns "" when no gateway is configured; callers should fall back to the
-// local in-memory gateway.
-func (s Server) effectiveGatewayURL(args map[string]any) string {
+type gatewayTarget struct {
+	URL              string
+	useOperatorToken bool
+}
+
+// effectiveGatewayTarget returns the gateway base URL and whether it came from
+// the configured server-level gateway. Per-call overrides must not inherit the
+// configured gateway's bearer token, even when both URLs are identical.
+func (s Server) effectiveGatewayTarget(args map[string]any) gatewayTarget {
 	if v := stringArg(args, "gateway_url", ""); v != "" {
-		return strings.TrimRight(strings.TrimSpace(v), "/")
+		return gatewayTarget{URL: normalizeGatewayBaseURL(v)}
 	}
-	return s.RemoteGateway
+	return gatewayTarget{URL: s.RemoteGateway, useOperatorToken: true}
+}
+
+func (s Server) remoteGatewayAuthorization(baseURL string, useOperatorToken bool) string {
+	if !useOperatorToken {
+		return ""
+	}
+	if strings.TrimSpace(s.remoteOperatorToken) == "" {
+		return ""
+	}
+	if normalizeGatewayBaseURL(baseURL) != s.RemoteGateway {
+		return ""
+	}
+	return "Bearer " + s.remoteOperatorToken
 }
 
 // proxyGETTo sends a GET to baseURL+path and decodes the response.
 func (s Server) proxyGETTo(baseURL, path string) (any, error) {
-	resp, err := s.remoteClient().Get(baseURL + path)
+	return s.proxyGETToTarget(baseURL, path, true)
+}
+
+func (s Server) proxyGETToTarget(baseURL, path string, useOperatorToken bool) (any, error) {
+	req, err := http.NewRequest(http.MethodGet, baseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if authorization := s.remoteGatewayAuthorization(baseURL, useOperatorToken); authorization != "" {
+		req.Header.Set("Authorization", authorization)
+	}
+	resp, err := s.remoteClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("remote gateway GET %s: %w", path, err)
 	}
@@ -191,6 +220,10 @@ func (s Server) proxyGETTo(baseURL, path string) (any, error) {
 
 // proxyPOSTTo sends a POST to baseURL+path and decodes the response.
 func (s Server) proxyPOSTTo(baseURL, path string, payload any) (any, error) {
+	return s.proxyPOSTToTarget(baseURL, path, payload, true)
+}
+
+func (s Server) proxyPOSTToTarget(baseURL, path string, payload any, useOperatorToken bool) (any, error) {
 	data, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -200,6 +233,9 @@ func (s Server) proxyPOSTTo(baseURL, path string, payload any) (any, error) {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if authorization := s.remoteGatewayAuthorization(baseURL, useOperatorToken); authorization != "" {
+		req.Header.Set("Authorization", authorization)
+	}
 	if body, ok := payload.(map[string]any); ok {
 		if key, _ := body["idempotency_key"].(string); strings.TrimSpace(key) != "" {
 			req.Header.Set("Idempotency-Key", strings.TrimSpace(key))
@@ -218,6 +254,9 @@ func (s Server) proxyPOSTTo(baseURL, path string, payload any) (any, error) {
 }
 
 func (s Server) decodeRemoteResponse(resp *http.Response) (any, error) {
+	if resp.StatusCode >= http.StatusMultipleChoices && resp.StatusCode < http.StatusBadRequest {
+		return nil, fmt.Errorf("remote gateway returned redirect HTTP %d", resp.StatusCode)
+	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20)) // 8 MiB cap
 	if err != nil {
 		return nil, fmt.Errorf("read remote gateway response: %w", err)
@@ -342,6 +381,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 	switch params.Name {
 	case "rdev.sessions.create":
 		data, err = s.createSession(params.Arguments)
+	case "rdev.sessions.handoff":
+		data, err = s.sessionHandoff(params.Arguments)
 	case "rdev.sessions.status":
 		data, err = s.sessionStatus(params.Arguments)
 	case "rdev.sessions.events":
@@ -354,8 +395,7 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.sessionArtifacts(params.Arguments)
 	case "rdev.sessions.close":
 		data, err = s.sessionClose(params.Arguments)
-	case "rdev.sessions.connect":
-		data, err = s.sessionsConnect(params.Arguments)
+
 	default:
 		err = unknownToolError{Name: params.Name}
 	}
@@ -366,8 +406,12 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 }
 
 func (s Server) createSession(args map[string]any) (any, error) {
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyPOSTTo(gwURL, "/v1/sessions", sessionSpecFromArgs(args))
+	if target := s.effectiveGatewayTarget(args); target.URL != "" {
+		spec := sessionSpecFromArgs(args)
+		// A remote-proxied create must bind the session handoff to the same
+		// configured gateway that received the operator-authenticated request.
+		spec.SelectedGatewayURL = target.URL
+		return s.proxyPOSTToTarget(target.URL, "/v1/sessions", spec, target.useOperatorToken)
 	}
 	session, err := s.Gateway.CreateSession(sessionSpecFromArgs(args))
 	if err != nil {
@@ -380,10 +424,30 @@ func (s Server) createSession(args map[string]any) (any, error) {
 	}, status), nil
 }
 
+func (s Server) sessionHandoff(args map[string]any) (any, error) {
+	sessionID := requiredString(args, "session_id")
+	platform := strings.TrimSpace(stringArg(args, "platform", gateway.WebHandoffPlatformWindowsAMD64))
+	if platform != gateway.WebHandoffPlatformWindowsAMD64 {
+		return nil, fmt.Errorf("unsupported web handoff platform %q", platform)
+	}
+	expiresInMS := intArg(args, "expires_in_ms", 0)
+	if expiresInMS < 0 {
+		return nil, fmt.Errorf("expires_in_ms must be non-negative")
+	}
+	target := s.effectiveGatewayTarget(args)
+	if target.URL == "" {
+		return nil, fmt.Errorf("session handoff requires a configured remote HTTPS gateway")
+	}
+	return s.proxyPOSTToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/host-handoffs", map[string]any{
+		"platform":      platform,
+		"expires_in_ms": expiresInMS,
+	}, target.useOperatorToken)
+}
+
 func (s Server) sessionStatus(args map[string]any) (any, error) {
 	sessionID := requiredString(args, "session_id")
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyGETTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID))
+	if target := s.effectiveGatewayTarget(args); target.URL != "" {
+		return s.proxyGETToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID), target.useOperatorToken)
 	}
 	session, err := s.Gateway.Session(sessionID)
 	if err != nil {
@@ -400,7 +464,7 @@ func (s Server) sessionEvents(args map[string]any) (any, error) {
 	sessionID := requiredString(args, "session_id")
 	afterSeq := uint64(intArg(args, "after_seq", 0))
 	limit := intArg(args, "limit", 100)
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
+	if target := s.effectiveGatewayTarget(args); target.URL != "" {
 		query := url.Values{}
 		query.Set("after_seq", fmt.Sprintf("%d", afterSeq))
 		query.Set("limit", fmt.Sprintf("%d", limit))
@@ -413,7 +477,7 @@ func (s Server) sessionEvents(args map[string]any) (any, error) {
 		if processed := intArg(args, "processed_seq", 0); processed > 0 {
 			query.Set("processed_seq", fmt.Sprintf("%d", processed))
 		}
-		return s.proxyGETTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/events?"+query.Encode())
+		return s.proxyGETToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/events?"+query.Encode(), target.useOperatorToken)
 	}
 	events, replay, err := s.Gateway.SessionEventsAfterForAgent(sessionID, afterSeq, limit)
 	if err != nil {
@@ -447,8 +511,8 @@ func (s Server) sessionTask(args map[string]any) (any, error) {
 			"checkpoint_id":   requiredString(args, "checkpoint_id"),
 			"idempotency_key": requiredString(args, "idempotency_key"),
 		}
-		if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-			return s.proxyPOSTTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/tasks/"+url.PathEscape(taskID)+"/resume", request)
+		if target := s.effectiveGatewayTarget(args); target.URL != "" {
+			return s.proxyPOSTToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/tasks/"+url.PathEscape(taskID)+"/resume", request, target.useOperatorToken)
 		}
 		task, event, err := s.Gateway.ResumeSessionTask(sessionID, taskID, request["checkpoint_id"].(string), request["idempotency_key"].(string))
 		if err != nil {
@@ -468,8 +532,8 @@ func (s Server) sessionTask(args map[string]any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyPOSTTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/tasks", spec)
+	if target := s.effectiveGatewayTarget(args); target.URL != "" {
+		return s.proxyPOSTToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/tasks", spec, target.useOperatorToken)
 	}
 	task, event, err := s.Gateway.SubmitSessionTask(sessionID, spec)
 	if err != nil {
@@ -601,8 +665,8 @@ func (s Server) sessionInterrupt(args map[string]any) (any, error) {
 		IdempotencyKey: requiredString(args, "idempotency_key"),
 		Payload:        payload,
 	}
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyPOSTTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/events", event)
+	if target := s.effectiveGatewayTarget(args); target.URL != "" {
+		return s.proxyPOSTToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/events", event, target.useOperatorToken)
 	}
 	appended, err := s.Gateway.AppendSessionEvent(sessionID, event)
 	if err != nil {
@@ -622,8 +686,8 @@ func (s Server) sessionInterrupt(args map[string]any) (any, error) {
 func (s Server) sessionArtifacts(args map[string]any) (any, error) {
 	sessionID := requiredString(args, "session_id")
 	if stringArg(args, "id", "") == "" && stringArg(args, "task_id", "") == "" {
-		if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-			return s.proxyGETTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/artifacts")
+		if target := s.effectiveGatewayTarget(args); target.URL != "" {
+			return s.proxyGETToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/artifacts", target.useOperatorToken)
 		}
 		session, err := s.Gateway.Session(sessionID)
 		if err != nil {
@@ -646,8 +710,8 @@ func (s Server) sessionArtifacts(args map[string]any) (any, error) {
 		UploadOffset: int64(intArg(args, "upload_offset", 0)),
 		Complete:     boolArg(args, "complete", false),
 	}
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyPOSTTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/artifacts", ref)
+	if target := s.effectiveGatewayTarget(args); target.URL != "" {
+		return s.proxyPOSTToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/artifacts", ref, target.useOperatorToken)
 	}
 	artifact, event, err := s.Gateway.UpsertSessionArtifact(sessionID, ref)
 	if err != nil {
@@ -667,11 +731,11 @@ func (s Server) sessionArtifacts(args map[string]any) (any, error) {
 
 func (s Server) sessionClose(args map[string]any) (any, error) {
 	sessionID := requiredString(args, "session_id")
-	if gwURL := s.effectiveGatewayURL(args); gwURL != "" {
-		return s.proxyPOSTTo(gwURL, "/v1/sessions/"+url.PathEscape(sessionID)+"/close", map[string]any{
+	if target := s.effectiveGatewayTarget(args); target.URL != "" {
+		return s.proxyPOSTToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/close", map[string]any{
 			"reason":          stringArg(args, "reason", ""),
 			"idempotency_key": stringArg(args, "idempotency_key", ""),
-		})
+		}, target.useOperatorToken)
 	}
 	session, event, err := s.Gateway.CloseSession(sessionID)
 	if err != nil {
@@ -712,249 +776,6 @@ func withSessionStatus(payload map[string]any, status controlplane.StatusSummary
 	return payload
 }
 
-func (s Server) sessionsConnect(args map[string]any) (any, error) {
-	ttl := intArg(args, "ttl_seconds", 7200)
-	if ttl < 60 || ttl > 86400 {
-		return nil, fmt.Errorf("ttl_seconds must be between 60 and 86400")
-	}
-	region, err := tunnelRegionArg(args)
-	if err != nil {
-		return nil, err
-	}
-	providerPolicy := strings.TrimSpace(stringArg(args, "provider_policy", ""))
-	allowDegraded := boolArg(args, "allow_degraded_direct_handoff", false)
-	gatewayURL := strings.TrimRight(strings.TrimSpace(stringArg(args, "gateway_url", "")), "/")
-	if gatewayURL == "" {
-		gatewayURL, _ = supportsession.ConfiguredGatewayURLCandidate()
-	}
-	regionalEvidence, err := loadMCPRegionalEvidence(providerPolicy, region, time.Now().UTC(), gatewayURL != "")
-	if err != nil {
-		return nil, err
-	}
-	foregroundPolicyPath := providerPolicy
-	if gatewayURL != "" {
-		foregroundPolicyPath = ""
-	}
-	rdevCommand := agentRdevCommand(stringArg(args, "rdev_command", ""))
-	handoff := supportsession.BuildHandoff(supportsession.HandoffOptions{
-		RepoRoot:                   stringArg(args, "repo_root", "."),
-		WorkDir:                    stringArg(args, "work_dir", ""),
-		Addr:                       stringArg(args, "addr", "0.0.0.0:8787"),
-		GatewayURL:                 gatewayURL,
-		Target:                     stringArg(args, "target", "auto"),
-		Reason:                     stringArg(args, "reason", "visible temporary remote support"),
-		TTLSeconds:                 ttl,
-		AutoActivate:               boolArg(args, "auto_activate", true),
-		Capabilities:               stringSliceArg(args, "capabilities"),
-		Locale:                     stringArg(args, "locale", "auto"),
-		RdevCommand:                rdevCommand,
-		Region:                     string(region),
-		ProviderPolicyPath:         foregroundPolicyPath,
-		AllowDegradedDirectHandoff: allowDegraded,
-		RequireForeground:          gatewayURL != "",
-	})
-	if nextArgs, ok := handoff["mcp_next_arguments"].(map[string]any); ok {
-		nextArgs["region"] = string(region)
-		if foregroundPolicyPath != "" {
-			nextArgs["provider_policy"] = foregroundPolicyPath
-		}
-		nextArgs["allow_degraded_direct_handoff"] = allowDegraded
-	}
-	readiness := supportsession.DirectAvailability(tunnel.AvailabilitySet{
-		SchemaVersion: tunnel.AvailabilitySchemaVersion,
-		Region:        region,
-	}, false)
-	payload := addTunnelReadinessAliases(supportsession.BuildConnectFromHandoff(handoff), readiness, regionalEvidence, providerPolicy != "")
-	if gatewayURL != "" {
-		payload["reason"] = "remote_ticket_and_probe_required"
-	}
-	return payload, nil
-}
-
-func tunnelRegionArg(args map[string]any) (tunnel.RegionProfile, error) {
-	region := tunnel.RegionProfile(strings.TrimSpace(stringArg(args, "region", string(tunnel.RegionGlobal))))
-	if region == "" {
-		region = tunnel.RegionGlobal
-	}
-	if region != tunnel.RegionGlobal && region != tunnel.RegionCNMainland {
-		return "", fmt.Errorf("unsupported tunnel region %q; use global or cn-mainland", region)
-	}
-	return region, nil
-}
-
-func addTunnelReadinessAliases(payload map[string]any, readiness supportsession.AvailabilityReadiness, evidence []mcpRegionalEvidenceSummary, providerPolicyApplied bool) map[string]any {
-	payload["availability_readiness"] = readiness
-	payload["availability_set"] = readiness.AvailabilitySet
-	payload["regional_evidence"] = evidence
-	payload["provider_policy_applied"] = providerPolicyApplied
-	payload["ready_to_send"] = readiness.ReadyToSend
-	payload["ready_to_send_human"] = readiness.ReadyToSend
-	payload["ready_to_send_to_human"] = readiness.ReadyToSend
-	payload["ready_to_activate"] = readiness.ReadyToActivate
-	payload["ready_to_execute"] = readiness.ReadyToExecute
-	payload["degraded_single_entry"] = readiness.DegradedSingleEntry
-	return payload
-}
-
-func loadMCPRegionalEvidence(policyPath string, region tunnel.RegionProfile, now time.Time, allowConfiguredGateway bool) ([]mcpRegionalEvidenceSummary, error) {
-	policyPath = strings.TrimSpace(policyPath)
-	if policyPath == "" {
-		return []mcpRegionalEvidenceSummary{}, nil
-	}
-	var policy mcpTunnelProviderPolicyFile
-	if err := tunnel.ReadProtectedJSONFile(policyPath, &policy); err != nil {
-		return nil, fmt.Errorf("decode provider policy: %w", err)
-	}
-	knownProviders := knownMCPProviderIDs(allowConfiguredGateway)
-	allowed, disabled, err := validateMCPProviderPolicy(policy, knownProviders)
-	if err != nil {
-		return nil, err
-	}
-	summaries := make([]mcpRegionalEvidenceSummary, 0)
-	for _, evidencePath := range policy.RegionalEvidencePaths {
-		evidencePath = strings.TrimSpace(evidencePath)
-		if evidencePath == "" {
-			return nil, fmt.Errorf("provider policy contains an empty regional evidence path")
-		}
-		var evidenceData json.RawMessage
-		if err := tunnel.ReadProtectedJSONFile(evidencePath, &evidenceData); err != nil {
-			return nil, fmt.Errorf("read regional evidence: %w", err)
-		}
-		values, err := decodeMCPRegionalEvidence(evidenceData)
-		if err != nil {
-			return nil, fmt.Errorf("decode regional evidence: %w", err)
-		}
-		for _, item := range values {
-			if !knownProviders[item.ProviderID] {
-				return nil, fmt.Errorf("regional evidence references unknown provider %q", item.ProviderID)
-			}
-			if err := item.Validate(); err != nil {
-				return nil, fmt.Errorf("validate regional evidence: %w", err)
-			}
-			if item.Region != region || !mcpPolicyAllowsProvider(item.ProviderID, allowed, disabled) {
-				continue
-			}
-			summaries = append(summaries, mcpRegionalEvidenceSummary{
-				ProviderID: item.ProviderID,
-				Region:     item.Region,
-				Status:     item.Status,
-				ObservedAt: item.ObservedAt,
-				ExpiresAt:  item.ExpiresAt,
-				Fresh:      !item.ObservedAt.After(now) && item.ExpiresAt.After(now),
-			})
-		}
-	}
-	return summaries, nil
-}
-
-func knownMCPProviderIDs(allowConfiguredGateway bool) map[string]bool {
-	known := make(map[string]bool, len(tunnel.CanonicalProviderIDs())+1)
-	for _, id := range tunnel.CanonicalProviderIDs() {
-		known[id] = true
-	}
-	if allowConfiguredGateway {
-		known[configuredGatewayProviderID] = true
-	}
-	return known
-}
-
-func validateMCPProviderPolicy(policy mcpTunnelProviderPolicyFile, known map[string]bool) (map[string]bool, map[string]bool, error) {
-	allowedCount := 0
-	if policy.AllowedProviderIDs != nil {
-		allowedCount = len(*policy.AllowedProviderIDs)
-	}
-	allowed := make(map[string]bool, allowedCount+1)
-	disabled := make(map[string]bool, len(policy.DisabledProviderIDs))
-	allowedValues := []string(nil)
-	if policy.AllowedProviderIDs != nil {
-		allowed[mcpProviderPolicyRestrictedKey] = true
-		allowedValues = *policy.AllowedProviderIDs
-	}
-	for label, values := range map[string][]string{
-		"allowed_provider_ids":  allowedValues,
-		"disabled_provider_ids": policy.DisabledProviderIDs,
-	} {
-		target := allowed
-		if label == "disabled_provider_ids" {
-			target = disabled
-		}
-		for _, value := range values {
-			id := strings.TrimSpace(value)
-			if id != value {
-				return nil, nil, fmt.Errorf("provider policy %s contains non-canonical provider %q", label, value)
-			}
-			if id == "" {
-				return nil, nil, fmt.Errorf("provider policy %s contains an empty provider ID", label)
-			}
-			if target[id] {
-				return nil, nil, fmt.Errorf("provider policy %s contains duplicate provider %q", label, id)
-			}
-			if !known[id] {
-				return nil, nil, fmt.Errorf("provider policy %s references unknown provider %q", label, id)
-			}
-			target[id] = true
-		}
-	}
-	for id := range allowed {
-		if disabled[id] {
-			return nil, nil, fmt.Errorf("provider policy lists provider %q as both allowed and disabled", id)
-		}
-	}
-	for id, path := range policy.SSHKnownHostsPaths {
-		if strings.TrimSpace(id) == "" || strings.TrimSpace(path) == "" {
-			return nil, nil, fmt.Errorf("provider policy ssh_known_hosts_paths requires non-empty provider IDs and paths")
-		}
-		if !known[strings.TrimSpace(id)] {
-			return nil, nil, fmt.Errorf("provider policy ssh_known_hosts_paths references unknown provider %q", id)
-		}
-	}
-	return allowed, disabled, nil
-}
-
-func mcpPolicyAllowsProvider(providerID string, allowed, disabled map[string]bool) bool {
-	if disabled[providerID] {
-		return false
-	}
-	if allowed[mcpProviderPolicyRestrictedKey] {
-		return allowed[providerID]
-	}
-	return len(allowed) == 0 || allowed[providerID]
-}
-
-func decodeMCPRegionalEvidence(data []byte) ([]tunnel.RegionalEvidence, error) {
-	if len(bytes.TrimSpace(data)) == 0 {
-		return nil, fmt.Errorf("regional evidence is empty")
-	}
-	if bytes.TrimSpace(data)[0] == '[' {
-		var values []tunnel.RegionalEvidence
-		if err := decodeStrictMCPJSON(data, &values); err != nil {
-			return nil, err
-		}
-		return values, nil
-	}
-	var value tunnel.RegionalEvidence
-	if err := decodeStrictMCPJSON(data, &value); err != nil {
-		return nil, err
-	}
-	return []tunnel.RegionalEvidence{value}, nil
-}
-
-func decodeStrictMCPJSON(data []byte, destination any) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(destination); err != nil {
-		return err
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("trailing JSON value is not allowed")
-		}
-		return err
-	}
-	return nil
-}
-
 func success(id any, result any) response {
 	return response{JSONRPC: "2.0", ID: id, Result: result}
 }
@@ -993,13 +814,6 @@ func stringArg(args map[string]any, key, fallback string) string {
 		return text
 	}
 	return fallback
-}
-
-func agentRdevCommand(command string) string {
-	if command = strings.TrimSpace(command); command != "" {
-		return command
-	}
-	return skillkit.RecommendedRdevCommand()
 }
 
 func intArg(args map[string]any, key string, fallback int) int {
