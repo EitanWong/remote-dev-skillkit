@@ -41,6 +41,17 @@ rdev host serve --join-code CODE --gateway https://gateway.example --once
 
 Useful host options from the current help surface include `--mode`, `--transport`, `--trust-pin`, `--trust-store`, `--identity-store`, and `--workspace-lock-store`.
 
+## Browser handoff for managed Windows hosts
+
+An operator-managed HTTPS gateway can serve a short-lived browser handoff when
+it starts with `--public-base-url HTTPS_URL` and
+`--windows-amd64-host-binary PATH`. Create the link through
+`rdev.sessions.handoff`, then send that link to the Windows operator. The
+browser downloads a hash-verifying PowerShell bootstrap only after a one-time
+claim; the target connects outward via managed long-poll. See
+[`WEB_HANDOFF.md`](WEB_HANDOFF.md) for deployment, expiry, and capability
+details.
+
 ## Remote MCP proxy
 
 ```bash

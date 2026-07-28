@@ -28,6 +28,7 @@ type MemoryGateway struct {
 	now          func() time.Time
 	sessionStore *controlplane.MemoryStore
 	audit        []model.AuditEvent
+	webHandoffs  map[string]webHandoffState
 	signingID    string
 	publicKey    ed25519.PublicKey
 	privateKey   ed25519.PrivateKey
@@ -64,6 +65,7 @@ func NewMemoryGatewayWithSigningKey(now func() time.Time, signingID string, publ
 	return &MemoryGateway{
 		now:          now,
 		sessionStore: controlplane.NewMemoryStore(now),
+		webHandoffs:  map[string]webHandoffState{},
 		signingID:    signingID,
 		publicKey:    append(ed25519.PublicKey(nil), publicKey...),
 		privateKey:   append(ed25519.PrivateKey(nil), privateKey...),

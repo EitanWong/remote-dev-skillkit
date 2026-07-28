@@ -154,7 +154,11 @@ func TestWebHandoffClaimRejectsExpiredProof(t *testing.T) {
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create status = %d body=%s", created.Code, created.Body.String())
 	}
-	var response struct{ Handoff struct{ URL string `json:"url"` } `json:"handoff"` }
+	var response struct {
+		Handoff struct {
+			URL string `json:"url"`
+		} `json:"handoff"`
+	}
 	if err := json.NewDecoder(created.Body).Decode(&response); err != nil {
 		t.Fatal(err)
 	}

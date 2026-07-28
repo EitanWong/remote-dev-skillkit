@@ -33,6 +33,17 @@ func Tools() []Tool {
 			}, []string{"reason"}),
 		},
 		{
+			Name:        "rdev.sessions.handoff",
+			Description: "Create a short-lived browser handoff link for one Windows managed-host session. The link uses a URL fragment proof, produces a one-time PowerShell bootstrap download, and returns handoff metadata plus user_summary and agent_next_action recovery fields.",
+			Safety:      "Creates a scoped, expiring distribution capability only. It does not execute on a target, expose an operator bearer token or private key, install persistence, mutate network settings, or bypass local OS controls.",
+			InputSchema: object(map[string]any{
+				"gateway_url":   gatewayURL,
+				"session_id":    sessionID,
+				"platform":      enum("windows-amd64"),
+				"expires_in_ms": integer(60000, 86400000),
+			}, []string{"session_id"}),
+		},
+		{
 			Name:        "rdev.sessions.status",
 			Description: "Read a Control Plane v1 session snapshot and derived status with user_summary, agent_next_action, recoverable, retry_after_ms, last_seq, snapshot_seq, selected gateway, endpoints, recent tasks, and artifact references.",
 			Safety:      "Read-only. Does not expose endpoint lease secrets, raw unbounded logs, or target-local credentials.",

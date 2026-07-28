@@ -28,6 +28,7 @@ type Server struct {
 	OperatorAuth    *operatorauth.Authorizer
 	stateMu         *sync.Mutex
 	gatewayInstance string
+	webHandoff      webHandoffConfig
 }
 
 type sessionTaskRequest struct {
@@ -71,6 +72,10 @@ func NewServerWithOperatorAuthAndStateStore(gw *gateway.MemoryGateway, store gat
 	return newServer(gw, store, auth)
 }
 
+func NewServerWithWebHandoff(gw *gateway.MemoryGateway, options WebHandoffOptions) (Server, error) {
+	return NewServer(gw).WithWebHandoff(options)
+}
+
 func newServer(gw *gateway.MemoryGateway, store gateway.StateStore, auth *operatorauth.Authorizer) Server {
 	return Server{
 		Gateway:         gw,
@@ -110,6 +115,8 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/sessions/", s.sessionRoute)
 
 	mux.HandleFunc("GET /v1/audit", s.listAudit)
+	mux.HandleFunc("GET /connect/", s.webHandoffRoute)
+	mux.HandleFunc("POST /connect/", s.webHandoffRoute)
 	return mux
 }
 
@@ -178,6 +185,8 @@ func (s Server) sessionRoute(w http.ResponseWriter, r *http.Request) {
 		s.getSessionSnapshot(w, r, sessionID)
 	case r.Method == http.MethodPost && resource == "join":
 		s.joinSession(w, r, sessionID)
+	case r.Method == http.MethodPost && resource == "host-handoffs":
+		s.createWebHandoff(w, r, sessionID)
 	case r.Method == http.MethodGet && resource == "events":
 		if strings.TrimSpace(r.URL.Query().Get("endpoint_id")) != "" {
 			s.sessionEventsAfter(w, r, sessionID)

@@ -14,7 +14,9 @@ description: Use when an agent needs to connect to, operate, or audit a remote m
 ## Session flow
 
 1. Create the session through MCP.
-2. Give the host only its current join code and gateway URL.
+2. For a configured managed HTTPS gateway, create `rdev.sessions.handoff` and
+   send its short-lived browser URL to the Windows operator. Otherwise give the
+   host only its current join code and gateway URL.
 3. Confirm endpoint readiness with session status and events.
 4. Submit a narrow task.
 5. Inspect events and artifact metadata before saying work is complete.
@@ -29,6 +31,10 @@ description: Use when an agent needs to connect to, operate, or audit a remote m
   file. Gateway restart ends active pilot sessions.
 - Host trust is verified through the signed trust-bundle endpoint.
 - Use `rdev mcp serve --gateway-url URL --operator-token-file PATH` for a configured remote MCP proxy; the token remains only in the protected local file.
+- A web handoff URL carries an opaque fragment proof only; the browser claims it
+  once, receives a PowerShell bootstrap, and downloads the hash-checked host
+  binary with a short-lived header ticket. It is not a host listener or a
+  substitute for session policy.
 
 ## Adaptive configuration
 

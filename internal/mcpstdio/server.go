@@ -381,6 +381,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 	switch params.Name {
 	case "rdev.sessions.create":
 		data, err = s.createSession(params.Arguments)
+	case "rdev.sessions.handoff":
+		data, err = s.sessionHandoff(params.Arguments)
 	case "rdev.sessions.status":
 		data, err = s.sessionStatus(params.Arguments)
 	case "rdev.sessions.events":
@@ -420,6 +422,26 @@ func (s Server) createSession(args map[string]any) (any, error) {
 		"session": session,
 		"status":  status,
 	}, status), nil
+}
+
+func (s Server) sessionHandoff(args map[string]any) (any, error) {
+	sessionID := requiredString(args, "session_id")
+	platform := strings.TrimSpace(stringArg(args, "platform", gateway.WebHandoffPlatformWindowsAMD64))
+	if platform != gateway.WebHandoffPlatformWindowsAMD64 {
+		return nil, fmt.Errorf("unsupported web handoff platform %q", platform)
+	}
+	expiresInMS := intArg(args, "expires_in_ms", 0)
+	if expiresInMS < 0 {
+		return nil, fmt.Errorf("expires_in_ms must be non-negative")
+	}
+	target := s.effectiveGatewayTarget(args)
+	if target.URL == "" {
+		return nil, fmt.Errorf("session handoff requires a configured remote HTTPS gateway")
+	}
+	return s.proxyPOSTToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/host-handoffs", map[string]any{
+		"platform":      platform,
+		"expires_in_ms": expiresInMS,
+	}, target.useOperatorToken)
 }
 
 func (s Server) sessionStatus(args map[string]any) (any, error) {

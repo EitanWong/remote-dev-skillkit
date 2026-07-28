@@ -72,6 +72,40 @@
       }
     },
     {
+      "name": "rdev.sessions.handoff",
+      "description": "Create a short-lived browser handoff link for one Windows managed-host session. The link uses a URL fragment proof, produces a one-time PowerShell bootstrap download, and returns handoff metadata plus user_summary and agent_next_action recovery fields.",
+      "safety": "Creates a scoped, expiring distribution capability only. It does not execute on a target, expose an operator bearer token or private key, install persistence, mutate network settings, or bypass local OS controls.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "expires_in_ms": {
+            "maximum": 86400000,
+            "minimum": 60000,
+            "type": "integer"
+          },
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this session call. Overrides the server-level gateway URL for this single MCP request.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "platform": {
+            "enum": [
+              "windows-amd64"
+            ],
+            "type": "string"
+          },
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "name": "rdev.sessions.status",
       "description": "Read a Control Plane v1 session snapshot and derived status with user_summary, agent_next_action, recoverable, retry_after_ms, last_seq, snapshot_seq, selected gateway, endpoints, recent tasks, and artifact references.",
       "safety": "Read-only. Does not expose endpoint lease secrets, raw unbounded logs, or target-local credentials.",

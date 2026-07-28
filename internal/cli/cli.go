@@ -177,13 +177,19 @@ func (a App) gateway(ctx context.Context, args []string) error {
 	addr := fs.String("addr", "127.0.0.1:8787", "loopback listen address")
 	dev := fs.Bool("dev", false, "mark the local gateway as development mode")
 	operatorAuthFile := fs.String("operator-auth-file", "", "optional protected operator-auth principals file")
+	publicBaseURL := fs.String("public-base-url", "", "optional public HTTPS base URL for browser handoff links")
+	windowsAMD64HostBinary := fs.String("windows-amd64-host-binary", "", "optional current rdev-host.exe artifact for browser handoffs")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 	if err := requireLoopbackAddress(*addr); err != nil {
 		return err
 	}
-	handler, operatorAuthEnabled, err := gatewayHandler(*operatorAuthFile)
+	webHandoffOptions, webHandoffEnabled, err := gatewayWebHandoffOptions(*publicBaseURL, *windowsAMD64HostBinary)
+	if err != nil {
+		return err
+	}
+	handler, operatorAuthEnabled, err := gatewayHandlerWithWebHandoff(*operatorAuthFile, webHandoffOptions)
 	if err != nil {
 		return err
 	}
@@ -199,6 +205,7 @@ func (a App) gateway(ctx context.Context, args []string) error {
 		"url":                   "http://" + listener.Addr().String(),
 		"mode":                  map[bool]string{true: "development", false: "local"}[*dev],
 		"operator_auth_enabled": operatorAuthEnabled,
+		"web_handoff_enabled":   webHandoffEnabled,
 		"protocol":              "rdev.session.v1",
 	}); err != nil {
 		return err
@@ -223,17 +230,48 @@ func (a App) gateway(ctx context.Context, args []string) error {
 	}
 }
 
+func gatewayWebHandoffOptions(publicBaseURL, windowsAMD64HostBinary string) (httpapi.WebHandoffOptions, bool, error) {
+	publicBaseURL = strings.TrimSpace(publicBaseURL)
+	windowsAMD64HostBinary = strings.TrimSpace(windowsAMD64HostBinary)
+	if publicBaseURL == "" && windowsAMD64HostBinary == "" {
+		return httpapi.WebHandoffOptions{}, false, nil
+	}
+	if publicBaseURL == "" || windowsAMD64HostBinary == "" {
+		return httpapi.WebHandoffOptions{}, false, fmt.Errorf("--public-base-url and --windows-amd64-host-binary must be supplied together")
+	}
+	asset, err := httpapi.LoadWindowsAMD64WebHandoffAsset(windowsAMD64HostBinary)
+	if err != nil {
+		return httpapi.WebHandoffOptions{}, false, err
+	}
+	return httpapi.WebHandoffOptions{PublicBaseURL: publicBaseURL, WindowsAMD64: asset}, true, nil
+}
+
 func gatewayHandler(operatorAuthFile string) (http.Handler, bool, error) {
+	return gatewayHandlerWithWebHandoff(operatorAuthFile, httpapi.WebHandoffOptions{})
+}
+
+func gatewayHandlerWithWebHandoff(operatorAuthFile string, webHandoffOptions httpapi.WebHandoffOptions) (http.Handler, bool, error) {
 	gw := gateway.NewMemoryGateway()
 	operatorAuthFile = strings.TrimSpace(operatorAuthFile)
+	var server httpapi.Server
+	operatorAuthEnabled := operatorAuthFile != ""
 	if operatorAuthFile == "" {
-		return httpapi.NewServer(gw).Handler(), false, nil
+		server = httpapi.NewServer(gw)
+	} else {
+		auth, _, err := operatorauth.Load(operatorAuthFile)
+		if err != nil {
+			return nil, false, fmt.Errorf("load operator auth file: %w", err)
+		}
+		server = httpapi.NewServerWithOperatorAuth(gw, "", auth)
 	}
-	auth, _, err := operatorauth.Load(operatorAuthFile)
-	if err != nil {
-		return nil, false, fmt.Errorf("load operator auth file: %w", err)
+	if strings.TrimSpace(webHandoffOptions.PublicBaseURL) != "" || len(webHandoffOptions.WindowsAMD64.Content) > 0 {
+		configured, err := server.WithWebHandoff(webHandoffOptions)
+		if err != nil {
+			return nil, false, err
+		}
+		server = configured
 	}
-	return httpapi.NewServerWithOperatorAuth(gw, "", auth).Handler(), true, nil
+	return server.Handler(), operatorAuthEnabled, nil
 }
 
 func requireLoopbackAddress(addr string) error {
@@ -265,7 +303,7 @@ func (a App) printCommandUsage(command string) {
 	case "host":
 		_, _ = fmt.Fprintln(a.Stdout, "rdev host serve --join-code CODE --gateway URL")
 	case "gateway":
-		_, _ = fmt.Fprintln(a.Stdout, "rdev gateway serve [--addr 127.0.0.1:8787] [--dev] [--operator-auth-file PATH]")
+		_, _ = fmt.Fprintln(a.Stdout, "rdev gateway serve [--addr 127.0.0.1:8787] [--dev] [--operator-auth-file PATH] [--public-base-url HTTPS_URL --windows-amd64-host-binary PATH]")
 	default:
 		a.printUsage()
 	}
