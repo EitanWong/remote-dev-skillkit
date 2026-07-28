@@ -14,7 +14,10 @@ Use for scoped engineering work on a host that has joined the active Control Pla
 1. Discover the real surface with `rdev doctor` and `rdev mcp tools`.
 2. Create a session through MCP and retain its session identifier, endpoint state, and gateway source.
 3. For a configured managed HTTPS gateway, create `rdev.sessions.handoff` and
-   send the returned browser URL to the Windows operator; otherwise start the
+   send the returned browser URL to the Windows operator. The native page
+   localizes to the target browser, gates claim to Windows, downloads
+   `Connect-Rdev.cmd`, and the operator double-clicks that launcher; use the
+   page's PowerShell download only as its explicit fallback. Otherwise start the
    host with the returned join code and current gateway URL.
 4. Wait for an endpoint through `rdev.sessions.status` and `rdev.sessions.events`.
 5. Submit the smallest task that states adapter, workspace, capability, limits, and expected verification.
@@ -26,6 +29,8 @@ Use for scoped engineering work on a host that has joined the active Control Pla
 - Keep agent work inside declared workspace and host policy.
 - Use `interrupt` for an in-flight task and `close` only when the operator asks.
 - Do not create persistence, public target-host listeners, or unrestricted execution paths.
+- Do not hand-author or distribute an alternate bootstrap when the configured
+  browser handoff exists; it is the session-native delivery surface.
 
 ## Adaptive configuration
 
