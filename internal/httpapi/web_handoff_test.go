@@ -75,18 +75,30 @@ func TestWebHandoffLinkClaimsBootstrapAndDeliversVerifiedHostBinary(t *testing.T
 		t.Fatalf("claim status = %d body=%s", claim.Code, claim.Body.String())
 	}
 	var claimed struct {
-		Bootstrap string `json:"bootstrap"`
+		Bootstrap                 string `json:"bootstrap"`
+		BootstrapFilename         string `json:"bootstrap_filename"`
+		FallbackBootstrap         string `json:"fallback_bootstrap"`
+		FallbackBootstrapFilename string `json:"fallback_bootstrap_filename"`
 	}
 	decodeHTTP(t, claim, &claimed)
-	if !strings.Contains(claimed.Bootstrap, session.JoinCode) || !strings.Contains(claimed.Bootstrap, "X-Rdev-Handoff-Ticket") {
-		t.Fatalf("bootstrap did not contain scoped connection material: %s", claimed.Bootstrap)
+	if claimed.BootstrapFilename != "Connect-Rdev.cmd" {
+		t.Fatalf("bootstrap filename = %q, want Connect-Rdev.cmd", claimed.BootstrapFilename)
 	}
-	if strings.Contains(claimed.Bootstrap, "operator-secret") {
-		t.Fatal("bootstrap leaked an operator credential")
+	if claimed.FallbackBootstrapFilename != "Connect-Rdev.ps1" {
+		t.Fatalf("fallback bootstrap filename = %q, want Connect-Rdev.ps1", claimed.FallbackBootstrapFilename)
 	}
-	ticketMatch := regexp.MustCompile(`(?m)^\$artifactTicket = '([^']+)'$`).FindStringSubmatch(claimed.Bootstrap)
+	if !strings.Contains(claimed.Bootstrap, session.JoinCode) || !strings.Contains(claimed.Bootstrap, "curl.exe") || !strings.Contains(claimed.Bootstrap, "certutil.exe") || !strings.Contains(claimed.Bootstrap, `tokens=* delims= `) || !strings.Contains(claimed.Bootstrap, `set "ACTUAL_SHA256=%ACTUAL_SHA256: =%"`) {
+		t.Fatalf("native launcher did not contain scoped connection material: %s", claimed.Bootstrap)
+	}
+	if strings.Contains(claimed.Bootstrap, "operator-secret") || strings.Contains(claimed.Bootstrap, "ExecutionPolicy") {
+		t.Fatal("native launcher leaked protected material or bypass behavior")
+	}
+	if !strings.Contains(claimed.FallbackBootstrap, session.JoinCode) || strings.Contains(claimed.FallbackBootstrap, "ExecutionPolicy") {
+		t.Fatalf("fallback bootstrap did not preserve the bounded PowerShell flow: %s", claimed.FallbackBootstrap)
+	}
+	ticketMatch := regexp.MustCompile(`(?m)^set "ARTIFACT_TICKET=([^"\r\n]+)"\r?$`).FindStringSubmatch(claimed.Bootstrap)
 	if len(ticketMatch) != 2 {
-		t.Fatalf("bootstrap did not contain an artifact ticket assignment: %s", claimed.Bootstrap)
+		t.Fatalf("native launcher did not contain an artifact ticket assignment: %s", claimed.Bootstrap)
 	}
 
 	artifactReq := httptest.NewRequest(http.MethodGet, link.Path+"/rdev-host.exe", nil)
@@ -103,6 +115,82 @@ func TestWebHandoffLinkClaimsBootstrapAndDeliversVerifiedHostBinary(t *testing.T
 	replayed := postJSON(t, handler, link.Path+"/claim", `{"proof":"`+link.Fragment+`"}`, "")
 	if replayed.Code != http.StatusGone {
 		t.Fatalf("second claim status = %d, want 410: %s", replayed.Code, replayed.Body.String())
+	}
+}
+
+func TestWebHandoffPageLocale(t *testing.T) {
+	tests := []struct {
+		acceptLanguage string
+		want           string
+	}{
+		{acceptLanguage: "zh-CN,zh;q=0.9", want: "zh-Hans"},
+		{acceptLanguage: "zh-TW,zh;q=0.9", want: "zh-Hant"},
+		{acceptLanguage: "zh-Hant-HK", want: "zh-Hant"},
+		{acceptLanguage: "en-US,en;q=0.9", want: "en"},
+		{acceptLanguage: "ja-JP,ja;q=0.9", want: "en"},
+	}
+	for _, test := range tests {
+		t.Run(test.acceptLanguage, func(t *testing.T) {
+			if got := webHandoffPageLocale(test.acceptLanguage); got != test.want {
+				t.Fatalf("webHandoffPageLocale(%q) = %q, want %q", test.acceptLanguage, got, test.want)
+			}
+		})
+	}
+}
+
+func TestWebHandoffPageLocalizesAndGatesWindowsBootstrap(t *testing.T) {
+	asset, err := NewWindowsAMD64WebHandoffAsset("rdev-host.exe", []byte("MZ"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gateway.NewMemoryGateway()
+	session, err := gw.CreateSession(controlplane.SessionSpec{
+		SelectedGatewayURL: "https://remote.example.test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := NewServerWithWebHandoff(gw, WebHandoffOptions{
+		PublicBaseURL: "https://remote.example.test",
+		WindowsAMD64:  asset,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := postJSON(t, server.Handler(), "/v1/sessions/"+url.PathEscape(session.ID)+"/host-handoffs", `{"platform":"windows-amd64"}`, "")
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create web handoff status = %d body=%s", created.Code, created.Body.String())
+	}
+	var response struct {
+		Handoff struct {
+			URL string `json:"url"`
+		} `json:"handoff"`
+	}
+	decodeHTTP(t, created, &response)
+	link, err := url.Parse(response.Handoff.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pageReq := httptest.NewRequest(http.MethodGet, link.Path, nil)
+	pageReq.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	pageRec := httptest.NewRecorder()
+	server.Handler().ServeHTTP(pageRec, pageReq)
+	if pageRec.Code != http.StatusOK {
+		t.Fatalf("localized handoff page status = %d body=%s", pageRec.Code, pageRec.Body.String())
+	}
+	body := pageRec.Body.String()
+	for _, want := range []string{
+		`<html lang="zh-Hans">`,
+		"连接这台 Windows 主机",
+		"Connect-Rdev.cmd",
+		"navigator.userAgentData",
+		"isWindowsBrowser",
+		"请在 Windows 设备上打开此连接页。它尚未被领取。",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("localized handoff page missing %q: %s", want, body)
+		}
 	}
 }
 

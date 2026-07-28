@@ -32,9 +32,10 @@ description: Use when an agent needs to connect to, operate, or audit a remote m
 - Host trust is verified through the signed trust-bundle endpoint.
 - Use `rdev mcp serve --gateway-url URL --operator-token-file PATH` for a configured remote MCP proxy; the token remains only in the protected local file.
 - A web handoff URL carries an opaque fragment proof only; the browser claims it
-  once, receives a PowerShell bootstrap, and downloads the hash-checked host
-  binary with a short-lived header ticket. It is not a host listener or a
-  substitute for session policy.
+  once, localizes and gates the page to Windows, then downloads a double-click
+  `Connect-Rdev.cmd` launcher that fetches the hash-checked host binary with a
+  short-lived header ticket. A PowerShell download remains an explicit fallback.
+  It is not a host listener or a substitute for session policy.
 
 ## Adaptive configuration
 

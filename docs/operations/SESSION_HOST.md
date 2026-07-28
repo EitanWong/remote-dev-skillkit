@@ -47,8 +47,11 @@ An operator-managed HTTPS gateway can serve a short-lived browser handoff when
 it starts with `--public-base-url HTTPS_URL` and
 `--windows-amd64-host-binary PATH`. Create the link through
 `rdev.sessions.handoff`, then send that link to the Windows operator. The
-browser downloads a hash-verifying PowerShell bootstrap only after a one-time
-claim; the target connects outward via managed long-poll. See
+browser exposes its native download only after a one-time claim; the page
+localizes itself, gates the action to Windows, downloads
+a hash-verifying double-click `Connect-Rdev.cmd` launcher, and exposes
+PowerShell only as a fallback. The target connects outward via managed
+long-poll. See
 [`WEB_HANDOFF.md`](WEB_HANDOFF.md) for deployment, expiry, and capability
 details.
 
