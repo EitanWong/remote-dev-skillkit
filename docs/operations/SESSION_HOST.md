@@ -60,6 +60,11 @@ rdev mcp serve --gateway-url https://gateway.example --operator-token-file /prot
 
 The token file contains local protected material. Keep its value out of command arguments, repository files, transcripts, and prompts.
 
+For a managed MCP launcher, set `RDEV_GATEWAY_OPERATOR_TOKEN_FILE` to the
+local protected **file path**. `rdev mcp serve` uses that path only when
+`--operator-token-file` is absent; an explicit flag wins. Do not put the raw
+bearer in environment variables or command arguments.
+
 ## Verification
 
 After a host joins, query session status and events through MCP. Before reporting completion, inspect task terminal state and artifact metadata, then close only on the operator's decision.

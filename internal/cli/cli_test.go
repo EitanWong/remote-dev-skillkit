@@ -174,6 +174,17 @@ func TestCurrentCLIRejectsInvalidMCPAndGatewayCalls(t *testing.T) {
 	}
 }
 
+func TestMCPServeOperatorTokenFilePathPrefersExplicitFlagThenProtectedEnvironment(t *testing.T) {
+	t.Setenv("RDEV_GATEWAY_OPERATOR_TOKEN_FILE", "/run/rdev/operator-from-environment.token")
+
+	if got := mcpOperatorTokenFilePath(""); got != "/run/rdev/operator-from-environment.token" {
+		t.Fatalf("environment token file path = %q", got)
+	}
+	if got := mcpOperatorTokenFilePath("/run/rdev/operator-from-flag.token"); got != "/run/rdev/operator-from-flag.token" {
+		t.Fatalf("explicit token file path = %q", got)
+	}
+}
+
 func TestGatewayHandlerLoadsOperatorAuthFile(t *testing.T) {
 	authPath := t.TempDir() + "/operators.json"
 	if err := operatorauth.WriteFile(authPath, operatorauth.File{

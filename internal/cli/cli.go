@@ -140,7 +140,7 @@ func (a App) mcp(ctx context.Context, args []string) error {
 		if strings.TrimSpace(*remoteGateway) == "" {
 			return mcpstdio.NewServer(gw).Serve(ctx, os.Stdin, a.Stdout)
 		}
-		token, err := readProtectedTokenFile(*operatorTokenFile)
+		token, err := readProtectedTokenFile(mcpOperatorTokenFilePath(*operatorTokenFile))
 		if err != nil {
 			return err
 		}
@@ -148,6 +148,13 @@ func (a App) mcp(ctx context.Context, args []string) error {
 	default:
 		return fmt.Errorf("unknown mcp subcommand %q", args[0])
 	}
+}
+
+func mcpOperatorTokenFilePath(explicit string) string {
+	if explicit = strings.TrimSpace(explicit); explicit != "" {
+		return explicit
+	}
+	return strings.TrimSpace(os.Getenv("RDEV_GATEWAY_OPERATOR_TOKEN_FILE"))
 }
 
 func readProtectedTokenFile(path string) (string, error) {
