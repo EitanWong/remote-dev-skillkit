@@ -116,27 +116,6 @@ func (s *MemoryStore) CreateSession(spec SessionSpec) (Session, error) {
 	return s.storeNewSessionLocked(session)
 }
 
-// CreateSessionForTicket is the internal binding surface for support tickets.
-// SessionSpec intentionally has no JSON field that lets an external caller
-// choose either the join code or the source ticket.
-func (s *MemoryStore) CreateSessionForTicket(spec SessionSpec, sourceTicketID, joinCode string) (Session, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	sourceTicketID = strings.TrimSpace(sourceTicketID)
-	joinCode = strings.TrimSpace(joinCode)
-	if sourceTicketID == "" || joinCode == "" {
-		return Session{}, s.err(ErrInvalidJoinCode, "ticket session binding is invalid", false)
-	}
-	session, err := NewSession(spec, s.now())
-	if err != nil {
-		return Session{}, err
-	}
-	session.JoinCode = joinCode
-	session.SourceTicketID = sourceTicketID
-	return s.storeNewSessionLocked(session)
-}
-
 func (s *MemoryStore) storeNewSessionLocked(session Session) (Session, error) {
 	if _, exists := s.sessions[session.ID]; exists {
 		return Session{}, s.err(ErrIdempotencyConflict, "session id is already in use", false)
@@ -1050,7 +1029,7 @@ func (s *MemoryStore) capabilityUnavailableError(available, requested []string) 
 		"requested_capabilities": append([]string(nil), requested...),
 		"available_capabilities": append([]string(nil), available...),
 	}
-	err.AgentNextAction = "request the missing capabilities and create a fresh support-session entry before retrying"
+	err.AgentNextAction = "request the missing capabilities and create a fresh session before retrying"
 	return err
 }
 

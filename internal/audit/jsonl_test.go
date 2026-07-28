@@ -16,7 +16,7 @@ func TestJSONLStoreAppend(t *testing.T) {
 	event := model.AuditEvent{
 		Sequence: 1,
 		Actor:    "operator",
-		Action:   "ticket.create",
+		Action:   "session.create",
 		TargetID: "tkt_123",
 		Message:  "created",
 		At:       time.Date(2026, 6, 28, 12, 0, 0, 0, time.UTC),

@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"strings"
 	"testing"
 )
 
@@ -78,6 +80,88 @@ func TestGatewayRequiresLoopbackAddress(t *testing.T) {
 	}
 	if err := requireLoopbackAddress("0.0.0.0:8787"); err == nil {
 		t.Fatal("public gateway address accepted")
+	}
+}
+
+func TestAppUsageAndGatewayServeExposeCurrentSurface(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	app := NewApp(&stdout, &stderr)
+	if err := app.Run(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "session-native remote development toolkit") {
+		t.Fatalf("top-level usage = %q", stdout.String())
+	}
+	for _, args := range [][]string{{"mcp", "--help"}, {"host", "--help"}, {"gateway", "--help"}} {
+		stdout.Reset()
+		if err := app.Run(context.Background(), args); err != nil {
+			t.Fatalf("%v help: %v", args[0], err)
+		}
+		if !strings.Contains(stdout.String(), "rdev "+args[0]) {
+			t.Fatalf("%v help = %q", args[0], stdout.String())
+		}
+	}
+
+	stdout.Reset()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := app.Run(ctx, []string{"gateway", "serve", "--addr", "127.0.0.1:0", "--dev"}); err != nil {
+		t.Fatalf("gateway serve with canceled context: %v", err)
+	}
+	var gatewayReady map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &gatewayReady); err != nil {
+		t.Fatal(err)
+	}
+	if gatewayReady["protocol"] != "rdev.session.v1" || gatewayReady["mode"] != "development" {
+		t.Fatalf("gateway ready payload = %#v", gatewayReady)
+	}
+
+	stdout.Reset()
+	if err := app.Run(context.Background(), []string{"version"}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(stdout.String(), "rdev ") {
+		t.Fatalf("version output = %q", stdout.String())
+	}
+}
+
+func TestCurrentCLIRejectsInvalidMCPAndGatewayCalls(t *testing.T) {
+	app := NewApp(&bytes.Buffer{}, &bytes.Buffer{})
+	for _, args := range [][]string{
+		{"mcp"},
+		{"mcp", "unknown"},
+		{"mcp", "serve", "--gateway-url", "https://gateway.example", "--operator-token-file", t.TempDir() + "/missing"},
+		{"mcp", "serve", "--unknown-flag"},
+		{"gateway"},
+		{"gateway", "unknown"},
+		{"gateway", "serve", "--addr", "0.0.0.0:8787"},
+	} {
+		if err := app.Run(context.Background(), args); err == nil {
+			t.Fatalf("%v was accepted", args)
+		}
+	}
+}
+
+func TestReadProtectedTokenFile(t *testing.T) {
+	if token, err := readProtectedTokenFile(""); err != nil || token != "" {
+		t.Fatalf("empty token path = %q, %v", token, err)
+	}
+	path := t.TempDir() + "/operator-token"
+	if err := os.WriteFile(path, []byte("\nfixture-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if token, err := readProtectedTokenFile(path); err != nil || token != "fixture-token" {
+		t.Fatalf("token file = %q, %v", token, err)
+	}
+	if err := os.WriteFile(path, []byte("\n	"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readProtectedTokenFile(path); err == nil {
+		t.Fatal("empty token file was accepted")
+	}
+	if _, err := readProtectedTokenFile(path + ".missing"); err == nil {
+		t.Fatal("missing token file was accepted")
 	}
 }
 

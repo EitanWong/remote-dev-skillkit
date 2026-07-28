@@ -1,278 +1,49 @@
-<div align="center">
-
 # Remote Dev Skillkit
 
-**Let AI agents safely help on real Mac, Windows, and Linux machines.**
+Remote Dev Skillkit is a small, session-native control plane for agent-assisted development on Mac, Windows, and Linux hosts. Agents create scoped work through MCP; hosts join with a short-lived session join code, enforce local policy, and return events and artifacts.
 
-[Install](#install) · [Use](#use) · [Docs](docs/README.md) · [Security](SECURITY.md) · [Contributing](CONTRIBUTING.md)
+## Current surface
 
-![Remote Dev Skillkit flow](docs/assets/remote-dev-skillkit-flow.svg)
+- `rdev doctor`
+- `rdev mcp tools`
+- `rdev mcp serve`
+- `rdev host serve --join-code CODE --gateway URL`
+- `rdev gateway serve --dev` for loopback development
+- Session MCP tools: `create`, `status`, `events`, `task`, `interrupt`, `artifacts`, and `close`
 
-</div>
-
-## What It Does
-
-Remote Dev Skillkit is an open-source safety layer for agent-native remote
-development.
-
-It lets Codex, Claude Code, Hermes, OpenClaw/OpenCode, and MCP agents connect
-to a real machine, run scoped repair work, and return audit-ready evidence
-without receiving unrestricted shell access.
-
-| Agent gets | Human keeps |
-|---|---|
-| Skills, MCP tools, file/desktop/task adapters | Visibility, authorization, revocation, audit |
-| Signed tasks with clear capabilities | Host-local policy and security boundaries |
-| Artifacts and evidence bundles | Control over what runs and when it stops |
-
-## Install
-
-Copy the text below and send it to your Agent:
-
-```text
-Please install Remote Dev Skillkit for your own agent runtime:
-https://github.com/EitanWong/remote-dev-skillkit
-```
-
-Need the full installer contract? See
-[Agent Bootstrap Prompt](docs/operations/AGENT_BOOTSTRAP_PROMPT.md).
-
-<details>
-<summary>Manual install commands</summary>
-
-```bash
-go install ./cmd/rdev
-rdev doctor
-rdev bootstrap agent-plan --repo-root .
-```
-
-```bash
-rdev skillkit export --source-root . --out dist/remote-dev-skillkit
-rdev skillkit verify --bundle dist/remote-dev-skillkit
-```
-
-```bash
-rdev skillkit plan-install \
-  --bundle dist/remote-dev-skillkit \
-  --out dist/skillkit-install \
-  --frameworks codex,claude-code,hermes,openclaw,opencode,generic-mcp-agent
-
-rdev skillkit verify-install-plan --plan dist/skillkit-install/install-plan.json
-```
-
-```bash
-rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills
-rdev skillkit install --bundle dist/remote-dev-skillkit --framework codex --target ~/.codex/skills --execute
-```
-
-</details>
-
-## Use
-
-### 1. Connect A Machine
-
-Ask your agent:
-
-```text
-Use Remote Dev Skillkit to connect this computer for a visible support session.
-```
-
-The agent should use `rdev.sessions.connect` or:
-
-```bash
-rdev support-session connect --start
-```
-
-Inspect provider eligibility before starting a tunnel, especially on mainland
-China networks:
-
-```bash
-rdev tunnel providers --region cn-mainland --json
-rdev tunnel probe --region cn-mainland --provider-policy /protected/path/providers.json --json
-```
-
-These inspection commands are read-only: they do not start a tunnel, accept
-terms, register an account, change configuration, or print credentials. A
-direct gateway or managed tunnel is reported as `degraded-single-entry` and is
-not ready to send by default. For an attended session, an operator may
-explicitly pass `--allow-degraded-direct-handoff`; the result remains degraded,
-is not ready to activate or execute, and still requires explicit stop/cleanup.
-
-For `--region global`, the current Agent-side order is: a configured stable
-operator gateway; Cloudflare Quick Tunnel (priority 10); the managed,
-checksum-pinned tunn3l v0.5.1 client (priority 20); and localhost.run with its
-reviewed official host key (priority 30). Pinggy (priority 40) and other SSH
-providers are considered only after an explicit operator allowlist and an exact
-reviewed host pin. The target-side human still receives exactly the newly
-generated `target_handoff_envelope.full_text`: one recommended public hostname
-embedded in one short readable PowerShell command, not a tunnel selection UI.
-
-If the target explicitly reports `trycloudflare.com` DNS failure or NXDOMAIN,
-do not retry Cloudflare as the default and do not manually start a tunnel. In a
-protected absolute work directory, create a protected provider-policy file with
-only:
-
-```json
-{"disabled_provider_ids":["cloudflare-quick"]}
-```
-
-Then keep
-`rdev support-session connect --start --work-dir <ABSOLUTE_PROTECTED_WORK_DIR> --region global --provider-policy <PROTECTED_POLICY_PATH>`
-in the foreground. Let managed tunn3l or localhost.run take over, and send only
-the new generated handoff. Do not build a multi-URL PowerShell loop or mutate
-DNS, hosts, proxy, firewall, or target bootstrap state. One successful sample
-does not become `cn-mainland` evidence.
-
-Anonymous/account-free tunnels are availability candidates, not guaranteed
-mainland-China services. `cn-mainland` remains fail-closed without fresh
-verified China Telecom, China Unicom, and China Mobile evidence. tunn3l's
-`Anonymous=true` means no account or registration is required; it is not a
-privacy or no-telemetry guarantee. In v0.5.1, the upstream client creates a
-`dv_` plus 24-hex device ID ([source](https://github.com/bdecrem/tunn3l/blob/2025a09e880bb6df4395ea8c65a6949a97265e44/cli/bore.js#L35-L42))
-and sends that ID, the Agent hostname, and Agent OS in relay registration
-metadata ([source](https://github.com/bdecrem/tunn3l/blob/2025a09e880bb6df4395ea8c65a6949a97265e44/cli/bore.js#L163-L169)).
-`rdev` gives it a fresh empty session `HOME`/`USERPROFILE`/XDG config and clears
-tunn3l credentials, subdomain/password overrides, and runtime preload variables,
-so it does not reuse the user's real `~/.tunn3l` and generates a new
-session-scoped ID. The relay still observes normal network and HTTP tunnel
-traffic. These statements are pinned to that v0.5.1 source commit and must not
-be generalized to other releases.
-
-#### Windows Temporary Layered Entry
-
-For Windows amd64 attended sessions, a trusted Agent can verify the signed
-`rdev-bootstrap.exe` release artifact and materialize a private layered handoff.
-The bootstrap fetches an HTTPS `layered-assets.json`, verifies its Ed25519
-release-root signature, selects only the Windows core `rdev-host` runtime, and
-uses the shared resumable content-addressed downloader. The controller pins the
-expected release version and `windows/amd64` in signed bootstrap metadata; the
-bootstrap requires the downloaded manifest to match that version before it
-requests the runtime. Ticket and gateway values remain in the separately
-signed join manifest.
-
-The first run downloads and SHA-256 verifies the core runtime. A warm run
-revalidates and reuses the digest cache without fetching the runtime again.
-The user-scoped cache is rooted below
-`%LOCALAPPDATA%\RemoteDevSkillkit\cache`; managed directories and files use
-private `0700`/`0600` permissions. On Windows, the primary visible launcher is
-`Start-ConnectionEntry.ps1`. The visible `Start-ConnectionEntry.cmd` broker
-tries that launcher under the current policy, retries with a process-scoped
-`-ExecutionPolicy Bypass`, and then uses its native CMD path. The retry changes
-no registry or machine policy. All paths share one private attempt directory;
-once its state reaches `core_started`, no launcher starts another core. Both
-launchers restrict handoff, attempt, and cache ACLs to the current user,
-SYSTEM, and Administrators; reject reparse or UNC paths; recheck bootstrap size
-and SHA-256; and keep the verified bootstrap in the foreground.
-
-Temporary mode runs the selected host in the foreground. It does not install a
-service, create a scheduled task or registry persistence, or start a background
-updater. If layered prerequisites were not published, Connection Entry retains
-the visible `Start-ConnectionEntry.ps1` archive-compatible fallback. Signature,
-digest, origin, path, or verification failures never execute the downloaded
-asset or automatically downgrade. The launcher prints the separately verified
-self-contained archive fallback as an explicit recovery command instead.
-
-The layered run report contains `from_cache`, `resumed`, `bytes`, and ordered
-stage durations for manifest fetch, signature verification, runtime resolution,
-and launch preparation. `bytes` is the verified runtime size, not measured
-network transfer volume. No performance target is claimed until real Windows
-cold and warm acceptance evidence is collected.
-
-For acceptance, save the first standalone JSON report emitted by each run as
-`cold-layered-run.json` and `warm-layered-run.json`; do not include subsequent
-foreground host output in either file. Package both reports with the other real
-Windows evidence:
-
-```bash
-rdev acceptance package-windows-temporary \
-  --plan windows-plan/windows-temporary-plan.json \
-  --out windows-evidence \
-  --transcript transcript.txt \
-  --release-verification rdev-verify.json \
-  --audit audit.jsonl \
-  --no-persistence-dir no-persistence \
-  --denial-probes-dir denial-probes \
-  --cold-layered-run cold-layered-run.json \
-  --warm-layered-run warm-layered-run.json
-```
-
-The packager requires a cache miss in the cold report, a cache hit in the warm
-report, the complete ordered verification stages, and nonnegative durations.
-Reports containing ticket, gateway, token, redaction-marker, or private-path
-content are rejected before copying. Synthetic fixture reports are
-non-production and do not satisfy the formal release gate or replace a real
-Windows run. Keep the complete session-bound Windows evidence package private;
-review any report separately before publication.
-
-### 2. Run Scoped Work
-
-The agent creates signed tasks for specific capabilities: shell, PowerShell,
-files, desktop, Codex, Claude Code, or adapter workflows.
-
-Examples:
-
-```bash
-rdev mcp tools
-rdev demo local
-```
-
-### 3. Review Evidence
-
-Tasks return artifacts, audit events, and evidence bundles before the agent
-claims the work is complete.
+## Quick start
 
 ```bash
 go test ./...
-rdev acceptance fresh-agent-support-session --out .rdev/acceptance/fresh-agent-support-session
+go run ./cmd/rdev doctor
+go run ./cmd/rdev mcp tools
 ```
 
-## Built For
-
-| Scenario | Why it fits |
-|---|---|
-| Remote debugging | Agent can inspect, run tests, and collect evidence |
-| Environment repair | Host policy controls what commands can run |
-| Support sessions | Target user sees and can revoke the session |
-| Agent framework setup | Same Skillkit works across major agent runtimes |
-| Adapter development | `pkg/adapterkit` provides conformance helpers |
-
-## Safety
-
-Remote Dev Skillkit is for explicit, consent-based remote development.
-
-It rejects hidden persistence, UAC or sudo bypass, disabled local security
-controls, public inbound listeners on target hosts by default, and unrestricted
-shell access without policy enforcement.
-
-## Docs
-
-| Topic | Link |
-|---|---|
-| Documentation index | [docs/README.md](docs/README.md) |
-| Install details | [Skillkit Install](docs/operations/SKILLKIT_INSTALL.md) |
-| MCP tools | [MCP Stdio](docs/operations/MCP_STDIO.md) |
-| Bootstrap flow | [Bootstrap](docs/operations/BOOTSTRAP.md) |
-| Architecture | [Architecture](docs/architecture/ARCHITECTURE.md) |
-| Threat model | [Threat Model](docs/security/THREAT_MODEL.md) |
-
-## Languages
-
-[English](README.md) ·
-[简体中文](docs/i18n/README.zh-CN.md) ·
-[Español](docs/i18n/README.es.md) ·
-[Français](docs/i18n/README.fr.md) ·
-[Deutsch](docs/i18n/README.de.md) ·
-[日本語](docs/i18n/README.ja.md) ·
-[한국어](docs/i18n/README.ko.md) ·
-[Português](docs/i18n/README.pt-BR.md) ·
-[हिन्दी](docs/i18n/README.hi.md) ·
-[العربية](docs/i18n/README.ar.md) ·
-[Русский](docs/i18n/README.ru.md)
-
-## Develop
+For local development, start a loopback gateway:
 
 ```bash
-scripts/check.sh
+go run ./cmd/rdev gateway serve --dev
 ```
 
-License: [Apache-2.0](LICENSE)
+A host joins a current Control Plane endpoint with values created through MCP:
+
+```bash
+rdev host serve --join-code CODE --gateway https://gateway.example --once
+```
+
+The built-in gateway command listens on loopback only. Remote deployments require an operator-managed HTTPS endpoint; keep bearer material in a protected local file when starting remote MCP proxy mode.
+
+## Safety boundaries
+
+- Hosts do not expose inbound public listeners.
+- Every task is policy-bound, scoped, auditable, and interruptible.
+- Temporary work remains foreground and non-persistent.
+- The toolkit does not bypass local security controls or provide unrestricted shell access.
+
+## Verification
+
+```bash
+./scripts/check.sh
+```
+
+See [documentation](docs/README.md), [security boundaries](docs/security/BOUNDARIES.md), and [contributing](CONTRIBUTING.md).

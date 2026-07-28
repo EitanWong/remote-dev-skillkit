@@ -180,12 +180,6 @@ func (s Server) effectiveGatewayTarget(args map[string]any) gatewayTarget {
 	return gatewayTarget{URL: s.RemoteGateway, useOperatorToken: true}
 }
 
-// effectiveGatewayURL preserves the legacy URL-only helper for callers that do
-// not need to decide whether a bearer token may be attached.
-func (s Server) effectiveGatewayURL(args map[string]any) string {
-	return s.effectiveGatewayTarget(args).URL
-}
-
 func (s Server) remoteGatewayAuthorization(baseURL string, useOperatorToken bool) string {
 	if !useOperatorToken {
 		return ""

@@ -499,32 +499,6 @@ func TestHTTPSessionEventsPersistsRenewedLeaseForGatewayRestart(t *testing.T) {
 	}
 }
 
-func TestHTTPOldHostJobExperimentalRoutesAreNotMounted(t *testing.T) {
-	handler := NewServer(gateway.NewMemoryGateway()).Handler()
-	for _, tc := range []struct {
-		method string
-		path   string
-		body   string
-	}{
-		{method: http.MethodGet, path: "/v1/hosts"},
-		{method: http.MethodGet, path: "/v1/hosts/hst_old"},
-		{method: http.MethodPost, path: "/v1/hosts/register", body: `{"ticket_code":"OLD-1234","name":"old","os":"windows","arch":"amd64"}`},
-		{method: http.MethodPost, path: "/v1/hosts/hst_old/authorize", body: `{"capabilities":["shell"]}`},
-		{method: http.MethodPost, path: "/v1/hosts/hst_old/revoke", body: `{"reason":"old contract"}`},
-		{method: http.MethodPost, path: "/v1/hosts/hst_old/heartbeat", body: `{}`},
-		{method: http.MethodGet, path: "/v1/hosts/hst_old/jobs/next"},
-		{method: http.MethodPost, path: "/v1/jobs/job_old/authorize", body: `{"authorization_id":"screen.screenshot","decision":"authorized"}`},
-	} {
-		req := httptest.NewRequest(tc.method, tc.path, bytes.NewBufferString(tc.body))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusNotFound {
-			t.Fatalf("%s %s status = %d body=%s", tc.method, tc.path, rec.Code, rec.Body.String())
-		}
-	}
-}
-
 func TestHTTPAgentEventReplayAndArtifactListing(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	handler := NewServer(gw).Handler()

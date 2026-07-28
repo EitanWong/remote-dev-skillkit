@@ -3,6 +3,8 @@ package gateway
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -53,6 +55,87 @@ func TestMemoryGatewaySnapshotRoundTripPreservesSessionState(t *testing.T) {
 	}
 	if got.ID != session.ID || len(got.Endpoints) != 1 || got.Endpoints[0].ID != endpoint.ID {
 		t.Fatalf("restored session = %#v", got)
+	}
+}
+
+func TestFileStateStorePersistsCurrentSessionState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "nested", "gateway-state.json")
+	store, err := NewFileStateStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if description := store.Describe(); description != FileStateStoreProvider+":"+path {
+		t.Fatalf("state store description = %#v", description)
+	}
+	if _, ok, err := store.LoadInto(NewMemoryGateway()); err != nil || ok {
+		t.Fatalf("missing state load = ok:%t err:%v", ok, err)
+	}
+	if _, err := store.SaveFrom(nil); err == nil {
+		t.Fatal("nil gateway save was accepted")
+	}
+	if _, _, err := store.LoadInto(nil); err == nil {
+		t.Fatal("nil gateway load was accepted")
+	}
+
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock := func() time.Time { return time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC) }
+	source := NewMemoryGatewayWithSigningKey(clock, "state-store-gateway", publicKey, privateKey)
+	session, err := source.CreateSession(controlplane.SessionSpec{Reason: "persist current session"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved, err := store.SaveFrom(source)
+	if err != nil || saved.SchemaVersion != SnapshotSchemaVersion {
+		t.Fatalf("SaveFrom() snapshot=%#v err=%v", saved, err)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("state permissions = %#v err=%v", info, err)
+	}
+	restored := NewMemoryGatewayWithSigningKey(clock, "state-store-gateway", publicKey, privateKey)
+	loaded, ok, err := store.LoadInto(restored)
+	if err != nil || !ok || loaded.SchemaVersion != SnapshotSchemaVersion {
+		t.Fatalf("LoadInto() snapshot=%#v ok=%t err=%v", loaded, ok, err)
+	}
+	if got, err := restored.Session(session.ID); err != nil || got.ID != session.ID {
+		t.Fatalf("restored session = %#v err=%v", got, err)
+	}
+}
+
+func TestGatewaySigningKeyValidationGuards(t *testing.T) {
+	if snapshot := NewMemoryGatewayWithClock(nil).Snapshot(); snapshot.GeneratedAt.IsZero() {
+		t.Fatal("nil clock gateway did not produce a snapshot timestamp")
+	}
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gateway := NewMemoryGatewayWithSigningKey(nil, "", publicKey, privateKey); gateway.signingID != "gateway-dev" {
+		t.Fatalf("default signing ID = %q", gateway.signingID)
+	}
+	otherPublicKey, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name       string
+		publicKey  ed25519.PublicKey
+		privateKey ed25519.PrivateKey
+	}{
+		{name: "short public key", publicKey: publicKey[:1], privateKey: privateKey},
+		{name: "short private key", publicKey: publicKey, privateKey: privateKey[:1]},
+		{name: "mismatched key pair", publicKey: otherPublicKey, privateKey: privateKey},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("invalid signing key was accepted")
+				}
+			}()
+			_ = NewMemoryGatewayWithSigningKey(time.Now, "gateway", test.publicKey, test.privateKey)
+		})
 	}
 }
 

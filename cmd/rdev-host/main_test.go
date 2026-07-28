@@ -29,7 +29,7 @@ func TestRdevHostEntrypointMapsPermanentJoinFailureExitCode(t *testing.T) {
 	err := hostcmd.NewJoinSessionResponseError(
 		404,
 		"404 Not Found",
-		[]byte(`{"error":{"schema_version":"rdev.error.v1","code":"invalid_join_code","message":"join code is invalid","recoverable":false,"retry_after_ms":0,"user_summary":"The support-session entry is invalid or no longer active.","agent_next_action":"create a fresh support-session entry"}}`),
+		[]byte(`{"error":{"schema_version":"rdev.error.v1","code":"invalid_join_code","message":"join code is invalid","recoverable":false,"retry_after_ms":0,"user_summary":"The session join code is invalid or no longer active.","agent_next_action":"create a fresh session and use its generated join code"}}`),
 		nil,
 	)
 	if got := commandExitCode(err); got != hostcmd.PermanentJoinFailureExitCode {

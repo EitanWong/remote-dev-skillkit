@@ -745,7 +745,7 @@ func assertAdaptiveConfigurationContract(t *testing.T, contract AdaptiveConfigur
 	}
 	for _, want := range []string{
 		"gateway URL",
-		"ticket code",
+		"session join code",
 		"root key",
 		"release URL",
 		"checksum",

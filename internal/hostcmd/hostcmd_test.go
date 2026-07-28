@@ -24,13 +24,26 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcap"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostidentity"
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
-	"github.com/EitanWong/remote-dev-skillkit/internal/model"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 	return f(req)
+}
+
+func signedTrustResponseForTest(t *testing.T) []byte {
+	t.Helper()
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := gateway.NewMemoryGatewayWithSigningKey(time.Now, "hostcmd-test", publicKey, privateKey)
+	content, err := json.Marshal(map[string]any{"trust_bundle": gw.SignedTrustBundle()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return content
 }
 
 func TestHostServeSessionCompletesTask(t *testing.T) {
@@ -145,16 +158,6 @@ func TestHostServeUsesSessionJoinCodeFlag(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), `"status": "session-joined"`) {
 		t.Fatalf("expected session join output, got %s", stdout.String())
-	}
-}
-
-func TestHostServeRejectsLegacyTicketCodeFlag(t *testing.T) {
-	err := New(io.Discard, io.Discard).Run(context.Background(), []string{
-		"serve",
-		"--ticket-code", "legacy-code",
-	})
-	if err == nil || !strings.Contains(err.Error(), "flag provided but not defined") {
-		t.Fatalf("legacy ticket-code flag error = %v", err)
 	}
 }
 
@@ -347,7 +350,7 @@ func TestJoinSessionRetriesTransientEOFWithIdempotencyKey(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(body), `"join_code":"TICKET-1"`) ||
+		if !strings.Contains(string(body), `"join_code":"JOIN-1"`) ||
 			!strings.Contains(string(body), `"role":"target"`) {
 			t.Fatalf("unexpected session join body: %s", string(body))
 		}
@@ -357,13 +360,13 @@ func TestJoinSessionRetriesTransientEOFWithIdempotencyKey(t *testing.T) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Header:     make(http.Header),
-			Body:       io.NopCloser(strings.NewReader(`{"session":{"schema_version":"rdev.session.v1","id":"ses_1","join_code":"TICKET-1","status":"waiting","created_at":"2026-07-08T00:00:00Z","updated_at":"2026-07-08T00:00:00Z"},"endpoint":{"schema_version":"rdev.endpoint.v1","id":"ep_1","session_id":"ses_1","role":"target","name":"win-temp","platform":"windows/amd64","identity_fingerprint":"fp_1","state":"online","transport":"long-poll","capabilities":["shell.user"],"lease_expires_at":"2026-07-08T00:01:00Z","last_seen_at":"2026-07-08T00:00:00Z","joined_at":"2026-07-08T00:00:00Z"},"lease":{"schema_version":"rdev.lease.v1","session_id":"ses_1","endpoint_id":"ep_1","generation":1,"secret":"lease_1","issued_at":"2026-07-08T00:00:00Z","expires_at":"2026-07-08T00:01:00Z","ttl_ms":60000,"renew_after_ms":20000,"retry_after_ms":1000},"events":[]}`)),
+			Body:       io.NopCloser(strings.NewReader(`{"session":{"schema_version":"rdev.session.v1","id":"ses_1","join_code":"JOIN-1","status":"waiting","created_at":"2026-07-08T00:00:00Z","updated_at":"2026-07-08T00:00:00Z"},"endpoint":{"schema_version":"rdev.endpoint.v1","id":"ep_1","session_id":"ses_1","role":"target","name":"win-temp","platform":"windows/amd64","identity_fingerprint":"fp_1","state":"online","transport":"long-poll","capabilities":["shell.user"],"lease_expires_at":"2026-07-08T00:01:00Z","last_seen_at":"2026-07-08T00:00:00Z","joined_at":"2026-07-08T00:00:00Z"},"lease":{"schema_version":"rdev.lease.v1","session_id":"ses_1","endpoint_id":"ep_1","generation":1,"secret":"lease_1","issued_at":"2026-07-08T00:00:00Z","expires_at":"2026-07-08T00:01:00Z","ttl_ms":60000,"renew_after_ms":20000,"retry_after_ms":1000},"events":[]}`)),
 			Request:    req,
 		}, nil
 	})
 	client := &http.Client{Transport: retryingRoundTripper{Base: base, MaxRetries: 2}}
 
-	session, endpoint, lease, _, err := joinSessionByCode(context.Background(), client, "https://gateway.example.test", "TICKET-1", controlplane.EndpointSpec{
+	session, endpoint, lease, _, err := joinSessionByCode(context.Background(), client, "https://gateway.example.test", "JOIN-1", controlplane.EndpointSpec{
 		Role:                controlplane.EndpointRoleTarget,
 		Name:                "win-temp",
 		Platform:            "windows/amd64",
@@ -383,7 +386,7 @@ func TestJoinSessionRetriesTransientEOFWithIdempotencyKey(t *testing.T) {
 }
 
 func TestJoinSessionResponseErrorExitCodeRequiresCompletePermanentProtocolEnvelope(t *testing.T) {
-	completePermanent := `{"error":{"schema_version":"rdev.error.v1","code":"invalid_join_code","message":"join code is invalid","recoverable":false,"retry_after_ms":0,"user_summary":"The support-session entry is invalid or no longer active.","agent_next_action":"create a fresh support-session entry"}}`
+	completePermanent := `{"error":{"schema_version":"rdev.error.v1","code":"invalid_join_code","message":"join code is invalid","recoverable":false,"retry_after_ms":0,"user_summary":"The session join code is invalid or no longer active.","agent_next_action":"create a fresh session and use its generated join code"}}`
 	completeRecoverable := `{"error":{"schema_version":"rdev.error.v1","code":"gateway_unavailable","message":"gateway is unavailable","recoverable":true,"retry_after_ms":500,"user_summary":"The gateway is temporarily unavailable.","agent_next_action":"retry after the requested delay"}}`
 
 	tests := []struct {
@@ -525,7 +528,7 @@ func TestJoinSessionByCodeReturnsPermanentFailureForProtocolRejection(t *testing
 			Status:     "404 Not Found",
 			Header:     make(http.Header),
 			Body: io.NopCloser(strings.NewReader(
-				`{"error":{"schema_version":"rdev.error.v1","code":"invalid_join_code","message":"join code is invalid","recoverable":false,"retry_after_ms":0,"user_summary":"The support-session entry is invalid or no longer active.","agent_next_action":"create a fresh support-session entry"}}`,
+				`{"error":{"schema_version":"rdev.error.v1","code":"invalid_join_code","message":"join code is invalid","recoverable":false,"retry_after_ms":0,"user_summary":"The session join code is invalid or no longer active.","agent_next_action":"create a fresh session and use its generated join code"}}`,
 			)),
 			Request: req,
 		}, nil
@@ -607,15 +610,7 @@ func TestCompleteSessionTaskRetriesTransientEOFWithIdempotencyKey(t *testing.T) 
 }
 
 func TestRunSessionTasksSelectsHealthyRouteAfterConcurrentInitialProbe(t *testing.T) {
-	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	trust := model.NewTrustBundle("test", publicKey)
-	trustBody, err := json.Marshal(map[string]any{"trust": trust})
-	if err != nil {
-		t.Fatal(err)
-	}
+	trustBody := signedTrustResponseForTest(t)
 	var deadEvents, healthyEvents int
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Host == "dead.example.test" {
@@ -623,7 +618,7 @@ func TestRunSessionTasksSelectsHealthyRouteAfterConcurrentInitialProbe(t *testin
 				deadEvents++
 				return &http.Response{StatusCode: http.StatusNotFound, Status: "404 Not Found", Header: make(http.Header), Body: io.NopCloser(strings.NewReader("No tunnel found")), Request: req}, nil
 			}
-			if req.URL.Path == "/v1/trust" {
+			if req.URL.Path == "/v1/trust-bundle" {
 				return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(trustBody)), Request: req}, nil
 			}
 			return &http.Response{StatusCode: http.StatusNotFound, Status: "404 Not Found", Header: make(http.Header), Body: io.NopCloser(strings.NewReader("not found")), Request: req}, nil
@@ -632,9 +627,6 @@ func TestRunSessionTasksSelectsHealthyRouteAfterConcurrentInitialProbe(t *testin
 			return nil, fmt.Errorf("unexpected candidate host %q", req.URL.Host)
 		}
 		if req.URL.Path == "/v1/trust-bundle" {
-			return &http.Response{StatusCode: http.StatusNotFound, Status: "404 Not Found", Header: make(http.Header), Body: io.NopCloser(strings.NewReader("legacy gateway")), Request: req}, nil
-		}
-		if req.URL.Path == "/v1/trust" {
 			return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(trustBody)), Request: req}, nil
 		}
 		if strings.HasSuffix(req.URL.Path, "/events") {
@@ -661,14 +653,7 @@ func TestRunSessionTasksSelectsHealthyRouteAfterConcurrentInitialProbe(t *testin
 }
 
 func TestRunSessionTasksSwitchesRouteWithoutReregistering(t *testing.T) {
-	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	trustBody, err := json.Marshal(map[string]any{"trust": model.NewTrustBundle("route-test", publicKey)})
-	if err != nil {
-		t.Fatal(err)
-	}
+	trustBody := signedTrustResponseForTest(t)
 	registrationCalls := 0
 	primaryEventCalls := 0
 	secondaryEventCalls := 0
@@ -687,9 +672,6 @@ func TestRunSessionTasksSwitchesRouteWithoutReregistering(t *testing.T) {
 			return response(http.StatusOK, `{"session":{"schema_version":"rdev.session.v1","id":"ses_route","join_code":"TEST-CODE","status":"active"},"endpoint":{"schema_version":"rdev.endpoint.v1","id":"ep_route","session_id":"ses_route","role":"target","state":"online"},"lease":{"schema_version":"rdev.lease.v1","session_id":"ses_route","endpoint_id":"ep_route","generation":1,"secret":"lease_one"},"events":[]}`)
 		}
 		if req.URL.Path == "/v1/trust-bundle" {
-			return response(http.StatusNotFound, `{"error":"legacy fixture"}`)
-		}
-		if req.URL.Path == "/v1/trust" {
 			return response(http.StatusOK, string(trustBody))
 		}
 		if strings.HasSuffix(req.URL.Path, "/events") {
@@ -772,14 +754,7 @@ func TestRunSessionTasksSwitchesRouteWithoutReregistering(t *testing.T) {
 }
 
 func TestRunSessionTasksDoesNotSkipEventsBeyondTransportLimit(t *testing.T) {
-	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	trustBody, err := json.Marshal(map[string]any{"trust": model.NewTrustBundle("cursor-test", publicKey)})
-	if err != nil {
-		t.Fatal(err)
-	}
+	trustBody := signedTrustResponseForTest(t)
 	eventCalls := 0
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		response := func(status int, payload any) (*http.Response, error) {
@@ -790,9 +765,6 @@ func TestRunSessionTasksDoesNotSkipEventsBeyondTransportLimit(t *testing.T) {
 			return &http.Response{StatusCode: status, Status: http.StatusText(status), Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(body)), Request: req}, nil
 		}
 		if req.URL.Path == "/v1/trust-bundle" {
-			return response(http.StatusNotFound, map[string]any{"error": "legacy"})
-		}
-		if req.URL.Path == "/v1/trust" {
 			return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(trustBody)), Request: req}, nil
 		}
 		if strings.HasSuffix(req.URL.Path, "/events") {
@@ -858,14 +830,7 @@ func TestRunSessionTasksDoesNotSkipEventsBeyondTransportLimit(t *testing.T) {
 }
 
 func TestRunSessionTasksRequeuesInitialEventAcrossTaskFetchFailover(t *testing.T) {
-	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	trustBody, err := json.Marshal(map[string]any{"trust": model.NewTrustBundle("initial-event-test", publicKey)})
-	if err != nil {
-		t.Fatal(err)
-	}
+	trustBody := signedTrustResponseForTest(t)
 	var taskFetchHosts []string
 	resultCalls := 0
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
@@ -873,9 +838,6 @@ func TestRunSessionTasksRequeuesInitialEventAcrossTaskFetchFailover(t *testing.T
 			return &http.Response{StatusCode: status, Status: http.StatusText(status), Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
 		}
 		if req.URL.Path == "/v1/trust-bundle" {
-			return response(http.StatusNotFound, `{"error":"legacy"}`)
-		}
-		if req.URL.Path == "/v1/trust" {
 			return response(http.StatusOK, string(trustBody))
 		}
 		if req.Method == http.MethodGet && req.URL.Path == "/v1/sessions/ses_initial" {
@@ -931,22 +893,13 @@ func TestRunSessionTasksRequeuesInitialEventAcrossTaskFetchFailover(t *testing.T
 }
 
 func TestRunSessionTasksRejectsNetworkEventsWithoutRenewedLease(t *testing.T) {
-	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	trustBody, err := json.Marshal(map[string]any{"trust": model.NewTrustBundle("missing-lease-test", publicKey)})
-	if err != nil {
-		t.Fatal(err)
-	}
+	trustBody := signedTrustResponseForTest(t)
 	taskFetches := 0
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		body := ""
 		status := http.StatusOK
 		switch {
 		case req.URL.Path == "/v1/trust-bundle":
-			status, body = http.StatusNotFound, `{"error":"legacy"}`
-		case req.URL.Path == "/v1/trust":
 			body = string(trustBody)
 		case strings.HasSuffix(req.URL.Path, "/events"):
 			body = `{"events":[{"seq":1,"type":"task","task_id":"must_not_run","payload":{"action":"offer"}}],"last_seq":1}`
@@ -1065,29 +1018,15 @@ func TestValidateLeaseBindingRejectsCrossSessionAndStaleGeneration(t *testing.T)
 	}
 }
 
-func TestFetchHostTrustDoesNotDowngradeInvalidSignedBundle(t *testing.T) {
-	publicKey, _, err := ed25519.GenerateKey(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacyBody, err := json.Marshal(map[string]any{"trust": model.NewTrustBundle("legacy", publicKey)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacyCalls := 0
+func TestFetchHostTrustRejectsInvalidSignedBundle(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		body := `{"trust_bundle":{}}`
-		if req.URL.Path == "/v1/trust" {
-			legacyCalls++
-			body = string(legacyBody)
+		if req.URL.Path != "/v1/trust-bundle" {
+			t.Fatalf("unexpected trust endpoint %q", req.URL.Path)
 		}
-		return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header), Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
+		return &http.Response{StatusCode: http.StatusOK, Status: "200 OK", Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"trust_bundle":{}}`)), Request: req}, nil
 	})}
-	if _, err := fetchHostTrust(context.Background(), client, "https://gateway.example.test", "", ""); err == nil {
-		t.Fatal("invalid signed trust response downgraded to legacy trust")
-	}
-	if legacyCalls != 0 {
-		t.Fatalf("legacy trust endpoint called %d times after signed verification failure", legacyCalls)
+	if err := fetchHostTrust(context.Background(), client, "https://gateway.example.test", "", ""); err == nil {
+		t.Fatal("invalid signed trust response was accepted")
 	}
 }
 

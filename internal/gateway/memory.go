@@ -26,17 +26,12 @@ var (
 type MemoryGateway struct {
 	mu           sync.Mutex
 	now          func() time.Time
-	auditSink    AuditSink
 	sessionStore *controlplane.MemoryStore
 	audit        []model.AuditEvent
 	signingID    string
 	publicKey    ed25519.PublicKey
 	privateKey   ed25519.PrivateKey
 	trustBundle  model.SignedTrustBundle
-}
-
-type AuditSink interface {
-	Append(model.AuditEvent) error
 }
 
 func NewMemoryGateway() *MemoryGateway {
@@ -106,19 +101,6 @@ func validateSigningKey(label string, publicKey ed25519.PublicKey, privateKey ed
 	}
 }
 
-func (g *MemoryGateway) WithAuditSink(sink AuditSink) *MemoryGateway {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	g.auditSink = sink
-	return g
-}
-
-func (g *MemoryGateway) TrustBundle() model.TrustBundle {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return model.NewTrustBundle(g.signingID, g.publicKey)
-}
-
 func (g *MemoryGateway) SignedTrustBundle() model.SignedTrustBundle {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -162,7 +144,4 @@ func (g *MemoryGateway) appendAuditLocked(actor, action, targetID, message strin
 		At:       g.now().UTC(),
 	}
 	g.audit = append(g.audit, event)
-	if g.auditSink != nil {
-		_ = g.auditSink.Append(event)
-	}
 }

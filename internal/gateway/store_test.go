@@ -46,34 +46,4 @@ func TestStateStoreConfigurationGuards(t *testing.T) {
 	if _, err := NewFileStateStore(""); err == nil {
 		t.Fatal("empty file path was accepted")
 	}
-	if _, err := NewSerializedStateStore(nil); err == nil {
-		t.Fatal("nil serialized store was accepted")
-	}
-	if _, err := NewPostgresStateStore("postgres://operator:secret@db.example/rdev"); err == nil {
-		t.Fatal("inline postgres password was accepted")
-	}
-	if _, err := NewRedisStreamStateStore("redis://:secret@cache.example:6379"); err == nil {
-		t.Fatal("inline redis password was accepted")
-	}
-	if _, err := NewS3CompatibleStateStore("https://bucket.example/rdev"); err == nil {
-		t.Fatal("non-s3 location was accepted")
-	}
-}
-
-func TestSerializedStateStoreDescribe(t *testing.T) {
-	var unconfigured SerializedStateStore
-	if unconfigured.Describe() != "serialized:unconfigured" {
-		t.Fatalf("description = %q", unconfigured.Describe())
-	}
-	store, err := NewFileStateStore(t.TempDir() + "/gateway.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	serialized, err := NewSerializedStateStore(store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if serialized.Describe() == "" {
-		t.Fatal("serialized description is empty")
-	}
 }

@@ -733,7 +733,7 @@ func TestTaskRoutingUsesDefaultTargetAndCapabilityMatch(t *testing.T) {
 	if !ok || len(missing) != 1 || missing[0] != "desktop" {
 		t.Fatalf("missing capability details = %#v", protocolErr.Details)
 	}
-	if !strings.Contains(protocolErr.AgentNextAction, "fresh support-session") {
+	if !strings.Contains(protocolErr.AgentNextAction, "fresh session") {
 		t.Fatalf("capability miss next action = %q", protocolErr.AgentNextAction)
 	}
 }

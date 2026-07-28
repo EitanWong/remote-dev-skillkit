@@ -29,8 +29,6 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostrunner"
 	"github.com/EitanWong/remote-dev-skillkit/internal/hosttrust"
 	"github.com/EitanWong/remote-dev-skillkit/internal/model"
-	"github.com/EitanWong/remote-dev-skillkit/internal/release"
-	"github.com/EitanWong/remote-dev-skillkit/internal/trustref"
 )
 
 type App struct {
@@ -79,30 +77,27 @@ for operator CLI, MCP, gateway, acceptance, and managed-service authoring.`))
 }
 
 type serveOptions struct {
-	Mode                     string
-	GatewayURL               string
-	JoinCode                 string
-	Name                     string
-	Once                     bool
-	Transport                string
-	PollInterval             time.Duration
-	LongPollTimeout          time.Duration
-	MaxTasks                 int
-	TrustPin                 string
-	GatewayCACertPath        string
-	GatewayClientCertPath    string
-	GatewayClientKeyPath     string
-	TrustStorePath           string
-	IdentityStorePath        string
-	IdentityKeyID            string
-	WorkspaceLockStore       string
-	CaptureRuntimeFixture    bool
-	KeepAwake                bool
-	ReleaseBundlePath        string
-	ReleaseRootPublicKey     string
-	ReleaseRequiredArtifacts []string
-	CapabilityCeiling        []string
-	CapabilityCeilingSet     bool
+	Mode                  string
+	GatewayURL            string
+	JoinCode              string
+	Name                  string
+	Once                  bool
+	Transport             string
+	PollInterval          time.Duration
+	LongPollTimeout       time.Duration
+	MaxTasks              int
+	TrustPin              string
+	GatewayCACertPath     string
+	GatewayClientCertPath string
+	GatewayClientKeyPath  string
+	TrustStorePath        string
+	IdentityStorePath     string
+	IdentityKeyID         string
+	WorkspaceLockStore    string
+	CaptureRuntimeFixture bool
+	KeepAwake             bool
+	CapabilityCeiling     []string
+	CapabilityCeilingSet  bool
 }
 
 func (a App) serve(ctx context.Context, args []string) error {
@@ -127,35 +122,29 @@ func (a App) serve(ctx context.Context, args []string) error {
 	workspaceLockStore := fs.String("workspace-lock-store", "", "optional local workspace lock store directory")
 	captureRuntimeFixture := fs.Bool("capture-runtime-fixture", false, "append an adapter runtime fixture artifact")
 	keepAwake := fs.Bool("keep-awake", true, "best-effort prevention of idle sleep/display sleep while host serve is running")
-	releaseBundle := fs.String("release-bundle", "", "optional signed release bundle index to verify before host registration")
-	releaseRootPublicKey := fs.String("release-root-public-key", "", "required release root public key for --release-bundle")
-	releaseRequiredArtifacts := fs.String("release-require-artifacts", "", "comma-separated artifact ids required in --release-bundle")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	return a.runServe(ctx, serveOptions{
-		Mode:                     *mode,
-		GatewayURL:               *gateway,
-		JoinCode:                 *joinCode,
-		Name:                     *name,
-		Once:                     *once,
-		Transport:                *transport,
-		PollInterval:             *pollInterval,
-		LongPollTimeout:          *longPollTimeout,
-		MaxTasks:                 *maxTasks,
-		TrustPin:                 *trustPin,
-		GatewayCACertPath:        *gatewayCA,
-		GatewayClientCertPath:    *gatewayClientCert,
-		GatewayClientKeyPath:     *gatewayClientKey,
-		TrustStorePath:           *trustStore,
-		IdentityStorePath:        *identityStore,
-		IdentityKeyID:            *identityKeyID,
-		WorkspaceLockStore:       *workspaceLockStore,
-		CaptureRuntimeFixture:    *captureRuntimeFixture,
-		KeepAwake:                *keepAwake,
-		ReleaseBundlePath:        *releaseBundle,
-		ReleaseRootPublicKey:     *releaseRootPublicKey,
-		ReleaseRequiredArtifacts: splitCommaList(*releaseRequiredArtifacts),
+		Mode:                  *mode,
+		GatewayURL:            *gateway,
+		JoinCode:              *joinCode,
+		Name:                  *name,
+		Once:                  *once,
+		Transport:             *transport,
+		PollInterval:          *pollInterval,
+		LongPollTimeout:       *longPollTimeout,
+		MaxTasks:              *maxTasks,
+		TrustPin:              *trustPin,
+		GatewayCACertPath:     *gatewayCA,
+		GatewayClientCertPath: *gatewayClientCert,
+		GatewayClientKeyPath:  *gatewayClientKey,
+		TrustStorePath:        *trustStore,
+		IdentityStorePath:     *identityStore,
+		IdentityKeyID:         *identityKeyID,
+		WorkspaceLockStore:    *workspaceLockStore,
+		CaptureRuntimeFixture: *captureRuntimeFixture,
+		KeepAwake:             *keepAwake,
 	})
 }
 
@@ -174,10 +163,6 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 		return fmt.Errorf("unsupported host transport %q", opts.Transport)
 	}
 	gatewayClient, err := gatewayHTTPClient(opts)
-	if err != nil {
-		return err
-	}
-	releaseGate, err := verifyReleaseGate(opts)
 	if err != nil {
 		return err
 	}
@@ -252,9 +237,6 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 		"note":                  "joined Control Plane v1 session; task transport starts when --once=false",
 	}
 
-	if releaseGate != nil {
-		payload["release_gate"] = releaseGate
-	}
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
 	if opts.Once {
@@ -279,45 +261,6 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 	payload["processed_tasks"] = processed
 	payload["status"] = "polling-complete"
 	return enc.Encode(payload)
-}
-
-type releaseGateResult struct {
-	OK                bool      `json:"ok"`
-	Schema            string    `json:"schema"`
-	Bundle            string    `json:"bundle"`
-	RootKeyID         string    `json:"root_key_id"`
-	RequiredArtifacts []string  `json:"required_artifacts,omitempty"`
-	VerifiedAt        time.Time `json:"verified_at"`
-	ArtifactCount     int       `json:"artifact_count"`
-}
-
-func verifyReleaseGate(opts serveOptions) (*releaseGateResult, error) {
-	if strings.TrimSpace(opts.ReleaseBundlePath) == "" {
-		if strings.TrimSpace(opts.ReleaseRootPublicKey) != "" || len(opts.ReleaseRequiredArtifacts) > 0 {
-			return nil, fmt.Errorf("release bundle is required when release verification options are provided")
-		}
-		return nil, nil
-	}
-	root, err := parseRootPublicKey(opts.ReleaseRootPublicKey)
-	if err != nil {
-		return nil, err
-	}
-	verification, err := release.VerifyBundle(opts.ReleaseBundlePath, root, opts.ReleaseRequiredArtifacts)
-	if err != nil {
-		return nil, err
-	}
-	if !verification.OK() {
-		return nil, fmt.Errorf("host release bundle verification failed")
-	}
-	return &releaseGateResult{
-		OK:                true,
-		Schema:            verification.SchemaVersion,
-		Bundle:            verification.BundlePath,
-		RootKeyID:         verification.RootKeyID,
-		RequiredArtifacts: append([]string(nil), opts.ReleaseRequiredArtifacts...),
-		VerifiedAt:        verification.GeneratedAt,
-		ArtifactCount:     len(verification.Artifacts),
-	}, nil
 }
 
 func writeSessionControlCard(out io.Writer, entry map[string]any) {
@@ -576,7 +519,7 @@ func (a App) runSessionTasksWithEvents(ctx context.Context, opts serveOptions, c
 		opts.GatewayURL = snapshot.Candidate.URL
 		opts.Transport = snapshot.Candidate.Transport
 		trustCtx, cancelTrust := routeRequestContext(ctx, snapshot, 2*time.Second)
-		_, trustErr := fetchHostTrust(trustCtx, client, opts.GatewayURL, opts.TrustPin, opts.TrustStorePath)
+		trustErr := fetchHostTrust(trustCtx, client, opts.GatewayURL, opts.TrustPin, opts.TrustStorePath)
 		cancelTrust()
 		if trustErr == nil {
 			if routes.reportSuccess(snapshot) {
@@ -1230,7 +1173,7 @@ func (s *gatewayCandidateSet) ensurePool(client *http.Client, trustPin string) *
 	}
 	probe := func(ctx context.Context, route routeCandidate) routeProbeResult {
 		started := time.Now()
-		_, err := fetchHostTrust(ctx, client, route.URL, trustPin, "")
+		err := fetchHostTrust(ctx, client, route.URL, trustPin, "")
 		return routeProbeResult{Healthy: err == nil, Latency: time.Since(started), Err: err}
 	}
 	s.pool = newRoutePool(s.routes, routePoolConfig{Probe: probe, ReprobeInterval: 5 * time.Second, ShareGatewayHealth: true})
@@ -1332,66 +1275,26 @@ func (s *gatewayCandidateSet) monitor(ctx context.Context, interval time.Duratio
 	return s.pool.monitor(ctx, interval)
 }
 
-func joinManifestGatewayReachable(ctx context.Context, client *http.Client, gatewayURL, trustPin string) bool {
-	probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	_, err := fetchTrustBundle(probeCtx, client, gatewayURL, trustPin)
-	return err == nil
-}
-
-type hostTrust struct {
-	Legacy       *model.TrustBundle
-	SignedBundle *model.SignedTrustBundle
-}
-
-type signedTrustHTTPError struct {
-	status int
-}
-
-func (e signedTrustHTTPError) Error() string {
-	return fmt.Sprintf("signed trust endpoint returned status class %d", e.status/100)
-}
-
-func signedTrustEndpointUnsupported(err error) bool {
-	var statusErr signedTrustHTTPError
-	return errors.As(err, &statusErr) && statusErr.status == http.StatusNotFound
-}
-
-func fetchHostTrust(ctx context.Context, client *http.Client, gatewayURL, trustPin, trustStorePath string) (hostTrust, error) {
+func fetchHostTrust(ctx context.Context, client *http.Client, gatewayURL, trustPin, trustStorePath string) error {
 	store, err := hosttrust.OpenStore(trustStorePath)
 	if err != nil {
-		return hostTrust{}, err
+		return err
 	}
 	signed, err := fetchSignedTrustBundle(ctx, client, gatewayURL, trustPin)
-	if err == nil {
-		if trustStorePath != "" {
-			root, rootErr := activeSigningRoot(signed)
-			if rootErr != nil {
-				return hostTrust{}, rootErr
-			}
-			if storeErr := store.VerifyAndSaveUpdate(signed, root, time.Now()); storeErr != nil {
-				return hostTrust{}, storeErr
-			}
-		}
-		return hostTrust{SignedBundle: &signed}, nil
+	if err != nil {
+		return fmt.Errorf("signed trust verification failed")
 	}
-	if !signedTrustEndpointUnsupported(err) {
-		return hostTrust{}, fmt.Errorf("signed trust verification failed")
+	if trustStorePath == "" {
+		return nil
 	}
-	if stored, ok, storeErr := store.Load(); storeErr != nil {
-		return hostTrust{}, storeErr
-	} else if ok {
-		root, rootErr := activeSigningRoot(stored)
-		if rootErr != nil || stored.Verify(root, time.Now()) != nil || root.VerifyPin(trustPin) != nil {
-			return hostTrust{}, fmt.Errorf("stored signed trust verification failed")
-		}
-		return hostTrust{SignedBundle: &stored}, nil
+	root, err := activeSigningRoot(signed)
+	if err != nil {
+		return err
 	}
-	legacy, legacyErr := fetchTrustBundle(ctx, client, gatewayURL, trustPin)
-	if legacyErr != nil {
-		return hostTrust{}, fmt.Errorf("legacy trust verification failed")
+	if err := store.VerifyAndSaveUpdate(signed, root, time.Now()); err != nil {
+		return err
 	}
-	return hostTrust{Legacy: &legacy}, nil
+	return nil
 }
 
 func activeSigningRoot(bundle model.SignedTrustBundle) (model.TrustBundle, error) {
@@ -1400,10 +1303,6 @@ func activeSigningRoot(bundle model.SignedTrustBundle) (model.TrustBundle, error
 		return model.TrustBundle{}, fmt.Errorf("signed trust bundle missing signing key %q", bundle.SigningKeyID)
 	}
 	return key.TrustBundle(), nil
-}
-
-func parseRootPublicKey(value string) (model.TrustBundle, error) {
-	return trustref.Parse(value)
 }
 
 func fetchSignedTrustBundle(ctx context.Context, client *http.Client, gatewayURL, trustPin string) (model.SignedTrustBundle, error) {
@@ -1418,7 +1317,7 @@ func fetchSignedTrustBundle(ctx context.Context, client *http.Client, gatewayURL
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		_, _ = io.ReadAll(io.LimitReader(resp.Body, 256*1024))
-		return model.SignedTrustBundle{}, signedTrustHTTPError{status: resp.StatusCode}
+		return model.SignedTrustBundle{}, fmt.Errorf("signed trust endpoint returned status class %d", resp.StatusCode/100)
 	}
 	var payload struct {
 		TrustBundle model.SignedTrustBundle `json:"trust_bundle"`
@@ -1438,36 +1337,6 @@ func fetchSignedTrustBundle(ctx context.Context, client *http.Client, gatewayURL
 		return model.SignedTrustBundle{}, err
 	}
 	return payload.TrustBundle, nil
-}
-
-func fetchTrustBundle(ctx context.Context, client *http.Client, gatewayURL, trustPin string) (model.TrustBundle, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(gatewayURL, "/")+"/v1/trust", nil)
-	if err != nil {
-		return model.TrustBundle{}, err
-	}
-	resp, err := doGatewayRequest(client, req)
-	if err != nil {
-		return model.TrustBundle{}, fmt.Errorf("legacy trust request failed")
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		_, _ = io.ReadAll(io.LimitReader(resp.Body, 64*1024))
-		return model.TrustBundle{}, fmt.Errorf("legacy trust endpoint returned status class %d", resp.StatusCode/100)
-	}
-	var payload struct {
-		Trust model.TrustBundle `json:"trust"`
-		Error string            `json:"error"`
-	}
-	if err := decodeBoundedGatewayJSON(resp.Body, 64*1024, &payload); err != nil {
-		return model.TrustBundle{}, err
-	}
-	if _, err := payload.Trust.Ed25519PublicKey(); err != nil {
-		return model.TrustBundle{}, err
-	}
-	if err := payload.Trust.VerifyPin(trustPin); err != nil {
-		return model.TrustBundle{}, err
-	}
-	return payload.Trust, nil
 }
 
 type transientGatewayResponseError struct {

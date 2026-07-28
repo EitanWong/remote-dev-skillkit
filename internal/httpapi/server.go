@@ -1,18 +1,13 @@
 package httpapi
 
 import (
-	"compress/gzip"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"path"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -31,7 +26,6 @@ type Server struct {
 	StatePath       string
 	StateStore      gateway.StateStore
 	OperatorAuth    *operatorauth.Authorizer
-	Assets          AssetConfig
 	stateMu         *sync.Mutex
 	gatewayInstance string
 }
@@ -44,21 +38,6 @@ type sessionTaskRequest struct {
 var gatewayInstanceFallbackCounter atomic.Uint64
 
 const permanentHostFailureExitCode = 78
-const layeredAssetManifestHTTPPath = "/layered-assets.json"
-const layeredAssetManifestFileName = "layered-assets.json"
-
-type AssetConfig struct {
-	LayeredAssetManifestPath      string
-	LayeredReleaseRootPublicKey   string
-	LayeredReleaseVersion         string
-	RdevHostWindowsAMD64Path      string
-	RdevBootstrapWindowsAMD64Path string
-	RdevBootstrapWindowsARM64Path string
-	RdevBootstrapDarwinARM64Path  string
-	RdevBootstrapDarwinAMD64Path  string
-	RdevBootstrapLinuxAMD64Path   string
-	RdevBootstrapLinuxARM64Path   string
-}
 
 func NewServer(gw *gateway.MemoryGateway) Server {
 	return newServer(gw, nil, nil)
@@ -122,7 +101,6 @@ func (s Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 
-	mux.HandleFunc("GET /v1/trust", s.trust)
 	mux.HandleFunc("GET /v1/trust-bundle", s.getTrustBundle)
 
 	mux.HandleFunc("POST /v1/trust-bundle", s.updateTrustBundle)
@@ -131,31 +109,8 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/sessions/", s.sessionRoute)
 	mux.HandleFunc("POST /v1/sessions/", s.sessionRoute)
 
-	mux.HandleFunc("GET "+layeredAssetManifestHTTPPath, s.layeredAssetManifest)
-	mux.HandleFunc("GET /assets/", s.asset)
-
 	mux.HandleFunc("GET /v1/audit", s.listAudit)
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if isLayeredAssetTraversalAlias(r) {
-			writeError(w, http.StatusNotFound, "unknown asset")
-			return
-		}
-		mux.ServeHTTP(w, r)
-	})
-}
-
-func isLayeredAssetTraversalAlias(r *http.Request) bool {
-	cleanPath := path.Clean(r.URL.Path)
-	for _, exactPath := range []string{
-		layeredAssetManifestHTTPPath,
-		"/assets/rdev-host-windows-amd64.exe",
-		"/assets/rdev-host-windows-amd64.exe.sha256",
-	} {
-		if cleanPath == exactPath && r.URL.Path != exactPath {
-			return true
-		}
-	}
-	return false
+	return mux
 }
 
 func (s Server) health(w http.ResponseWriter, r *http.Request) {
@@ -617,10 +572,6 @@ func (s Server) closeSession(w http.ResponseWriter, r *http.Request, sessionID s
 	writeJSON(w, http.StatusAccepted, map[string]any{"session": session, "event": event})
 }
 
-func (s Server) trust(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"trust": s.Gateway.TrustBundle()})
-}
-
 func (s Server) getTrustBundle(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"trust_bundle": s.Gateway.SignedTrustBundle()})
 }
@@ -646,177 +597,6 @@ func (s Server) updateTrustBundle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"trust_bundle": bundle})
-}
-
-func (s Server) asset(w http.ResponseWriter, r *http.Request) {
-	const windowsHostAssetPath = "/assets/rdev-host-windows-amd64.exe"
-	if strings.HasPrefix(r.URL.Path, windowsHostAssetPath) {
-		s.rdevHostWindowsAMD64Asset(w, r)
-		return
-	}
-	name := strings.Trim(strings.TrimPrefix(r.URL.Path, "/assets/"), "/")
-	if name == "" || strings.Contains(name, "/") || strings.Contains(name, `\`) {
-		writeError(w, http.StatusNotFound, "unknown asset")
-		return
-	}
-	shaOnly := false
-	if strings.HasSuffix(name, ".sha256") {
-		shaOnly = true
-		name = strings.TrimSuffix(name, ".sha256")
-	}
-	gzipOnly := false
-	if strings.HasSuffix(name, ".gz") {
-		gzipOnly = true
-		name = strings.TrimSuffix(name, ".gz")
-	}
-	path, ok := s.assetPath(name)
-	if !ok {
-		writeError(w, http.StatusNotFound, "asset is not configured")
-		return
-	}
-	sum, err := fileSHA256(path)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "asset is unavailable")
-		return
-	}
-	if shaOnly {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintln(w, sum)
-		return
-	}
-	if gzipOnly {
-		s.serveGzipAsset(w, path)
-		return
-	}
-	http.ServeFile(w, r, path)
-}
-
-func (s Server) layeredAssetManifest(w http.ResponseWriter, r *http.Request) {
-	if !exactAssetRequest(r, layeredAssetManifestHTTPPath) {
-		writeError(w, http.StatusNotFound, "unknown asset")
-		return
-	}
-	path, ok := configuredAssetPath(s.Assets.LayeredAssetManifestPath)
-	if !ok {
-		writeError(w, http.StatusNotFound, "asset is not configured")
-		return
-	}
-	file, err := os.Open(path)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "asset is unavailable")
-		return
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil || info.IsDir() {
-		writeError(w, http.StatusInternalServerError, "asset is unavailable")
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	http.ServeContent(w, r, layeredAssetManifestFileName, info.ModTime(), file)
-}
-
-func exactAssetRequest(r *http.Request, path string) bool {
-	return r.URL.EscapedPath() == path &&
-		r.URL.RawQuery == "" &&
-		!r.URL.ForceQuery &&
-		r.URL.Fragment == ""
-}
-
-func (s Server) rdevHostWindowsAMD64Asset(w http.ResponseWriter, r *http.Request) {
-	const assetPath = "/assets/rdev-host-windows-amd64.exe"
-	shaOnly := false
-	switch {
-	case exactAssetRequest(r, assetPath):
-	case exactAssetRequest(r, assetPath+".sha256"):
-		shaOnly = true
-	default:
-		writeError(w, http.StatusNotFound, "unknown asset")
-		return
-	}
-	path, ok := configuredAssetPath(s.Assets.RdevHostWindowsAMD64Path)
-	if !ok {
-		writeError(w, http.StatusNotFound, "asset is not configured")
-		return
-	}
-	sum, err := fileSHA256(path)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "asset is unavailable")
-		return
-	}
-	if shaOnly {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = fmt.Fprintln(w, sum)
-		return
-	}
-	http.ServeFile(w, r, path)
-}
-
-func (s Server) serveGzipAsset(w http.ResponseWriter, path string) {
-	file, err := os.Open(path)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "asset is unavailable")
-		return
-	}
-	defer file.Close()
-	w.Header().Set("Content-Type", "application/gzip")
-	w.WriteHeader(http.StatusOK)
-	zw := gzip.NewWriter(w)
-	if _, err := io.Copy(zw, file); err != nil {
-		_ = zw.Close()
-		return
-	}
-	_ = zw.Close()
-}
-
-func (s Server) assetPath(name string) (string, bool) {
-	switch name {
-	case "rdev-bootstrap-windows-amd64.exe":
-		return configuredAssetPath(s.Assets.RdevBootstrapWindowsAMD64Path)
-	case "rdev-bootstrap-windows-arm64.exe":
-		return configuredAssetPath(s.Assets.RdevBootstrapWindowsARM64Path)
-	case "rdev-bootstrap-darwin-arm64":
-		return configuredAssetPath(s.Assets.RdevBootstrapDarwinARM64Path)
-	case "rdev-bootstrap-darwin-amd64":
-		return configuredAssetPath(s.Assets.RdevBootstrapDarwinAMD64Path)
-	case "rdev-bootstrap-linux-amd64":
-		return configuredAssetPath(s.Assets.RdevBootstrapLinuxAMD64Path)
-	case "rdev-bootstrap-linux-arm64":
-		return configuredAssetPath(s.Assets.RdevBootstrapLinuxARM64Path)
-	default:
-		return "", false
-	}
-}
-
-func configuredAssetPath(path string) (string, bool) {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return "", false
-	}
-	clean, err := filepath.Abs(path)
-	if err != nil {
-		return "", false
-	}
-	info, err := os.Stat(clean)
-	if err != nil || info.IsDir() {
-		return "", false
-	}
-	return clean, true
-}
-
-func fileSHA256(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func (s Server) listAudit(w http.ResponseWriter, r *http.Request) {

@@ -62,6 +62,33 @@ func TestServerInitializeAndToolsListExposesCurrentSessionProtocol(t *testing.T)
 	}
 }
 
+func TestServerRejectsUnknownSessionTool(t *testing.T) {
+	input := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"rdev.sessions.unknown","arguments":{}}}` + "\n"
+	var out bytes.Buffer
+	if err := NewServer(gateway.NewMemoryGateway()).Serve(context.Background(), strings.NewReader(input), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := responseLines(t, out.String())
+	if len(lines) != 1 {
+		t.Fatalf("responses = %#v", lines)
+	}
+	errPayload, ok := lines[0]["error"].(map[string]any)
+	if !ok || errPayload["code"] != float64(-32602) || !strings.Contains(errPayload["message"].(string), "unknown tool") {
+		t.Fatalf("unknown tool response = %#v", lines[0])
+	}
+}
+
+func TestRemoteGatewayConfigurationHandlesInvalidAndDefaultClients(t *testing.T) {
+	server := NewServer(gateway.NewMemoryGateway())
+	if server.remoteClient() != http.DefaultClient {
+		t.Fatal("local MCP server did not use the default HTTP client")
+	}
+	remote := NewServerWithRemoteGateway(gateway.NewMemoryGateway(), "http://[::1")
+	if remote.RemoteGateway != "http://[::1" {
+		t.Fatalf("invalid remote gateway URL was unexpectedly rewritten: %q", remote.RemoteGateway)
+	}
+}
+
 func TestProxyPOSTToRetriesSessionTaskWithIdempotencyKey(t *testing.T) {
 	attempts := 0
 	keys := []string{}

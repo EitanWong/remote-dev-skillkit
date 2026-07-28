@@ -26,10 +26,6 @@ func (g *MemoryGateway) AppendSessionEvent(sessionID string, event controlplane.
 	return g.controlPlane().AppendEvent(sessionID, event)
 }
 
-func (g *MemoryGateway) AppendSessionEventBatch(sessionID string, events []controlplane.Event) ([]controlplane.Event, error) {
-	return g.controlPlane().AppendEventBatch(sessionID, events)
-}
-
 func (g *MemoryGateway) SessionEventsAfter(sessionID string, cursor controlplane.EventCursor, limit int) ([]controlplane.Event, controlplane.Lease, controlplane.EventReplayState, error) {
 	return g.controlPlane().EventsAfter(sessionID, cursor, limit)
 }

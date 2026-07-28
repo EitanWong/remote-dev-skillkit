@@ -372,7 +372,7 @@ func adaptiveConfigurationContract() string {
 		"",
 		"Agents using this Skillkit must discover their environment before acting. They should probe the installed `rdev` binary with `rdev doctor`, inspect MCP tools with `rdev mcp tools`, and check the target OS, shell, available service manager, gateway configuration, network reachability, proxy/DNS state, NAT/firewall/CGNAT constraints, SSH configuration, installed tunnel or mesh tools, workspace path, installed agent adapters, framework install path, current permissions, and available connection modes.",
 		"",
-		"If a gateway URL, ticket code, root key, release URL, checksum, framework install path, workspace root, adapter choice, tunnel or mesh authorization, or authorization policy cannot be discovered safely, the agent must ask a short follow-up question instead of inventing a value.",
+		"If a gateway URL, session join code, root key, release URL, checksum, framework install path, workspace root, adapter choice, tunnel or mesh authorization, or authorization policy cannot be discovered safely, the agent must ask a short follow-up question instead of inventing a value.",
 		"",
 		"For local Agent installs on a personal computer, gateway configuration may be absent. Use local MCP stdio with `rdev mcp serve`; choose a gateway only when a remote-host workflow needs local dev, LAN, hosted, SSH-tunnel, or relay/mesh/VPN connectivity.",
 		"",

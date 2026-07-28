@@ -70,6 +70,52 @@ func TestGatewaySessionCreateJoinReplay(t *testing.T) {
 	}
 }
 
+func TestGatewaySessionCurrentOperations(t *testing.T) {
+	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+	session, err := gw.CreateSession(controlplane.SessionSpec{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, endpoint, lease, err := gw.JoinSession(session.ID, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Platform:            "linux/amd64",
+		IdentityFingerprint: "fp-current-operations",
+		Capabilities:        []string{"shell.user"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cursor := controlplane.EventCursor{
+		EndpointID:  endpoint.ID,
+		LeaseSecret: lease.Secret,
+		VisibleRole: controlplane.EndpointRoleTarget,
+	}
+	if err := gw.ValidateSessionLease(session.ID, endpoint.ID, lease.Secret); err != nil {
+		t.Fatalf("ValidateSessionLease() error = %v", err)
+	}
+	if _, _, _, err := gw.PeekSessionEventsAfter(session.ID, cursor, 10); err != nil {
+		t.Fatalf("PeekSessionEventsAfter() error = %v", err)
+	}
+	if _, _, err := gw.SessionEventsAfterForAgent(session.ID, 0, 10); err != nil {
+		t.Fatalf("SessionEventsAfterForAgent() error = %v", err)
+	}
+	task, _, err := gw.SubmitSessionTask(session.ID, controlplane.TaskSpec{
+		Adapter:        "shell",
+		Capabilities:   []string{"shell.user"},
+		IdempotencyKey: "current-operations-task",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := gw.CancelSessionTask(session.ID, task.ID, "operator requested stop", "current-operations-cancel"); err != nil {
+		t.Fatalf("CancelSessionTask() error = %v", err)
+	}
+	if _, _, err := gw.ResumeSessionTask(session.ID, task.ID, "", "current-operations-resume"); err == nil {
+		t.Fatal("ResumeSessionTask() accepted an empty checkpoint")
+	}
+}
+
 func TestGatewaySessionIdempotencySnapshotAndLeaseGrace(t *testing.T) {
 	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
 	gw := NewMemoryGatewayWithClock(func() time.Time { return now })

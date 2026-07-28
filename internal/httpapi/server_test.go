@@ -2,21 +2,14 @@ package httpapi
 
 import (
 	"bytes"
-	"compress/gzip"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
-
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
-
-	"os"
-	"path/filepath"
-
 	"strings"
 	"testing"
 	"time"
@@ -43,8 +36,8 @@ func TestHealthzIncludesGatewayInstanceMarker(t *testing.T) {
 		if err != nil || len(decoded) != 16 {
 			t.Fatalf("expected a 128-bit hex gateway instance marker, got %q", marker)
 		}
-		if strings.Contains(strings.ToLower(marker), "ticket") || strings.Contains(strings.ToLower(marker), "key") {
-			t.Fatalf("gateway instance marker must not expose ticket or key material: %q", marker)
+		if strings.Contains(strings.ToLower(marker), "key") {
+			t.Fatalf("gateway instance marker must not expose key material: %q", marker)
 		}
 		return marker
 	}
@@ -78,135 +71,6 @@ func TestUnexpectedControlPlaneErrorIsRecoverableAndDoesNotLeakDetails(t *testin
 	}
 	if strings.Contains(recorder.Body.String(), "secret-detail") {
 		t.Fatal("unexpected server error leaked internal details")
-	}
-}
-
-func TestJoinAssetsServeConfiguredBinaryAndHash(t *testing.T) {
-	dir := t.TempDir()
-	binaryPath := filepath.Join(dir, "rdev-bootstrap-windows-amd64.exe")
-	if err := os.WriteFile(binaryPath, []byte("fake bootstrap binary\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	server := NewServer(gateway.NewMemoryGateway())
-	server.Assets.RdevBootstrapWindowsAMD64Path = binaryPath
-	handler := server.Handler()
-
-	req := httptest.NewRequest(http.MethodGet, "/assets/rdev-bootstrap-windows-amd64.exe.sha256", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	sum := sha256.Sum256([]byte("fake bootstrap binary\n"))
-	if strings.TrimSpace(rec.Body.String()) != hex.EncodeToString(sum[:]) {
-		t.Fatalf("unexpected sha body: %q", rec.Body.String())
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/assets/rdev-bootstrap-windows-amd64.exe", nil)
-	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "fake bootstrap binary") {
-		t.Fatalf("expected configured binary, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestRdevHostWindowsAMD64AssetServesExactBinaryAndHashOnly(t *testing.T) {
-	dir := t.TempDir()
-	binaryContent := []byte("fake Windows host core runtime\n")
-	binaryPath := filepath.Join(dir, "rdev-host-windows-amd64.exe")
-	if err := os.WriteFile(binaryPath, binaryContent, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	server := NewServer(gateway.NewMemoryGateway())
-	server.Assets.RdevHostWindowsAMD64Path = binaryPath
-	handler := server.Handler()
-
-	req := httptest.NewRequest(http.MethodGet, "/assets/rdev-host-windows-amd64.exe", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || !bytes.Equal(rec.Body.Bytes(), binaryContent) {
-		t.Fatalf("expected configured Windows host runtime, got %d: %q", rec.Code, rec.Body.Bytes())
-	}
-
-	req = httptest.NewRequest(http.MethodGet, "/assets/rdev-host-windows-amd64.exe.sha256", nil)
-	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	sum := sha256.Sum256(binaryContent)
-	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != hex.EncodeToString(sum[:]) {
-		t.Fatalf("expected Windows host runtime checksum, got %d: %q", rec.Code, rec.Body.String())
-	}
-
-	for _, requestPath := range []string{
-		"/assets/rdev-host-windows-arm64.exe",
-		"/assets/rdev-host-windows-amd64.exe.extra",
-		"/assets/nested/rdev-host-windows-amd64.exe",
-		"/assets/../rdev-host-windows-amd64.exe",
-		"/assets/rdev-host-windows-amd64.exe.gz",
-		"/assets/rdev-host-windows-amd64.exe.gz.sha256",
-		"/assets/rdev-host-windows-amd64.exe/",
-		"/assets/rdev-host-windows-amd64.exe.sha256/",
-		"/assets/rdev-host-windows-amd64.exe?download=1",
-		"/assets/rdev-host-windows-amd64.exe.sha256?download=1",
-		"/assets/%2Frdev-host-windows-amd64.exe",
-		"/assets/%2Frdev-host-windows-amd64.exe.sha256",
-	} {
-		req = httptest.NewRequest(http.MethodGet, requestPath, nil)
-		rec = httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code == http.StatusOK || bytes.Contains(rec.Body.Bytes(), binaryContent) {
-			t.Fatalf("unexpected Windows host asset exposure for %q: %d %q", requestPath, rec.Code, rec.Body.Bytes())
-		}
-	}
-}
-
-func TestAssetErrorsDoNotExposeConfiguredFilesystemPath(t *testing.T) {
-	privatePath := filepath.Join(t.TempDir(), "private", "rdev-host-windows-amd64.exe")
-	rec := httptest.NewRecorder()
-	NewServer(gateway.NewMemoryGateway()).serveGzipAsset(rec, privatePath)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected asset read failure, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if strings.Contains(rec.Body.String(), privatePath) || strings.Contains(rec.Body.String(), filepath.Dir(privatePath)) {
-		t.Fatalf("asset error exposed configured filesystem path: %s", rec.Body.String())
-	}
-	if !strings.Contains(rec.Body.String(), `"error":"asset is unavailable"`) {
-		t.Fatalf("expected generic asset error, got %s", rec.Body.String())
-	}
-}
-
-func TestJoinAssetsServeGzipBinary(t *testing.T) {
-	dir := t.TempDir()
-	binaryPath := filepath.Join(dir, "rdev-bootstrap-windows-amd64.exe")
-	content := bytes.Repeat([]byte("fake bootstrap binary\n"), 1024)
-	if err := os.WriteFile(binaryPath, content, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	server := NewServer(gateway.NewMemoryGateway())
-	server.Assets.RdevBootstrapWindowsAMD64Path = binaryPath
-	handler := server.Handler()
-
-	req := httptest.NewRequest(http.MethodGet, "/assets/rdev-bootstrap-windows-amd64.exe.gz", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-	if got := rec.Header().Get("Content-Type"); got != "application/gzip" {
-		t.Fatalf("expected application/gzip, got %q", got)
-	}
-	reader, err := gzip.NewReader(bytes.NewReader(rec.Body.Bytes()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := io.ReadAll(reader)
-	if closeErr := reader.Close(); closeErr != nil && err == nil {
-		err = closeErr
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, content) {
-		t.Fatal("gzip bootstrap body did not round trip")
 	}
 }
 
