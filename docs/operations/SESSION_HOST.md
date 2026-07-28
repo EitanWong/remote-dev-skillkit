@@ -18,6 +18,21 @@ rdev gateway serve --dev
 
 This command binds loopback only and is suitable for local development. A remote host requires an operator-managed HTTPS gateway endpoint.
 
+## Managed pilot gateway
+
+An operator-managed pilot may place HTTPS termination in front of the same
+loopback-only process and load a protected, hashed-principal auth file:
+
+```bash
+rdev gateway serve --dev --operator-auth-file /protected/operators.json
+```
+
+The rdev process never binds a public address. The auth file contains token
+hashes, not token values; the MCP proxy reads its bearer token separately from
+its protected local token file. This pilot is intentionally ephemeral: a
+gateway restart invalidates active sessions and requires a new session and host
+join.
+
 ## Join a host
 
 ```bash

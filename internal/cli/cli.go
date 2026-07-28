@@ -21,6 +21,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/hostcmd"
 	"github.com/EitanWong/remote-dev-skillkit/internal/httpapi"
 	"github.com/EitanWong/remote-dev-skillkit/internal/mcpstdio"
+	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
 )
 
 type App struct {
@@ -175,10 +176,15 @@ func (a App) gateway(ctx context.Context, args []string) error {
 	fs.SetOutput(a.Stderr)
 	addr := fs.String("addr", "127.0.0.1:8787", "loopback listen address")
 	dev := fs.Bool("dev", false, "mark the local gateway as development mode")
+	operatorAuthFile := fs.String("operator-auth-file", "", "optional protected operator-auth principals file")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
 	if err := requireLoopbackAddress(*addr); err != nil {
+		return err
+	}
+	handler, operatorAuthEnabled, err := gatewayHandler(*operatorAuthFile)
+	if err != nil {
 		return err
 	}
 	listener, err := net.Listen("tcp", *addr)
@@ -187,12 +193,13 @@ func (a App) gateway(ctx context.Context, args []string) error {
 	}
 	defer listener.Close()
 
-	server := &http.Server{Handler: httpapi.NewServer(gateway.NewMemoryGateway()).Handler()}
+	server := &http.Server{Handler: handler}
 	if err := writeJSON(a.Stdout, map[string]any{
-		"schema_version": "rdev.gateway-ready.v2",
-		"url":            "http://" + listener.Addr().String(),
-		"mode":           map[bool]string{true: "development", false: "local"}[*dev],
-		"protocol":       "rdev.session.v1",
+		"schema_version":        "rdev.gateway-ready.v2",
+		"url":                   "http://" + listener.Addr().String(),
+		"mode":                  map[bool]string{true: "development", false: "local"}[*dev],
+		"operator_auth_enabled": operatorAuthEnabled,
+		"protocol":              "rdev.session.v1",
 	}); err != nil {
 		return err
 	}
@@ -214,6 +221,19 @@ func (a App) gateway(ctx context.Context, args []string) error {
 		}
 		return err
 	}
+}
+
+func gatewayHandler(operatorAuthFile string) (http.Handler, bool, error) {
+	gw := gateway.NewMemoryGateway()
+	operatorAuthFile = strings.TrimSpace(operatorAuthFile)
+	if operatorAuthFile == "" {
+		return httpapi.NewServer(gw).Handler(), false, nil
+	}
+	auth, _, err := operatorauth.Load(operatorAuthFile)
+	if err != nil {
+		return nil, false, fmt.Errorf("load operator auth file: %w", err)
+	}
+	return httpapi.NewServerWithOperatorAuth(gw, "", auth).Handler(), true, nil
 }
 
 func requireLoopbackAddress(addr string) error {
@@ -245,7 +265,7 @@ func (a App) printCommandUsage(command string) {
 	case "host":
 		_, _ = fmt.Fprintln(a.Stdout, "rdev host serve --join-code CODE --gateway URL")
 	case "gateway":
-		_, _ = fmt.Fprintln(a.Stdout, "rdev gateway serve [--addr 127.0.0.1:8787] [--dev]")
+		_, _ = fmt.Fprintln(a.Stdout, "rdev gateway serve [--addr 127.0.0.1:8787] [--dev] [--operator-auth-file PATH]")
 	default:
 		a.printUsage()
 	}

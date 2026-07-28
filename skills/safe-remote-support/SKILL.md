@@ -24,6 +24,9 @@ description: Use when an agent needs to connect to, operate, or audit a remote m
 
 - `rdev gateway serve --dev` is loopback-only development infrastructure.
 - Use an operator-managed HTTPS gateway for a remote host.
+- A managed pilot may use `--operator-auth-file PATH`; it loads hashed
+  principals while the MCP bearer token stays in a separate protected local
+  file. Gateway restart ends active pilot sessions.
 - Host trust is verified through the signed trust-bundle endpoint.
 - Use `rdev mcp serve --gateway-url URL --operator-token-file PATH` for a configured remote MCP proxy; the token remains only in the protected local file.
 

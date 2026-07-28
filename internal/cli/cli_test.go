@@ -4,9 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/EitanWong/remote-dev-skillkit/internal/operatorauth"
 )
 
 func TestVersionAndDoctorExposeSessionRuntime(t *testing.T) {
@@ -113,8 +117,33 @@ func TestAppUsageAndGatewayServeExposeCurrentSurface(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &gatewayReady); err != nil {
 		t.Fatal(err)
 	}
-	if gatewayReady["protocol"] != "rdev.session.v1" || gatewayReady["mode"] != "development" {
+	if gatewayReady["protocol"] != "rdev.session.v1" || gatewayReady["mode"] != "development" || gatewayReady["operator_auth_enabled"] != false {
 		t.Fatalf("gateway ready payload = %#v", gatewayReady)
+	}
+
+	authPath := t.TempDir() + "/operators.json"
+	if err := operatorauth.WriteFile(authPath, operatorauth.File{
+		SchemaVersion: operatorauth.SchemaVersion,
+		HashAlg:       "sha256",
+		Principals: []operatorauth.Principal{{
+			ID:        "operator",
+			Roles:     []string{operatorauth.RoleOperator},
+			TokenHash: operatorauth.HashToken("fixture-operator-token"),
+		}},
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	ctx, cancel = context.WithCancel(context.Background())
+	cancel()
+	if err := app.Run(ctx, []string{"gateway", "serve", "--addr", "127.0.0.1:0", "--dev", "--operator-auth-file", authPath}); err != nil {
+		t.Fatalf("authenticated gateway serve with canceled context: %v", err)
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &gatewayReady); err != nil {
+		t.Fatal(err)
+	}
+	if gatewayReady["operator_auth_enabled"] != true {
+		t.Fatalf("authenticated gateway ready payload = %#v", gatewayReady)
 	}
 
 	stdout.Reset()
@@ -136,10 +165,60 @@ func TestCurrentCLIRejectsInvalidMCPAndGatewayCalls(t *testing.T) {
 		{"gateway"},
 		{"gateway", "unknown"},
 		{"gateway", "serve", "--addr", "0.0.0.0:8787"},
+		{"gateway", "serve", "--operator-auth-file", t.TempDir() + "/missing"},
 	} {
 		if err := app.Run(context.Background(), args); err == nil {
 			t.Fatalf("%v was accepted", args)
 		}
+	}
+}
+
+func TestGatewayHandlerLoadsOperatorAuthFile(t *testing.T) {
+	authPath := t.TempDir() + "/operators.json"
+	if err := operatorauth.WriteFile(authPath, operatorauth.File{
+		SchemaVersion: operatorauth.SchemaVersion,
+		HashAlg:       "sha256",
+		Principals: []operatorauth.Principal{{
+			ID:        "operator",
+			Roles:     []string{operatorauth.RoleOperator},
+			TokenHash: operatorauth.HashToken("fixture-operator-token"),
+		}},
+	}, false); err != nil {
+		t.Fatal(err)
+	}
+	handler, enabled, err := gatewayHandler(authPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !enabled {
+		t.Fatal("operator auth was not reported as enabled")
+	}
+	request := httptest.NewRequest(http.MethodPost, "/v1/sessions", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("unauthenticated session create status = %d, want %d", response.Code, http.StatusForbidden)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "/v1/sessions", nil)
+	request.Header.Set("Authorization", "Bearer fixture-operator-token")
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("authenticated empty session create status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+
+	localHandler, localAuthEnabled, err := gatewayHandler("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if localAuthEnabled {
+		t.Fatal("local gateway unexpectedly reported operator auth")
+	}
+	response = httptest.NewRecorder()
+	localHandler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/v1/sessions", nil))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("local empty session create status = %d, want %d", response.Code, http.StatusBadRequest)
 	}
 }
 
