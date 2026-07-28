@@ -6,6 +6,7 @@ repo_root="$(cd "$script_dir/../.." && pwd)"
 policy_script="$repo_root/scripts/ci/git-policy.sh"
 workflow_file="$repo_root/.github/workflows/git-policy.yml"
 ci_workflow_file="$repo_root/.github/workflows/ci.yml"
+release_smoke_script="$repo_root/scripts/ci/release-smoke.sh"
 tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/git-policy-test.XXXXXX")"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -103,6 +104,9 @@ fi
 if [[ ! -f "$ci_workflow_file" ]]; then
   die "missing CI workflow file at $ci_workflow_file"
 fi
+if [[ ! -x "$release_smoke_script" ]]; then
+  die "missing executable release smoke script at $release_smoke_script"
+fi
 
 assert_contains "$workflow_file" 'pull_request_target:'
 assert_contains "$workflow_file" '    branches:'
@@ -119,6 +123,8 @@ assert_contains "$ci_workflow_file" 'pull_request:'
 assert_contains "$ci_workflow_file" '  go-checks:'
 assert_contains "$ci_workflow_file" '    name: go-checks'
 assert_contains "$ci_workflow_file" '  release-smoke:'
+assert_contains "$ci_workflow_file" '    name: release-smoke'
+assert_contains "$ci_workflow_file" '        run: ./scripts/ci/release-smoke.sh'
 
 main_repo="$(setup_repo main)"
 assert_success "$main_repo" \
