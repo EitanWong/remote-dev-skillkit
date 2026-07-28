@@ -56,7 +56,7 @@ func TestMCPToolsExposeSessionControlPlane(t *testing.T) {
 	}
 	want := map[string]bool{
 		"rdev.sessions.create":    true,
-		"rdev.sessions.handoff":  true,
+		"rdev.sessions.handoff":   true,
 		"rdev.sessions.status":    true,
 		"rdev.sessions.events":    true,
 		"rdev.sessions.task":      true,
