@@ -207,6 +207,8 @@ func (s Server) sessionRoute(w http.ResponseWriter, r *http.Request) {
 		s.listSessionArtifacts(w, r, sessionID)
 	case r.Method == http.MethodPost && resource == "close":
 		s.closeSession(w, r, sessionID)
+	case r.Method == http.MethodPost && resource == "revoke":
+		s.revokeSession(w, r, sessionID)
 	default:
 		writeProtocolError(w, http.StatusNotFound, protocolHTTPError(controlplane.ErrSessionClosed, "unknown session endpoint", false))
 	}
@@ -571,6 +573,22 @@ func (s Server) closeSession(w http.ResponseWriter, r *http.Request, sessionID s
 		return
 	}
 	session, event, err := s.Gateway.CloseSession(sessionID)
+	if err != nil {
+		writeControlPlaneError(w, err)
+		return
+	}
+	if !s.persistState(w) {
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"session": session, "event": event})
+}
+
+func (s Server) revokeSession(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if !s.authorizeOperator(r, operatorauth.RoleOperator) {
+		writeProtocolError(w, http.StatusForbidden, protocolHTTPError(controlplane.ErrUnauthorizedEndpoint, "operator role is required", false))
+		return
+	}
+	session, event, err := s.Gateway.RevokeSession(sessionID)
 	if err != nil {
 		writeControlPlaneError(w, err)
 		return

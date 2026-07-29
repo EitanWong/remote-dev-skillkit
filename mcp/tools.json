@@ -840,11 +840,18 @@
     },
     {
       "name": "rdev.sessions.close",
-      "description": "Close a Control Plane v1 session and return final status with user_summary, agent_next_action, recoverable, retry_after_ms, and close event. Event reads remain available until retention expiry.",
-      "safety": "Closes the session control plane. Does not uninstall software, delete local data, or mutate target OS settings.",
+      "description": "Close or revoke a Control Plane v1 session and return final status with user_summary, agent_next_action, recoverable, retry_after_ms, and lifecycle event. action defaults to close; revoke immediately invalidates endpoint leases. Event reads remain available until retention expiry.",
+      "safety": "Closes or revokes the session control plane only. Does not uninstall software, delete local data, or mutate target OS settings.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "action": {
+            "enum": [
+              "close",
+              "revoke"
+            ],
+            "type": "string"
+          },
           "gateway_url": {
             "description": "Optional gateway base URL to proxy this session call. Overrides the server-level gateway URL for this single MCP request.",
             "minLength": 1,

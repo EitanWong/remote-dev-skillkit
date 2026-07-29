@@ -147,3 +147,9 @@ func (g *MemoryGateway) appendAuditLocked(actor, action, targetID, message strin
 	}
 	g.audit = append(g.audit, event)
 }
+
+func (g *MemoryGateway) appendAudit(actor, action, targetID, message string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.appendAuditLocked(actor, action, targetID, message)
+}

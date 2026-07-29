@@ -257,3 +257,60 @@ func TestGatewaySessionTaskResultArtifactAndTerminalGrace(t *testing.T) {
 		t.Fatalf("final result was not accepted during terminal grace: %#v %#v", completed, resultEvent)
 	}
 }
+
+func TestGatewayAuditsManagedLifecycleAndRevoke(t *testing.T) {
+	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
+	gw := NewMemoryGatewayWithClock(func() time.Time { return now })
+	session, err := gw.CreateSession(controlplane.SessionSpec{Profile: "managed", Reason: "audited control"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, endpoint, _, err := gw.JoinSession(session.ID, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-audited-control",
+		Capabilities:        []string{"shell.user"},
+		Transport:           controlplane.TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _, err := gw.SubmitSessionTask(session.ID, controlplane.TaskSpec{
+		Adapter:        "shell",
+		Intent:         "do not place this intent in audit detail",
+		Capabilities:   []string{"shell.user"},
+		IdempotencyKey: "audited-task",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.TargetEndpointID != endpoint.ID {
+		t.Fatalf("task target = %q, want %q", task.TargetEndpointID, endpoint.ID)
+	}
+	if _, _, err := gw.RevokeSession(session.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]bool{
+		"session.create":      false,
+		"session.join":        false,
+		"session.task.submit": false,
+		"session.revoke":      false,
+	}
+	for _, event := range gw.AuditEvents() {
+		if _, ok := want[event.Action]; ok {
+			want[event.Action] = true
+		}
+		if strings.Contains(event.Message, "do not place this intent") {
+			t.Fatalf("audit message leaked task intent: %#v", event)
+		}
+	}
+	for action, found := range want {
+		if !found {
+			t.Fatalf("missing lifecycle audit action %q: %#v", action, gw.AuditEvents())
+		}
+	}
+	if len(gw.Snapshot().Audit) < len(want) {
+		t.Fatalf("gateway snapshot omitted lifecycle audit records: %#v", gw.Snapshot().Audit)
+	}
+}

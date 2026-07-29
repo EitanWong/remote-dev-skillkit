@@ -3,6 +3,8 @@ package gateway
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,5 +47,23 @@ func TestFileStateStoreRoundTripSessionSnapshot(t *testing.T) {
 func TestStateStoreConfigurationGuards(t *testing.T) {
 	if _, err := NewFileStateStore(""); err == nil {
 		t.Fatal("empty file path was accepted")
+	}
+}
+
+func TestFileStateStoreRejectsInsecureExistingFile(t *testing.T) {
+	path := t.TempDir() + "/gateway.json"
+	store, err := NewFileStateStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gw := NewMemoryGateway()
+	if _, err := store.SaveFrom(gw); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.LoadInto(gw); err == nil || !strings.Contains(err.Error(), "0600") {
+		t.Fatalf("group-readable gateway state was accepted: %v", err)
 	}
 }

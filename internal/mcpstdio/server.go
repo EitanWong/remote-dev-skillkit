@@ -731,13 +731,29 @@ func (s Server) sessionArtifacts(args map[string]any) (any, error) {
 
 func (s Server) sessionClose(args map[string]any) (any, error) {
 	sessionID := requiredString(args, "session_id")
+	action := strings.TrimSpace(stringArg(args, "action", "close"))
+	if action == "" {
+		action = "close"
+	}
+	if action != "close" && action != "revoke" {
+		return nil, fmt.Errorf("unsupported session close action %q", action)
+	}
 	if target := s.effectiveGatewayTarget(args); target.URL != "" {
-		return s.proxyPOSTToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/close", map[string]any{
+		return s.proxyPOSTToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/"+action, map[string]any{
 			"reason":          stringArg(args, "reason", ""),
 			"idempotency_key": stringArg(args, "idempotency_key", ""),
 		}, target.useOperatorToken)
 	}
-	session, event, err := s.Gateway.CloseSession(sessionID)
+	var (
+		session controlplane.Session
+		event   controlplane.Event
+		err     error
+	)
+	if action == "revoke" {
+		session, event, err = s.Gateway.RevokeSession(sessionID)
+	} else {
+		session, event, err = s.Gateway.CloseSession(sessionID)
+	}
 	if err != nil {
 		return nil, err
 	}
