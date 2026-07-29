@@ -17,8 +17,8 @@ Use for scoped engineering work on a host that has joined the active Control Pla
    send the returned browser URL to the Windows operator. The native page
    localizes to the target browser, gates claim to Windows, downloads
    `Connect-Rdev.cmd`, and the operator double-clicks that launcher; use the
-   page's PowerShell download only as its explicit fallback. Otherwise start the
-   host with the returned join code and current gateway URL.
+   page's copy/paste PowerShell fallback only if the CMD launcher cannot run.
+   Otherwise start the host with the returned join code and current gateway URL.
 4. Wait for an endpoint through `rdev.sessions.status` and `rdev.sessions.events`.
 5. Submit the smallest task that states adapter, workspace, capability, limits, and expected verification.
 6. Inspect terminal state, events, artifacts, changed files, and test output before reporting completion.

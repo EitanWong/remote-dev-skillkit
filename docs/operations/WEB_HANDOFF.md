@@ -39,9 +39,10 @@ binary is loaded and hashed at gateway startup. Readiness reports
    downloaded `Connect-Rdev.cmd`. It opens a visible console, downloads the
    host binary through the short-lived ticket, verifies its SHA-256, and starts
    managed long-poll.
-6. If `curl.exe` is unavailable on an older Windows install, the claimed page
-   exposes a `Connect-Rdev.ps1` download as a visible fallback using the same
-   bounded ticket.
+6. If `Connect-Rdev.cmd` cannot run (for example, `curl.exe` is unavailable),
+   the claimed page exposes a user-initiated **Copy PowerShell fallback**. Paste
+   it into an already-open PowerShell window; do not download and run a `.ps1`
+   file.
 7. Wait for the target endpoint through `rdev.sessions.status` before sending a
    task.
 
@@ -62,12 +63,12 @@ Only `HANDOFF_ID` reaches the gateway in the initial HTTP request. The browser
 reads `FRAGMENT_PROOF` locally, removes it from browser history, and submits it
 in a same-origin POST body. The gateway stores only a SHA-256 hash of the proof.
 
-After a successful claim, the browser receives a Windows `.cmd` launcher and a
-PowerShell fallback. Both contain the same short-lived artifact ticket and
-download the Windows host binary using `X-Rdev-Handoff-Ticket`; each verifies
-the configured SHA-256 before execution. Operator credentials and gateway
-private keys do not appear in the initial page, HTTP URL, referrer, or query
-string.
+After a successful claim, the browser receives a Windows `.cmd` launcher and
+may copy a PowerShell fallback into an already-open prompt. Both use the same
+short-lived artifact ticket to download the Windows host binary using
+`X-Rdev-Handoff-Ticket`; each verifies the configured SHA-256 before execution.
+Operator credentials and gateway private keys do not appear in the initial
+page, HTTP URL, referrer, or query string.
 
 The launcher starts the host visibly with managed mode and outbound long-poll.
 It persists identity, trust, and workspace-lock state under the current
@@ -80,8 +81,9 @@ request, or execution-policy bypass.
 The page has no external provisioning script or client-side configuration step:
 it is served by the same session gateway and consumes the same one-time handoff
 contract used by MCP. It uses `Accept-Language` for an initial server-rendered
-fallback and browser language preferences for the final rendered locale. English,
-Simplified Chinese, and Traditional Chinese are currently included.
+fallback, then browser and `Intl` locale preferences for the final rendered
+locale. English, Simplified Chinese, and Traditional Chinese are currently
+included.
 
 The page uses `navigator.userAgentData.platform` when available, with standard
 browser platform/user-agent fallbacks, and keeps the claim button disabled when

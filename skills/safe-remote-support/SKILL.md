@@ -34,7 +34,8 @@ description: Use when an agent needs to connect to, operate, or audit a remote m
 - A web handoff URL carries an opaque fragment proof only; the browser claims it
   once, localizes and gates the page to Windows, then downloads a double-click
   `Connect-Rdev.cmd` launcher that fetches the hash-checked host binary with a
-  short-lived header ticket. A PowerShell download remains an explicit fallback.
+  short-lived header ticket. The explicit PowerShell fallback is copied into an
+  already-open prompt rather than downloaded as a `.ps1` file.
   It is not a host listener or a substitute for session policy.
 
 ## Adaptive configuration

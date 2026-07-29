@@ -27,7 +27,6 @@ const (
 	maxWebHandoffRequestBytes   = 4 << 10
 	webHandoffArtifactTicketKey = "X-Rdev-Handoff-Ticket"
 	webHandoffLauncherFilename  = "Connect-Rdev.cmd"
-	webHandoffFallbackFilename  = "Connect-Rdev.ps1"
 )
 
 type webHandoffPageCopy struct {
@@ -41,7 +40,9 @@ type webHandoffPageCopy struct {
 	Downloaded         string `json:"downloaded"`
 	Fallback           string `json:"fallback"`
 	ClaimFailed        string `json:"claimFailed"`
-	FallbackDownload   string `json:"fallbackDownload"`
+	FallbackAction     string `json:"fallbackAction"`
+	FallbackCopied     string `json:"fallbackCopied"`
+	FallbackCopyManual string `json:"fallbackCopyManual"`
 	UnexpectedDownload string `json:"unexpectedDownload"`
 }
 
@@ -55,9 +56,11 @@ var webHandoffPageCopies = map[string]webHandoffPageCopy{
 		WindowsOnly:        "Open this handoff on a Windows device. It has not been claimed.",
 		Preparing:          "Preparing the Windows launcher…",
 		Downloaded:         "Downloaded Connect-Rdev.cmd. Double-click it to start the managed connector.",
-		Fallback:           "If the Windows launcher cannot run, download the PowerShell fallback.",
+		Fallback:           "If Connect-Rdev.cmd cannot start, use the PowerShell copy button below. Paste the copied script into the PowerShell window already open; do not save or run it as a .ps1 file.",
 		ClaimFailed:        "The handoff could not be claimed. Ask the operator for a fresh link.",
-		FallbackDownload:   "Download PowerShell fallback",
+		FallbackAction:     "Connect-Rdev.cmd could not start? Copy PowerShell script",
+		FallbackCopied:     "Copied. Paste into the open PowerShell window and press Enter.",
+		FallbackCopyManual: "Copy is unavailable. The script is selected below; copy it, then paste it into the open PowerShell window and press Enter.",
 		UnexpectedDownload: "The handoff response did not include a launcher.",
 	},
 	"zh-Hans": {
@@ -69,9 +72,11 @@ var webHandoffPageCopies = map[string]webHandoffPageCopy{
 		WindowsOnly:        "请在 Windows 设备上打开此连接页。它尚未被领取。",
 		Preparing:          "正在准备 Windows 启动器…",
 		Downloaded:         "已下载 Connect-Rdev.cmd。双击它即可启动托管连接器。",
-		Fallback:           "若 Windows 启动器无法运行，请下载 PowerShell 备用脚本。",
+		Fallback:           "若 Connect-Rdev.cmd 无法启动，请使用下方的 PowerShell 复制按钮。将复制的脚本粘贴到当前已打开的 PowerShell 窗口执行；不要将其保存后直接运行 .ps1 文件。",
 		ClaimFailed:        "此连接未能领取。请向操作员获取新的链接。",
-		FallbackDownload:   "下载 PowerShell 备用脚本",
+		FallbackAction:     "Connect-Rdev.cmd 无法启动？复制 PowerShell 脚本",
+		FallbackCopied:     "已复制。请粘贴到当前 PowerShell 窗口并按 Enter 执行。",
+		FallbackCopyManual: "浏览器未允许复制。下方脚本已被选中，请复制后粘贴到当前 PowerShell 窗口并按 Enter 执行。",
 		UnexpectedDownload: "连接响应未包含启动器。",
 	},
 	"zh-Hant": {
@@ -83,9 +88,11 @@ var webHandoffPageCopies = map[string]webHandoffPageCopy{
 		WindowsOnly:        "請在 Windows 裝置上開啟此連線頁。它尚未被領取。",
 		Preparing:          "正在準備 Windows 啟動器…",
 		Downloaded:         "已下載 Connect-Rdev.cmd。雙擊它即可啟動受管連線器。",
-		Fallback:           "若 Windows 啟動器無法執行，請下載 PowerShell 備用指令碼。",
+		Fallback:           "若 Connect-Rdev.cmd 無法啟動，請使用下方的 PowerShell 複製按鈕。將複製的指令碼貼到目前已開啟的 PowerShell 視窗執行；不要將其儲存後直接執行 .ps1 檔案。",
 		ClaimFailed:        "此連線未能領取。請向操作員取得新的連結。",
-		FallbackDownload:   "下載 PowerShell 備用指令碼",
+		FallbackAction:     "Connect-Rdev.cmd 無法啟動？複製 PowerShell 指令碼",
+		FallbackCopied:     "已複製。請貼到目前 PowerShell 視窗並按 Enter 執行。",
+		FallbackCopyManual: "瀏覽器未允許複製。下方指令碼已被選取，請複製後貼到目前 PowerShell 視窗並按 Enter 執行。",
 		UnexpectedDownload: "連線回應未包含啟動器。",
 	},
 }
@@ -309,8 +316,8 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
 	_, _ = fmt.Fprintf(w, `<!doctype html>
 <html lang="%s">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>%s</title>
-<style>body{font-family:system-ui,sans-serif;max-width:42rem;margin:4rem auto;padding:0 1.25rem;color:#172033}button{padding:.7rem 1rem;font:inherit}#status{min-height:1.5rem}#fallback{display:inline-block;margin-top:.5rem}</style></head>
-<body><main><h1 id="heading">%s</h1><p id="description">%s</p><button id="download" type="button">%s</button><p id="status" role="status"></p><a id="fallback" hidden></a></main>
+<style>body{font-family:system-ui,sans-serif;max-width:42rem;margin:4rem auto;padding:0 1.25rem;color:#172033}button{padding:.7rem 1rem;font:inherit}#status{min-height:1.5rem}#copy-fallback{display:block;margin-top:.75rem}#fallback-script{box-sizing:border-box;display:block;width:100%%;min-height:14rem;margin-top:.75rem;font-family:ui-monospace,monospace}</style></head>
+<body><main><h1 id="heading">%s</h1><p id="description">%s</p><button id="download" type="button">%s</button><p id="status" role="status"></p><button id="copy-fallback" type="button" hidden></button><textarea id="fallback-script" hidden readonly spellcheck="false"></textarea></main>
 <script>
 (() => {
   const pageCopies = %s;
@@ -318,8 +325,10 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
   const claimPath = %s;
   const button = document.getElementById('download');
   const status = document.getElementById('status');
-  const fallback = document.getElementById('fallback');
-  const languages = [...(navigator.languages || []), navigator.language, initialLocale].filter(Boolean);
+  const fallback = document.getElementById('copy-fallback');
+  const fallbackBootstrap = document.getElementById('fallback-script');
+  const systemLocale = Intl.DateTimeFormat().resolvedOptions().locale;
+  const languages = [...(navigator.languages || []), navigator.language, systemLocale, initialLocale].filter(Boolean);
   const localeFor = values => {
     for (const value of values) {
       const language = String(value).toLowerCase();
@@ -335,6 +344,9 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
   document.getElementById('heading').textContent = copy.heading;
   document.getElementById('description').textContent = copy.description;
   button.textContent = copy.download;
+  fallback.textContent = copy.fallbackAction;
+  fallback.title = copy.fallback;
+  fallbackBootstrap.setAttribute('aria-label', copy.fallbackAction);
   const isWindowsBrowser = () => {
     const clientHintPlatform = navigator.userAgentData && navigator.userAgentData.platform;
     const platform = String(clientHintPlatform || navigator.platform || '');
@@ -350,6 +362,17 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
     link.remove();
     window.setTimeout(() => URL.revokeObjectURL(link.href), 0);
   };
+  fallback.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(fallbackBootstrap.value);
+      status.textContent = copy.fallbackCopied;
+    } catch (_) {
+      fallbackBootstrap.hidden = false;
+      fallbackBootstrap.focus();
+      fallbackBootstrap.select();
+      status.textContent = copy.fallbackCopyManual;
+    }
+  });
   const proof = window.location.hash.slice(1);
   if (!proof) { button.disabled = true; status.textContent = copy.missingProof; return; }
   history.replaceState(null, '', window.location.pathname);
@@ -367,11 +390,8 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
       }
       claimed = true;
       download(payload.bootstrap, payload.bootstrap_filename);
-      if (typeof payload.fallback_bootstrap === 'string' && payload.fallback_bootstrap && typeof payload.fallback_bootstrap_filename === 'string' && payload.fallback_bootstrap_filename) {
-        const fallbackBlob = new Blob([payload.fallback_bootstrap], {type:'text/plain;charset=utf-8'});
-        fallback.href = URL.createObjectURL(fallbackBlob);
-        fallback.download = payload.fallback_bootstrap_filename;
-        fallback.textContent = copy.fallbackDownload;
+      if (typeof payload.fallback_bootstrap === 'string' && payload.fallback_bootstrap) {
+        fallbackBootstrap.value = payload.fallback_bootstrap;
         fallback.hidden = false;
       }
       status.textContent = copy.downloaded;
@@ -418,11 +438,10 @@ func (s Server) claimWebHandoff(w http.ResponseWriter, r *http.Request, id strin
 	launcher := s.webHandoffWindowsLauncher(handoff, session.JoinCode, ticket)
 	fallback := s.webHandoffPowerShellFallback(handoff, session.JoinCode, ticket)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"bootstrap":                   launcher,
-		"bootstrap_filename":          webHandoffLauncherFilename,
-		"fallback_bootstrap":          fallback,
-		"fallback_bootstrap_filename": webHandoffFallbackFilename,
-		"expires_at":                  handoff.ArtifactTicketExpiresAt,
+		"bootstrap":          launcher,
+		"bootstrap_filename": webHandoffLauncherFilename,
+		"fallback_bootstrap": fallback,
+		"expires_at":         handoff.ArtifactTicketExpiresAt,
 	})
 }
 
@@ -504,8 +523,8 @@ func cmdLiteral(value string) string {
 func (s Server) webHandoffPowerShellFallback(handoff gateway.WebHandoff, joinCode, ticket string) string {
 	assetURL := s.webHandoff.publicBaseURL + "/connect/" + url.PathEscape(handoff.ID) + "/rdev-host.exe"
 	return fmt.Sprintf(`# Remote Dev Skillkit managed-host bootstrap.
-# This script runs visibly in the current PowerShell window. It does not create
-# a service, scheduled task, firewall rule, or execution-policy bypass.
+	# Paste this script into an already-open PowerShell window. It does not create
+	# a service, scheduled task, firewall rule, or execution-policy bypass.
 $ErrorActionPreference = 'Stop'
 $gateway = %s
 $joinCode = %s
@@ -527,7 +546,8 @@ Move-Item -LiteralPath $tempBinary -Destination $hostBinary -Force
 
 Write-Host 'Starting managed Remote Dev Skillkit connector in this visible PowerShell window.'
 & $hostBinary serve --mode managed --gateway $gateway --join-code $joinCode --once=false --max-tasks 0 --transport long-poll --identity-store $identityStore --trust-store $trustStore --workspace-lock-store $lockStore
-exit $LASTEXITCODE
+$connectorExitCode = $LASTEXITCODE
+if ($connectorExitCode -ne 0) { throw "rdev-host.exe exited with code $connectorExitCode." }
 `, powershellLiteral(s.webHandoff.publicBaseURL), powershellLiteral(joinCode), powershellLiteral(assetURL), powershellLiteral(ticket), powershellLiteral(s.webHandoff.windowsAMD64.SHA256), powershellLiteral(webHandoffArtifactTicketKey))
 }
 
