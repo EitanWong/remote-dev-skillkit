@@ -132,6 +132,36 @@ func TestHostServeSessionCompletesTask(t *testing.T) {
 	}
 }
 
+func TestFetchSessionTaskUsesEndpointLeaseRoute(t *testing.T) {
+	const (
+		sessionID    = "ses_task_fetch"
+		endpointID   = "end_task_fetch"
+		leaseSecret  = "lease-task-fetch"
+		taskID       = "task_task_fetch"
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/sessions/"+sessionID+"/tasks/"+taskID {
+			t.Fatalf("task route path = %q", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("endpoint_id"); got != endpointID {
+			t.Fatalf("endpoint_id = %q, want %q", got, endpointID)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer "+leaseSecret {
+			t.Fatalf("authorization = %q", got)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"task": controlplane.Task{ID: taskID, TargetEndpointID: endpointID}})
+	}))
+	defer server.Close()
+
+	task, err := fetchSessionTask(context.Background(), server.Client(), server.URL, sessionID, endpointID, leaseSecret, taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.ID != taskID || task.TargetEndpointID != endpointID {
+		t.Fatalf("task = %#v", task)
+	}
+}
+
 func TestHostServeUsesSessionJoinCodeFlag(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	session, err := gw.CreateSession(controlplane.SessionSpec{
