@@ -88,6 +88,64 @@ func TestFileStoreVerifyAndSaveUpdateRejectsRollback(t *testing.T) {
 	}
 }
 
+func TestFileStoreVerifyAndSaveUpdateAcceptsIdenticalBundle(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	publicKey, privateKey := testKeyPair(t)
+	store := FileStore{Path: filepath.Join(t.TempDir(), "bundle.json")}
+	bundle := signedBundle(t, model.SignedTrustBundleSpec{
+		BundleID:     "managed-host",
+		Sequence:     1,
+		NotBefore:    now,
+		NotAfter:     now.Add(time.Hour),
+		SigningKeyID: "gateway",
+		Keys: []model.TrustKey{
+			model.NewTrustKey("gateway", publicKey, model.TrustKeyStatusActive, now),
+		},
+	}, privateKey, now)
+	root := model.NewTrustBundle("gateway", publicKey)
+
+	if err := store.VerifyAndSaveUpdate(bundle, root, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.VerifyAndSaveUpdate(bundle, root, now); err != nil {
+		t.Fatalf("expected repeated signed bundle to be accepted: %v", err)
+	}
+}
+
+func TestFileStoreVerifyAndSaveUpdateRejectsDifferentBundleAtSameSequence(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	publicKey, privateKey := testKeyPair(t)
+	store := FileStore{Path: filepath.Join(t.TempDir(), "bundle.json")}
+	root := model.NewTrustBundle("gateway", publicKey)
+	first := signedBundle(t, model.SignedTrustBundleSpec{
+		BundleID:     "managed-host",
+		Sequence:     1,
+		NotBefore:    now,
+		NotAfter:     now.Add(time.Hour),
+		SigningKeyID: "gateway",
+		Keys: []model.TrustKey{
+			model.NewTrustKey("gateway", publicKey, model.TrustKeyStatusActive, now),
+		},
+	}, privateKey, now)
+	different := signedBundle(t, model.SignedTrustBundleSpec{
+		BundleID:     "different-bundle",
+		Sequence:     1,
+		NotBefore:    now,
+		NotAfter:     now.Add(time.Hour),
+		SigningKeyID: "gateway",
+		Keys: []model.TrustKey{
+			model.NewTrustKey("gateway", publicKey, model.TrustKeyStatusActive, now),
+		},
+	}, privateKey, now)
+
+	if err := store.VerifyAndSaveUpdate(first, root, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.VerifyAndSaveUpdate(different, root, now); err == nil {
+		t.Fatal("expected distinct same-sequence bundle to be rejected")
+	}
+}
+
 func TestFileStoreVerifyAndSaveUpdatePersistsValidUpdate(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	publicKey, privateKey := testKeyPair(t)
