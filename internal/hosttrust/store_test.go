@@ -146,6 +146,31 @@ func TestFileStoreVerifyAndSaveUpdateRejectsDifferentBundleAtSameSequence(t *tes
 	}
 }
 
+func TestFileStoreVerifyAndSaveUpdateRejectsBadSignatureAtSameSequence(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	publicKey, privateKey := testKeyPair(t)
+	store := FileStore{Path: filepath.Join(t.TempDir(), "bundle.json")}
+	root := model.NewTrustBundle("gateway", publicKey)
+	bundle := signedBundle(t, model.SignedTrustBundleSpec{
+		BundleID:     "managed-host",
+		Sequence:     1,
+		NotBefore:    now,
+		NotAfter:     now.Add(time.Hour),
+		SigningKeyID: "gateway",
+		Keys: []model.TrustKey{
+			model.NewTrustKey("gateway", publicKey, model.TrustKeyStatusActive, now),
+		},
+	}, privateKey, now)
+	if err := store.VerifyAndSaveUpdate(bundle, root, now); err != nil {
+		t.Fatal(err)
+	}
+	invalid := bundle
+	invalid.Signature = "not-a-valid-signature"
+	if err := store.VerifyAndSaveUpdate(invalid, root, now); !errors.Is(err, model.ErrTrustBundleSignature) {
+		t.Fatalf("expected signature error, got %v", err)
+	}
+}
+
 func TestFileStoreVerifyAndSaveUpdatePersistsValidUpdate(t *testing.T) {
 	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
 	publicKey, privateKey := testKeyPair(t)
