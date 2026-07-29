@@ -179,6 +179,23 @@ func verifyAndSaveUpdate(store Store, next model.SignedTrustBundle, root model.T
 		if err != nil {
 			return err
 		}
+		if next.Sequence == current.Sequence {
+			if err := next.Verify(currentRoot, now); err != nil {
+				return err
+			}
+			nextHash, err := next.Hash()
+			if err != nil {
+				return err
+			}
+			currentHash, err := current.Hash()
+			if err != nil {
+				return err
+			}
+			if nextHash == currentHash {
+				return nil
+			}
+			return fmt.Errorf("%w: equal sequence bundle content differs", model.ErrTrustBundleInvalid)
+		}
 		if err := next.VerifyUpdate(current, currentRoot, now); err != nil {
 			return err
 		}
