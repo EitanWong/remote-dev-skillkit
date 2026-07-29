@@ -195,6 +195,8 @@ func (s Server) sessionRoute(w http.ResponseWriter, r *http.Request) {
 		}
 	case r.Method == http.MethodPost && resource == "events":
 		s.appendSessionEvent(w, r, sessionID)
+	case r.Method == http.MethodGet && resource == "tasks" && taskID != "" && action == "":
+		s.getSessionTask(w, r, sessionID, taskID)
 	case r.Method == http.MethodPost && resource == "tasks" && taskID == "" && action == "":
 		s.submitSessionTask(w, r, sessionID)
 	case r.Method == http.MethodPost && resource == "tasks" && taskID != "" && action == "result":
@@ -257,6 +259,39 @@ func (s Server) getSessionSnapshot(w http.ResponseWriter, r *http.Request, sessi
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"snapshot": session.Snapshot()})
+}
+
+func (s Server) getSessionTask(w http.ResponseWriter, r *http.Request, sessionID, taskID string) {
+	task, ok := s.targetSessionTask(w, r, sessionID, taskID)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"task": task})
+}
+
+func (s Server) targetSessionTask(w http.ResponseWriter, r *http.Request, sessionID, taskID string) (controlplane.Task, bool) {
+	endpointID := strings.TrimSpace(r.URL.Query().Get("endpoint_id"))
+	if err := s.Gateway.ValidateSessionLease(sessionID, endpointID, extractBearerToken(r)); err != nil {
+		writeControlPlaneError(w, err)
+		return controlplane.Task{}, false
+	}
+	session, err := s.Gateway.Session(sessionID)
+	if err != nil {
+		writeControlPlaneError(w, err)
+		return controlplane.Task{}, false
+	}
+	for _, task := range session.Tasks {
+		if task.ID != taskID {
+			continue
+		}
+		if task.TargetEndpointID != endpointID {
+			writeProtocolError(w, http.StatusNotFound, protocolHTTPError(controlplane.ErrTaskNotFound, "task not found", false))
+			return controlplane.Task{}, false
+		}
+		return task, true
+	}
+	writeProtocolError(w, http.StatusNotFound, protocolHTTPError(controlplane.ErrTaskNotFound, "task not found", false))
+	return controlplane.Task{}, false
 }
 
 func (s Server) joinSession(w http.ResponseWriter, r *http.Request, sessionID string) {
@@ -497,6 +532,9 @@ func sameCapabilitySet(left, right []string) bool {
 }
 
 func (s Server) completeSessionTask(w http.ResponseWriter, r *http.Request, sessionID, taskID string) {
+	if _, ok := s.targetSessionTask(w, r, sessionID, taskID); !ok {
+		return
+	}
 	var result map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&result); err != nil {
 		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrPayloadTooLarge, "invalid JSON body", false))
@@ -739,6 +777,8 @@ func splitSessionPath(path string) (sessionID string, resource string, taskID st
 		return parts[0], "", "", "", true
 	case len(parts) == 2 && parts[0] != "" && parts[1] != "":
 		return parts[0], parts[1], "", "", true
+	case len(parts) == 3 && parts[0] != "" && parts[1] == "tasks" && parts[2] != "":
+		return parts[0], parts[1], parts[2], "", true
 	case len(parts) == 4 && parts[0] != "" && parts[1] == "tasks" && parts[2] != "" && parts[3] != "":
 		return parts[0], parts[1], parts[2], parts[3], true
 	default:

@@ -240,6 +240,98 @@ func TestHTTPTaskDispatchWakesManagedLongPollTarget(t *testing.T) {
 	}
 }
 
+func TestHTTPTargetLeaseFetchesOnlyAssignedTask(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	session, err := gw.CreateSession(controlplane.SessionSpec{
+		Profile:      "managed",
+		Reason:       "target task fetch",
+		Capabilities: []string{"shell.user"},
+		JoinPolicy:   "multi-target",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, endpoint, lease, err := gw.JoinSession(session.ID, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "target-task-fetch",
+		Capabilities:        []string{"shell.user"},
+		Transport:           controlplane.TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, otherEndpoint, otherLease, err := gw.JoinSession(session.ID, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "other-target-task-fetch",
+		Capabilities:        []string{"shell.user"},
+		Transport:           controlplane.TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, _, err := gw.SubmitSessionTask(session.ID, controlplane.TaskSpec{
+		TargetEndpointID: endpoint.ID,
+		Adapter:          "shell",
+		Intent:           "inspect task fetch authorization",
+		Capabilities:     []string{"shell.user"},
+		IdempotencyKey:   "target-task-fetch",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewServerWithOperatorAuth(gw, "", httpTestOperatorAuth(t)).Handler()
+	taskPath := "/v1/sessions/" + url.PathEscape(session.ID) + "/tasks/" + url.PathEscape(task.ID)
+	path := taskPath + "?endpoint_id=" + url.QueryEscape(endpoint.ID)
+
+	missingLease := httptest.NewRequest(http.MethodGet, path, nil)
+	missingLeaseRec := httptest.NewRecorder()
+	handler.ServeHTTP(missingLeaseRec, missingLease)
+	if missingLeaseRec.Code != http.StatusUnauthorized {
+		t.Fatalf("missing target lease status = %d, want 401: %s", missingLeaseRec.Code, missingLeaseRec.Body.String())
+	}
+
+	otherRequest := httptest.NewRequest(http.MethodGet, taskPath+"?endpoint_id="+url.QueryEscape(otherEndpoint.ID), nil)
+	otherRequest.Header.Set("Authorization", "Bearer "+otherLease.Secret)
+	otherRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(otherRecorder, otherRequest)
+	if otherRecorder.Code != http.StatusNotFound {
+		t.Fatalf("other target task fetch status = %d, want 404: %s", otherRecorder.Code, otherRecorder.Body.String())
+	}
+	var otherResponse struct {
+		Error controlplane.ProtocolError `json:"error"`
+	}
+	decodeHTTP(t, otherRecorder, &otherResponse)
+	if otherResponse.Error.Code != controlplane.ErrTaskNotFound {
+		t.Fatalf("other target task fetch error = %#v", otherResponse.Error)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	request.Header.Set("Authorization", "Bearer "+lease.Secret)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("target task fetch status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Task controlplane.Task `json:"task"`
+	}
+	decodeHTTP(t, recorder, &response)
+	if response.Task.ID != task.ID || response.Task.TargetEndpointID != endpoint.ID {
+		t.Fatalf("target task fetch response = %#v", response.Task)
+	}
+
+	missingResultLease := httptest.NewRequest(http.MethodPost, taskPath+"/result?endpoint_id="+url.QueryEscape(endpoint.ID), strings.NewReader(`{"idempotency_key":"missing-result-lease","status":"succeeded"}`))
+	missingResultLease.Header.Set("Content-Type", "application/json")
+	missingResultLeaseRec := httptest.NewRecorder()
+	handler.ServeHTTP(missingResultLeaseRec, missingResultLease)
+	if missingResultLeaseRec.Code != http.StatusUnauthorized {
+		t.Fatalf("missing target result lease status = %d, want 401: %s", missingResultLeaseRec.Code, missingResultLeaseRec.Body.String())
+	}
+}
+
 func TestHTTPSessionEventsLongPollIgnoresInvisibleEvent(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	session, err := gw.CreateSession(controlplane.SessionSpec{Reason: "long poll visibility fixture"})
@@ -413,7 +505,7 @@ func TestHTTPSessionTaskResultArtifactAndTerminalBehavior(t *testing.T) {
 		t.Fatalf("artifact status = %d body=%s", artifactRec.Code, artifactRec.Body.String())
 	}
 
-	resultRec := postJSON(t, handler, "/v1/sessions/"+url.PathEscape(created.Session.ID)+"/tasks/"+url.PathEscape(taskPayload.Task.ID)+"/result", `{
+	resultRec := postJSON(t, handler, "/v1/sessions/"+url.PathEscape(created.Session.ID)+"/tasks/"+url.PathEscape(taskPayload.Task.ID)+"/result?endpoint_id="+url.QueryEscape(joined.Endpoint.ID), `{
 		"attempt_id":"`+taskPayload.Task.AttemptID+`",
 		"idempotency_key":"result-1",
 		"status":"succeeded",

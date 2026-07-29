@@ -651,7 +651,7 @@ pollLoop:
 			opts.GatewayURL = taskSnapshot.Candidate.URL
 			opts.Transport = taskSnapshot.Candidate.Transport
 			requestCtx, cancelRequest := routeRequestContext(ctx, taskSnapshot, sessionRequestTimeout(opts))
-			task, err := fetchSessionTask(requestCtx, client, opts.GatewayURL, sessionID, event.TaskID)
+			task, err := fetchSessionTask(requestCtx, client, opts.GatewayURL, sessionID, endpointID, leaseSecret, event.TaskID)
 			cancelRequest()
 			if err != nil {
 				if isTransientGatewayResponseError(err) && routes.reportFailure(ctx, taskSnapshot) {
@@ -745,7 +745,7 @@ func (a App) runSessionTaskWithRoutes(ctx context.Context, opts serveOptions, cl
 		if pooled {
 			requestCtx, cancelRequest = routeRequestContext(ctx, snapshot, sessionRequestTimeout(opts))
 		}
-		_, _, completeErr := completeSessionTask(requestCtx, client, opts.GatewayURL, sessionID, task.ID, leaseSecret, payload)
+		_, _, completeErr := completeSessionTask(requestCtx, client, opts.GatewayURL, sessionID, endpointID, leaseSecret, task.ID, payload)
 		cancelRequest()
 		if completeErr == nil {
 			if pooled {
@@ -967,10 +967,16 @@ func fetchSessionEvents(ctx context.Context, client *http.Client, gatewayURL, se
 	return payload.Events, payload.Lease, replay, nil
 }
 
-func fetchSessionTask(ctx context.Context, client *http.Client, gatewayURL, sessionID, taskID string) (controlplane.Task, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(gatewayURL, "/")+"/v1/sessions/"+url.PathEscape(sessionID), nil)
+func fetchSessionTask(ctx context.Context, client *http.Client, gatewayURL, sessionID, endpointID, leaseSecret, taskID string) (controlplane.Task, error) {
+	values := url.Values{}
+	values.Set("endpoint_id", endpointID)
+	endpoint := strings.TrimRight(gatewayURL, "/") + "/v1/sessions/" + url.PathEscape(sessionID) + "/tasks/" + url.PathEscape(taskID) + "?" + values.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return controlplane.Task{}, err
+	}
+	if leaseSecret != "" {
+		req.Header.Set("Authorization", "Bearer "+leaseSecret)
 	}
 	resp, err := doGatewayRequest(client, req)
 	if err != nil {
@@ -982,7 +988,7 @@ func fetchSessionTask(ctx context.Context, client *http.Client, gatewayURL, sess
 		return controlplane.Task{}, transientGatewayResponseError{Endpoint: req.URL.String(), Status: resp.Status, Cause: err}
 	}
 	var payload struct {
-		Snapshot controlplane.SessionSnapshot `json:"snapshot"`
+		Task controlplane.Task `json:"task"`
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return controlplane.Task{}, gatewayResponseError("fetch session task failed", req.URL.String(), resp, body, nil)
@@ -990,20 +996,21 @@ func fetchSessionTask(ctx context.Context, client *http.Client, gatewayURL, sess
 	if err := json.Unmarshal(body, &payload); err != nil {
 		return controlplane.Task{}, gatewayResponseError("fetch session task failed", req.URL.String(), resp, body, err)
 	}
-	for _, task := range payload.Snapshot.Tasks {
-		if task.ID == taskID {
-			return task, nil
-		}
+	if payload.Task.ID != taskID || payload.Task.TargetEndpointID != endpointID {
+		return controlplane.Task{}, fmt.Errorf("fetch session task failed: task %s not found", taskID)
 	}
-	return controlplane.Task{}, fmt.Errorf("fetch session task failed: task %s not found", taskID)
+	return payload.Task, nil
 }
 
-func completeSessionTask(ctx context.Context, client *http.Client, gatewayURL, sessionID, taskID, leaseSecret string, result map[string]any) (controlplane.Task, controlplane.Event, error) {
+func completeSessionTask(ctx context.Context, client *http.Client, gatewayURL, sessionID, endpointID, leaseSecret, taskID string, result map[string]any) (controlplane.Task, controlplane.Event, error) {
 	body, err := json.Marshal(result)
 	if err != nil {
 		return controlplane.Task{}, controlplane.Event{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(gatewayURL, "/")+"/v1/sessions/"+url.PathEscape(sessionID)+"/tasks/"+url.PathEscape(taskID)+"/result", bytes.NewReader(body))
+	values := url.Values{}
+	values.Set("endpoint_id", endpointID)
+	endpoint := strings.TrimRight(gatewayURL, "/") + "/v1/sessions/" + url.PathEscape(sessionID) + "/tasks/" + url.PathEscape(taskID) + "/result?" + values.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return controlplane.Task{}, controlplane.Event{}, err
 	}
