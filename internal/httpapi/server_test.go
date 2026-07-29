@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -145,6 +146,87 @@ func TestTrustBundleEndpointUpdatesSignedBundle(t *testing.T) {
 	handler.ServeHTTP(auditRec, auditReq)
 	if !bytes.Contains(auditRec.Body.Bytes(), []byte("trust_bundle.update")) {
 		t.Fatalf("expected audit response to include trust_bundle.update, got %s", auditRec.Body.String())
+	}
+}
+
+func TestTrustBundleEndpointRenewsExpiredBundle(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	gw := gateway.NewMemoryGatewayWithClock(clock)
+	server := NewServer(gw)
+	initial := gw.SignedTrustBundle()
+	previousHash, err := initial.Hash()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now = initial.NotAfter.Add(time.Second)
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/trust-bundle", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("renewal status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+	var payload struct {
+		TrustBundle model.SignedTrustBundle `json:"trust_bundle"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.TrustBundle.Sequence != initial.Sequence+1 {
+		t.Fatalf("renewed sequence = %d, want %d", payload.TrustBundle.Sequence, initial.Sequence+1)
+	}
+	if payload.TrustBundle.PreviousBundleHash != previousHash {
+		t.Fatalf("renewed previous hash = %q, want %q", payload.TrustBundle.PreviousBundleHash, previousHash)
+	}
+	if !payload.TrustBundle.NotAfter.After(now) {
+		t.Fatalf("renewed bundle expires at %s, which is not after %s", payload.TrustBundle.NotAfter, now)
+	}
+	root, err := payload.TrustBundle.ActiveTrustBundle(payload.TrustBundle.SigningKeyID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := payload.TrustBundle.Verify(root, now); err != nil {
+		t.Fatalf("renewed bundle should verify: %v", err)
+	}
+	audit := gw.AuditEvents()
+	if len(audit) != 1 || audit[0].Action != "trust_bundle.renew" {
+		t.Fatalf("audit = %#v, want one trust_bundle.renew event", audit)
+	}
+}
+
+func TestTrustBundleEndpointRenewsExpiredPersistedBundle(t *testing.T) {
+	now := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	clock := func() time.Time { return now }
+	publicKey, privateKey := httpTestKeyPair(t)
+	gw := gateway.NewMemoryGatewayWithSigningKey(clock, "persistent-gateway", publicKey, privateKey)
+	initial := gw.SignedTrustBundle()
+	statePath := filepath.Join(t.TempDir(), "gateway-state.json")
+	store, err := gateway.NewFileStateStore(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveFrom(gw); err != nil {
+		t.Fatal(err)
+	}
+
+	now = initial.NotAfter.Add(time.Second)
+	restarted := gateway.NewMemoryGatewayWithSigningKey(clock, "persistent-gateway", publicKey, privateKey)
+	if _, ok, err := store.LoadInto(restarted); err != nil || !ok {
+		t.Fatalf("load expired state = ok:%t err:%v", ok, err)
+	}
+	server := NewServerWithStateStore(restarted, store)
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/v1/trust-bundle", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("renewal status = %d, body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	verified := gateway.NewMemoryGatewayWithSigningKey(clock, "persistent-gateway", publicKey, privateKey)
+	if _, ok, err := store.LoadInto(verified); err != nil || !ok {
+		t.Fatalf("load persisted renewal = ok:%t err:%v", ok, err)
+	}
+	if got := verified.SignedTrustBundle().Sequence; got != initial.Sequence+1 {
+		t.Fatalf("persisted renewal sequence = %d, want %d", got, initial.Sequence+1)
 	}
 }
 

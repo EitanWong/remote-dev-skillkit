@@ -26,67 +26,61 @@ const (
 	defaultArtifactTicketTTL    = 15 * time.Minute
 	maxWebHandoffRequestBytes   = 4 << 10
 	webHandoffArtifactTicketKey = "X-Rdev-Handoff-Ticket"
-	webHandoffLauncherFilename  = "Connect-Rdev.cmd"
-	webHandoffFallbackFilename  = "Connect-Rdev.ps1"
 )
 
 type webHandoffPageCopy struct {
-	Title              string `json:"title"`
-	Heading            string `json:"heading"`
-	Description        string `json:"description"`
-	Download           string `json:"download"`
-	MissingProof       string `json:"missingProof"`
-	WindowsOnly        string `json:"windowsOnly"`
-	Preparing          string `json:"preparing"`
-	Downloaded         string `json:"downloaded"`
-	Fallback           string `json:"fallback"`
-	ClaimFailed        string `json:"claimFailed"`
-	FallbackDownload   string `json:"fallbackDownload"`
-	UnexpectedDownload string `json:"unexpectedDownload"`
+	Title               string `json:"title"`
+	Heading             string `json:"heading"`
+	Description         string `json:"description"`
+	CopyAction          string `json:"copyAction"`
+	MissingProof        string `json:"missingProof"`
+	WindowsOnly         string `json:"windowsOnly"`
+	Preparing           string `json:"preparing"`
+	ClaimFailed         string `json:"claimFailed"`
+	Copied              string `json:"copied"`
+	CopyManual          string `json:"copyManual"`
+	UnexpectedBootstrap string `json:"unexpectedBootstrap"`
 }
 
 var webHandoffPageCopies = map[string]webHandoffPageCopy{
 	"en": {
-		Title:              "Remote Dev Host Connection",
-		Heading:            "Connect this Windows host",
-		Description:        "This link downloads a native Windows launcher. Downloading does not start it; double-click Connect-Rdev.cmd in a visible console window.",
-		Download:           "Download Windows launcher",
-		MissingProof:       "This handoff link is missing its confirmation fragment.",
-		WindowsOnly:        "Open this handoff on a Windows device. It has not been claimed.",
-		Preparing:          "Preparing the Windows launcher…",
-		Downloaded:         "Downloaded Connect-Rdev.cmd. Double-click it to start the managed connector.",
-		Fallback:           "If the Windows launcher cannot run, download the PowerShell fallback.",
-		ClaimFailed:        "The handoff could not be claimed. Ask the operator for a fresh link.",
-		FallbackDownload:   "Download PowerShell fallback",
-		UnexpectedDownload: "The handoff response did not include a launcher.",
+		Title:               "Remote Dev Host Connection",
+		Heading:             "Connect this Windows host",
+		Description:         "This page prepares a short-lived connection command. Copy it, paste it into an already-open PowerShell window, and press Enter. The connector is fetched and verified automatically.",
+		CopyAction:          "Copy connection command",
+		MissingProof:        "This handoff link is missing its confirmation fragment.",
+		WindowsOnly:         "Open this handoff on a Windows device. It has not been claimed.",
+		Preparing:           "Preparing connection command…",
+		ClaimFailed:         "The handoff could not be claimed. Ask the operator for a fresh link.",
+		Copied:              "Copied. Paste into the open PowerShell window and press Enter.",
+		CopyManual:          "Copy is unavailable. The command is selected below; copy it, then paste it into the open PowerShell window and press Enter.",
+		UnexpectedBootstrap: "The handoff response did not include a connection command.",
 	},
 	"zh-Hans": {
-		Title:              "远程开发主机连接",
-		Heading:            "连接这台 Windows 主机",
-		Description:        "此链接会下载原生 Windows 启动器。下载本身不会启动它；请在可见的控制台窗口中双击 Connect-Rdev.cmd。",
-		Download:           "下载 Windows 启动器",
-		MissingProof:       "此连接链接缺少确认片段。",
-		WindowsOnly:        "请在 Windows 设备上打开此连接页。它尚未被领取。",
-		Preparing:          "正在准备 Windows 启动器…",
-		Downloaded:         "已下载 Connect-Rdev.cmd。双击它即可启动托管连接器。",
-		Fallback:           "若 Windows 启动器无法运行，请下载 PowerShell 备用脚本。",
-		ClaimFailed:        "此连接未能领取。请向操作员获取新的链接。",
-		FallbackDownload:   "下载 PowerShell 备用脚本",
-		UnexpectedDownload: "连接响应未包含启动器。",
+		Title:               "远程开发主机连接",
+		Heading:             "连接这台 Windows 主机",
+		Description:         "此页面会准备一条短期连接命令。复制后粘贴到当前已打开的 PowerShell 窗口并按 Enter；连接器会自动获取并校验。",
+		CopyAction:          "复制连接命令",
+		MissingProof:        "此连接链接缺少确认片段。",
+		WindowsOnly:         "请在 Windows 设备上打开此连接页。它尚未被领取。",
+		Preparing:           "正在准备连接命令…",
+		ClaimFailed:         "此连接未能领取。请向操作员获取新的链接。",
+		Copied:              "已复制。请粘贴到当前 PowerShell 窗口并按 Enter 执行。",
+		CopyManual:          "浏览器未允许复制。下方命令已被选中，请复制后粘贴到当前 PowerShell 窗口并按 Enter 执行。",
+		UnexpectedBootstrap: "连接响应未包含连接命令。",
 	},
 	"zh-Hant": {
-		Title:              "遠端開發主機連線",
-		Heading:            "連線這台 Windows 主機",
-		Description:        "此連結會下載原生 Windows 啟動器。下載本身不會啟動它；請在可見的主控台視窗中雙擊 Connect-Rdev.cmd。",
-		Download:           "下載 Windows 啟動器",
-		MissingProof:       "此連線連結缺少確認片段。",
-		WindowsOnly:        "請在 Windows 裝置上開啟此連線頁。它尚未被領取。",
-		Preparing:          "正在準備 Windows 啟動器…",
-		Downloaded:         "已下載 Connect-Rdev.cmd。雙擊它即可啟動受管連線器。",
-		Fallback:           "若 Windows 啟動器無法執行，請下載 PowerShell 備用指令碼。",
-		ClaimFailed:        "此連線未能領取。請向操作員取得新的連結。",
-		FallbackDownload:   "下載 PowerShell 備用指令碼",
-		UnexpectedDownload: "連線回應未包含啟動器。",
+		Title:               "遠端開發主機連線",
+		Heading:             "連線這台 Windows 主機",
+		Description:         "此頁面會準備一條短期連線指令。複製後貼到目前已開啟的 PowerShell 視窗並按 Enter；連線器會自動取得並驗證。",
+		CopyAction:          "複製連線指令",
+		MissingProof:        "此連線連結缺少確認片段。",
+		WindowsOnly:         "請在 Windows 裝置上開啟此連線頁。它尚未被領取。",
+		Preparing:           "正在準備連線指令…",
+		ClaimFailed:         "此連線未能領取。請向操作員取得新的連結。",
+		Copied:              "已複製。請貼到目前 PowerShell 視窗並按 Enter 執行。",
+		CopyManual:          "瀏覽器未允許複製。下方指令已被選取，請複製後貼到目前 PowerShell 視窗並按 Enter 執行。",
+		UnexpectedBootstrap: "連線回應未包含連線指令。",
 	},
 }
 
@@ -309,17 +303,17 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
 	_, _ = fmt.Fprintf(w, `<!doctype html>
 <html lang="%s">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>%s</title>
-<style>body{font-family:system-ui,sans-serif;max-width:42rem;margin:4rem auto;padding:0 1.25rem;color:#172033}button{padding:.7rem 1rem;font:inherit}#status{min-height:1.5rem}#fallback{display:inline-block;margin-top:.5rem}</style></head>
-<body><main><h1 id="heading">%s</h1><p id="description">%s</p><button id="download" type="button">%s</button><p id="status" role="status"></p><a id="fallback" hidden></a></main>
+<style>body{font-family:system-ui,sans-serif;max-width:42rem;margin:4rem auto;padding:0 1.25rem;color:#172033}button{padding:.7rem 1rem;font:inherit}#status{min-height:1.5rem}#connection-script{box-sizing:border-box;display:block;width:100%%;min-height:14rem;margin-top:.75rem;font-family:ui-monospace,monospace}</style></head>
+<body><main><h1 id="heading">%s</h1><p id="description">%s</p><button id="copy-command" type="button">%s</button><p id="status" role="status"></p><textarea id="connection-script" hidden readonly spellcheck="false"></textarea></main>
 <script>
 (() => {
   const pageCopies = %s;
   const initialLocale = %s;
   const claimPath = %s;
-  const button = document.getElementById('download');
+  const button = document.getElementById('copy-command');
   const status = document.getElementById('status');
-  const fallback = document.getElementById('fallback');
-  const languages = [...(navigator.languages || []), navigator.language, initialLocale].filter(Boolean);
+  const connectionBootstrap = document.getElementById('connection-script');
+  const browserLanguages = [...(navigator.languages || []), navigator.language].filter(Boolean);
   const localeFor = values => {
     for (const value of values) {
       const language = String(value).toLowerCase();
@@ -328,27 +322,32 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
     }
     return 'en';
   };
-  const locale = localeFor(languages);
+  const locale = localeFor(browserLanguages.length ? browserLanguages : [initialLocale]);
   const copy = pageCopies[locale] || pageCopies.en;
   document.documentElement.lang = locale;
   document.title = copy.title;
   document.getElementById('heading').textContent = copy.heading;
   document.getElementById('description').textContent = copy.description;
-  button.textContent = copy.download;
+  button.textContent = copy.copyAction;
+  connectionBootstrap.setAttribute('aria-label', copy.copyAction);
   const isWindowsBrowser = () => {
     const clientHintPlatform = navigator.userAgentData && navigator.userAgentData.platform;
     const platform = String(clientHintPlatform || navigator.platform || '');
     return /^win/i.test(platform) || /windows/i.test(navigator.userAgent || '');
   };
-  const download = (content, filename) => {
-    const blob = new Blob([content], {type:'text/plain;charset=utf-8'});
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(link.href), 0);
+  const selectForManualCopy = () => {
+    connectionBootstrap.hidden = false;
+    connectionBootstrap.focus();
+    connectionBootstrap.select();
+  };
+  const copyBootstrap = async () => {
+    try {
+      await navigator.clipboard.writeText(connectionBootstrap.value);
+      status.textContent = copy.copied;
+    } catch (_) {
+      selectForManualCopy();
+      status.textContent = copy.copyManual;
+    }
   };
   const proof = window.location.hash.slice(1);
   if (!proof) { button.disabled = true; status.textContent = copy.missingProof; return; }
@@ -362,27 +361,20 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
       const response = await fetch(claimPath, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({proof})});
       if (!response.ok) { throw new Error('claim failed'); }
       const payload = await response.json();
-      if (typeof payload.bootstrap !== 'string' || !payload.bootstrap || typeof payload.bootstrap_filename !== 'string' || !payload.bootstrap_filename) {
-        throw new Error('launcher missing');
+      if (typeof payload.bootstrap !== 'string' || !payload.bootstrap) {
+        throw new Error('connection command missing');
       }
       claimed = true;
-      download(payload.bootstrap, payload.bootstrap_filename);
-      if (typeof payload.fallback_bootstrap === 'string' && payload.fallback_bootstrap && typeof payload.fallback_bootstrap_filename === 'string' && payload.fallback_bootstrap_filename) {
-        const fallbackBlob = new Blob([payload.fallback_bootstrap], {type:'text/plain;charset=utf-8'});
-        fallback.href = URL.createObjectURL(fallbackBlob);
-        fallback.download = payload.fallback_bootstrap_filename;
-        fallback.textContent = copy.fallbackDownload;
-        fallback.hidden = false;
-      }
-      status.textContent = copy.downloaded;
-      if (!fallback.hidden) { status.textContent += ' ' + copy.fallback; }
+      connectionBootstrap.value = payload.bootstrap;
+      connectionBootstrap.hidden = false;
+      await copyBootstrap();
     } catch (_) {
-      status.textContent = claimed ? copy.unexpectedDownload : copy.claimFailed;
+      status.textContent = claimed ? copy.unexpectedBootstrap : copy.claimFailed;
       if (!claimed) { button.disabled = false; }
     }
   });
 })();
-</script></body></html>`, locale, copy.Title, copy.Heading, copy.Description, copy.Download, string(copies), string(initialLocale), string(claimPath))
+</script></body></html>`, locale, copy.Title, copy.Heading, copy.Description, copy.CopyAction, string(copies), string(initialLocale), string(claimPath))
 }
 
 func (s Server) claimWebHandoff(w http.ResponseWriter, r *http.Request, id string) {
@@ -415,97 +407,18 @@ func (s Server) claimWebHandoff(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 	writeWebHandoffSecurityHeaders(w)
-	launcher := s.webHandoffWindowsLauncher(handoff, session.JoinCode, ticket)
-	fallback := s.webHandoffPowerShellFallback(handoff, session.JoinCode, ticket)
+	bootstrap := s.webHandoffPowerShellBootstrap(handoff, session.JoinCode, ticket)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"bootstrap":                   launcher,
-		"bootstrap_filename":          webHandoffLauncherFilename,
-		"fallback_bootstrap":          fallback,
-		"fallback_bootstrap_filename": webHandoffFallbackFilename,
-		"expires_at":                  handoff.ArtifactTicketExpiresAt,
+		"bootstrap":  bootstrap,
+		"expires_at": handoff.ArtifactTicketExpiresAt,
 	})
 }
 
-func (s Server) webHandoffWindowsLauncher(handoff gateway.WebHandoff, joinCode, ticket string) string {
-	assetURL := s.webHandoff.publicBaseURL + "/connect/" + url.PathEscape(handoff.ID) + "/rdev-host.exe"
-	lines := []string{
-		"@echo off",
-		"setlocal EnableExtensions DisableDelayedExpansion",
-		cmdSetLine("GATEWAY", s.webHandoff.publicBaseURL),
-		cmdSetLine("JOIN_CODE", joinCode),
-		cmdSetLine("ARTIFACT_URI", assetURL),
-		cmdSetLine("ARTIFACT_TICKET", ticket),
-		cmdSetLine("ARTIFACT_TICKET_HEADER", webHandoffArtifactTicketKey),
-		cmdSetLine("EXPECTED_SHA256", s.webHandoff.windowsAMD64.SHA256),
-		"",
-		"if not defined LOCALAPPDATA (",
-		"  echo LOCALAPPDATA is required to start the managed connector.",
-		"  exit /b 1",
-		")",
-		`set "STATE_ROOT=%LOCALAPPDATA%\RemoteDevSkillkit\managed-host"`,
-		`set "HOST_BINARY=%STATE_ROOT%\rdev-host.exe"`,
-		`set "TEMP_BINARY=%STATE_ROOT%\rdev-host.download.exe"`,
-		`set "IDENTITY_STORE=%STATE_ROOT%\identity.json"`,
-		`set "TRUST_STORE=%STATE_ROOT%	rust.json"`,
-		`set "LOCK_STORE=%STATE_ROOT%\workspace-locks"`,
-		"",
-		"where curl.exe >nul 2>nul",
-		"if errorlevel 1 (",
-		"  echo curl.exe is unavailable. Use the PowerShell fallback from the handoff page.",
-		"  exit /b 1",
-		")",
-		`if not exist "%STATE_ROOT%" mkdir "%STATE_ROOT%"`,
-		"if errorlevel 1 (",
-		"  echo Failed to create managed connector state directory.",
-		"  exit /b 1",
-		")",
-		`if not exist "%LOCK_STORE%" mkdir "%LOCK_STORE%"`,
-		"if errorlevel 1 (",
-		"  echo Failed to create workspace lock directory.",
-		"  exit /b 1",
-		")",
-		"",
-		"echo Downloading and verifying Remote Dev Skillkit connector...",
-		`curl.exe --fail --silent --show-error --location --header "%ARTIFACT_TICKET_HEADER%: %ARTIFACT_TICKET%" --output "%TEMP_BINARY%" "%ARTIFACT_URI%"`,
-		"if errorlevel 1 (",
-		"  echo Connector download failed.",
-		"  exit /b 1",
-		")",
-		`set "ACTUAL_SHA256="`,
-		`for /f "tokens=* delims= " %%H in ('certutil.exe -hashfile "%TEMP_BINARY%" SHA256 ^| findstr /R /I "^[0-9A-F][0-9A-F]"') do if not defined ACTUAL_SHA256 set "ACTUAL_SHA256=%%H"`,
-		`set "ACTUAL_SHA256=%ACTUAL_SHA256: =%"`,
-		`if /I not "%ACTUAL_SHA256%"=="%EXPECTED_SHA256%" (`,
-		"  echo rdev-host.exe SHA-256 verification failed.",
-		`  del /q "%TEMP_BINARY%" >nul 2>nul`,
-		"  exit /b 1",
-		")",
-		`move /Y "%TEMP_BINARY%" "%HOST_BINARY%" >nul`,
-		"if errorlevel 1 (",
-		"  echo Failed to install the verified connector.",
-		"  exit /b 1",
-		")",
-		"",
-		"echo Starting managed Remote Dev Skillkit connector in this visible window.",
-		`"%HOST_BINARY%" serve --mode managed --gateway "%GATEWAY%" --join-code "%JOIN_CODE%" --once=false --max-tasks 0 --transport long-poll --identity-store "%IDENTITY_STORE%" --trust-store "%TRUST_STORE%" --workspace-lock-store "%LOCK_STORE%"`,
-		`set "EXIT_CODE=%ERRORLEVEL%"`,
-		"endlocal & exit /b %EXIT_CODE%",
-	}
-	return strings.Join(lines, "\r\n") + "\r\n"
-}
-
-func cmdSetLine(name, value string) string {
-	return `set "` + name + "=" + cmdLiteral(value) + `"`
-}
-
-func cmdLiteral(value string) string {
-	return strings.NewReplacer("^", "^^", "&", "^&", "|", "^|", "<", "^<", ">", "^>", "%", "%%").Replace(value)
-}
-
-func (s Server) webHandoffPowerShellFallback(handoff gateway.WebHandoff, joinCode, ticket string) string {
+func (s Server) webHandoffPowerShellBootstrap(handoff gateway.WebHandoff, joinCode, ticket string) string {
 	assetURL := s.webHandoff.publicBaseURL + "/connect/" + url.PathEscape(handoff.ID) + "/rdev-host.exe"
 	return fmt.Sprintf(`# Remote Dev Skillkit managed-host bootstrap.
-# This script runs visibly in the current PowerShell window. It does not create
-# a service, scheduled task, firewall rule, or execution-policy bypass.
+	# Paste this script into an already-open PowerShell window. It does not create
+	# a service, scheduled task, firewall rule, or execution-policy bypass.
 $ErrorActionPreference = 'Stop'
 $gateway = %s
 $joinCode = %s
@@ -527,7 +440,8 @@ Move-Item -LiteralPath $tempBinary -Destination $hostBinary -Force
 
 Write-Host 'Starting managed Remote Dev Skillkit connector in this visible PowerShell window.'
 & $hostBinary serve --mode managed --gateway $gateway --join-code $joinCode --once=false --max-tasks 0 --transport long-poll --identity-store $identityStore --trust-store $trustStore --workspace-lock-store $lockStore
-exit $LASTEXITCODE
+$connectorExitCode = $LASTEXITCODE
+if ($connectorExitCode -ne 0) { throw "rdev-host.exe exited with code $connectorExitCode." }
 `, powershellLiteral(s.webHandoff.publicBaseURL), powershellLiteral(joinCode), powershellLiteral(assetURL), powershellLiteral(ticket), powershellLiteral(s.webHandoff.windowsAMD64.SHA256), powershellLiteral(webHandoffArtifactTicketKey))
 }
 

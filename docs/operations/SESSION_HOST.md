@@ -41,6 +41,10 @@ permissions. Keep the pair across restart to restore session, endpoint lease,
 task, event, and audit state. Browser handoff proofs remain intentionally
 short-lived and are not restored after a gateway restart.
 
+The gateway renews its signed host trust bundle before expiry when a host reads
+`/v1/trust-bundle`; with the state/signing-key pair configured, that renewal is
+persisted across restart.
+
 The host keeps an outbound authenticated long-poll. A permitted operator task
 is appended by the gateway and wakes that poll; no inbound host port or
 unrestricted resident shell is created. Task authority remains bound to the
@@ -82,10 +86,10 @@ An operator-managed HTTPS gateway can serve a short-lived browser handoff when
 it starts with `--public-base-url HTTPS_URL` and
 `--windows-amd64-host-binary PATH`. Create the link through
 `rdev.sessions.handoff`, then send that link to the Windows operator. The
-browser exposes its native download only after a one-time claim; the page
-localizes itself, gates the action to Windows, downloads
-a hash-verifying double-click `Connect-Rdev.cmd` launcher, and exposes
-PowerShell only as a fallback. The target connects outward via managed
+browser exposes a copyable PowerShell connection command only after a one-time
+claim; the page localizes itself, gates the action to Windows, and the operator
+pastes the command into an existing PowerShell window. The command automatically
+fetches and hash-verifies the host binary before connecting outward via managed
 long-poll. See
 [`WEB_HANDOFF.md`](WEB_HANDOFF.md) for deployment, expiry, and capability
 details.

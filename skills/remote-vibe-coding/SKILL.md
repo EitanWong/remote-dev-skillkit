@@ -15,10 +15,11 @@ Use for scoped engineering work on a host that has joined the active Control Pla
 2. Create a session through MCP and retain its session identifier, endpoint state, and gateway source.
 3. For a configured managed HTTPS gateway, create `rdev.sessions.handoff` and
    send the returned browser URL to the Windows operator. The native page
-   localizes to the target browser, gates claim to Windows, downloads
-   `Connect-Rdev.cmd`, and the operator double-clicks that launcher; use the
-   page's PowerShell download only as its explicit fallback. Otherwise start the
-   host with the returned join code and current gateway URL.
+   localizes to the target browser, gates claim to Windows, and copies a
+   short-lived PowerShell connection command. The operator pastes it into an
+   already-open PowerShell window; it automatically fetches and hash-verifies
+   the scoped host binary without a manual launcher download.
+   Otherwise start the host with the returned join code and current gateway URL.
 4. Wait for an endpoint through `rdev.sessions.status` and `rdev.sessions.events`.
 5. Submit the smallest task that states adapter, workspace, capability, limits, and expected verification.
 6. Inspect terminal state, events, artifacts, changed files, and test output before reporting completion.

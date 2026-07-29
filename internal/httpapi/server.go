@@ -600,7 +600,15 @@ func (s Server) revokeSession(w http.ResponseWriter, r *http.Request, sessionID 
 }
 
 func (s Server) getTrustBundle(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"trust_bundle": s.Gateway.SignedTrustBundle()})
+	bundle, renewed, err := s.Gateway.RenewSignedTrustBundle()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "renew signed trust bundle")
+		return
+	}
+	if renewed && !s.persistState(w) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"trust_bundle": bundle})
 }
 
 func (s Server) updateTrustBundle(w http.ResponseWriter, r *http.Request) {
