@@ -134,10 +134,10 @@ func TestHostServeSessionCompletesTask(t *testing.T) {
 
 func TestFetchSessionTaskUsesEndpointLeaseRoute(t *testing.T) {
 	const (
-		sessionID    = "ses_task_fetch"
-		endpointID   = "end_task_fetch"
-		leaseSecret  = "lease-task-fetch"
-		taskID       = "task_task_fetch"
+		sessionID   = "ses_task_fetch"
+		endpointID  = "end_task_fetch"
+		leaseSecret = "lease-task-fetch"
+		taskID      = "task_task_fetch"
 	)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/sessions/"+sessionID+"/tasks/"+taskID {
@@ -159,6 +159,18 @@ func TestFetchSessionTaskUsesEndpointLeaseRoute(t *testing.T) {
 	}
 	if task.ID != taskID || task.TargetEndpointID != endpointID {
 		t.Fatalf("task = %#v", task)
+	}
+}
+
+func TestFetchSessionTaskRejectsMismatchedTarget(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"task": controlplane.Task{ID: "task-1", TargetEndpointID: "end-other"}})
+	}))
+	defer server.Close()
+
+	_, err := fetchSessionTask(context.Background(), server.Client(), server.URL, "ses-1", "end-expected", "lease-1", "task-1")
+	if err == nil || !strings.Contains(err.Error(), "task task-1 not found") {
+		t.Fatalf("mismatched task error = %v", err)
 	}
 }
 
@@ -590,6 +602,9 @@ func TestCompleteSessionTaskRetriesTransientEOFWithIdempotencyKey(t *testing.T) 
 		if req.URL.Path != "/v1/sessions/ses_1/tasks/task_1/result" {
 			t.Fatalf("expected task result path, got %s", req.URL.Path)
 		}
+		if req.URL.Query().Get("endpoint_id") != "ep_1" || req.Header.Get("Authorization") != "Bearer lease_1" {
+			t.Fatalf("task result lost endpoint lease binding: query=%v auth=%q", req.URL.Query(), req.Header.Get("Authorization"))
+		}
 		key := strings.TrimSpace(req.Header.Get("Idempotency-Key"))
 		if key == "" {
 			t.Fatalf("expected idempotency key on attempt %d", attempts)
@@ -622,7 +637,7 @@ func TestCompleteSessionTaskRetriesTransientEOFWithIdempotencyKey(t *testing.T) 
 	})
 	client := &http.Client{Transport: retryingRoundTripper{Base: base, MaxRetries: 2}}
 
-	task, event, err := completeSessionTask(context.Background(), client, "https://gateway.example.test", "ses_1", "task_1", "lease_1", map[string]any{
+	task, event, err := completeSessionTask(context.Background(), client, "https://gateway.example.test", "ses_1", "ep_1", "task_1", "lease_1", map[string]any{
 		"status":           "succeeded",
 		"attempt_id":       "attempt_1",
 		"idempotency_key":  "result_1",
@@ -728,11 +743,14 @@ func TestRunSessionTasksSwitchesRouteWithoutReregistering(t *testing.T) {
 				return nil, fmt.Errorf("unexpected event route %q", req.URL.Host)
 			}
 		}
-		if req.Method == http.MethodGet && req.URL.Path == "/v1/sessions/ses_route" {
+		if req.Method == http.MethodGet && req.URL.Path == "/v1/sessions/ses_route/tasks/task_route" {
 			if req.URL.Host != "secondary.example.test" {
 				t.Fatalf("task fetch route = %q, want secondary", req.URL.Host)
 			}
-			return response(http.StatusOK, `{"snapshot":{"tasks":[{"schema_version":"rdev.task.v1","id":"task_route","session_id":"ses_route","target_endpoint_id":"ep_route","attempt_id":"attempt_route","adapter":"shell","intent":"fixture","capabilities":["shell.user"],"status":"offered"}]}}`)
+			if req.URL.Query().Get("endpoint_id") != "ep_route" || req.Header.Get("Authorization") != "Bearer lease_three" {
+				t.Fatalf("task fetch lost endpoint lease binding: query=%v auth=%q", req.URL.Query(), req.Header.Get("Authorization"))
+			}
+			return response(http.StatusOK, `{"task":{"schema_version":"rdev.task.v1","id":"task_route","session_id":"ses_route","target_endpoint_id":"ep_route","attempt_id":"attempt_route","adapter":"shell","intent":"fixture","capabilities":["shell.user"],"status":"offered"}}`)
 		}
 		if req.Method == http.MethodPost && req.URL.Path == "/v1/sessions/ses_route/tasks/task_route/result" {
 			if req.URL.Host != "secondary.example.test" || req.Header.Get("Authorization") != "Bearer lease_three" || req.Header.Get("Idempotency-Key") == "" {
@@ -825,8 +843,11 @@ func TestRunSessionTasksDoesNotSkipEventsBeyondTransportLimit(t *testing.T) {
 				"last_seq": 17,
 			})
 		}
-		if req.Method == http.MethodGet && req.URL.Path == "/v1/sessions/ses_cursor" {
-			return response(http.StatusOK, map[string]any{"snapshot": controlplane.SessionSnapshot{Tasks: []controlplane.Task{{ID: "task_cursor", SessionID: "ses_cursor", TargetEndpointID: "ep_cursor", AttemptID: "attempt_cursor", Capabilities: []string{"shell.user"}}}}})
+		if req.Method == http.MethodGet && req.URL.Path == "/v1/sessions/ses_cursor/tasks/task_cursor" {
+			if req.URL.Query().Get("endpoint_id") != "ep_cursor" || req.Header.Get("Authorization") != "Bearer lease_two" {
+				t.Fatalf("cursor task fetch lost endpoint lease binding: query=%v auth=%q", req.URL.Query(), req.Header.Get("Authorization"))
+			}
+			return response(http.StatusOK, map[string]any{"task": controlplane.Task{ID: "task_cursor", SessionID: "ses_cursor", TargetEndpointID: "ep_cursor", AttemptID: "attempt_cursor", Capabilities: []string{"shell.user"}}})
 		}
 		if req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/tasks/task_cursor/result") {
 			return response(http.StatusOK, map[string]any{"task": controlplane.Task{ID: "task_cursor"}, "event": controlplane.Event{Seq: 18}})
@@ -870,12 +891,15 @@ func TestRunSessionTasksRequeuesInitialEventAcrossTaskFetchFailover(t *testing.T
 		if req.URL.Path == "/v1/trust-bundle" {
 			return response(http.StatusOK, string(trustBody))
 		}
-		if req.Method == http.MethodGet && req.URL.Path == "/v1/sessions/ses_initial" {
+		if req.Method == http.MethodGet && req.URL.Path == "/v1/sessions/ses_initial/tasks/task_initial" {
 			taskFetchHosts = append(taskFetchHosts, req.URL.Host)
 			if req.URL.Host == "primary.example.test" {
 				return nil, io.ErrUnexpectedEOF
 			}
-			return response(http.StatusOK, `{"snapshot":{"tasks":[{"id":"task_initial","session_id":"ses_initial","target_endpoint_id":"ep_initial","attempt_id":"attempt_initial","capabilities":["shell.user"]}]}}`)
+			if req.URL.Query().Get("endpoint_id") != "ep_initial" || req.Header.Get("Authorization") == "" {
+				t.Fatalf("initial task fetch lost endpoint lease binding: query=%v auth=%q", req.URL.Query(), req.Header.Get("Authorization"))
+			}
+			return response(http.StatusOK, `{"task":{"id":"task_initial","session_id":"ses_initial","target_endpoint_id":"ep_initial","attempt_id":"attempt_initial","capabilities":["shell.user"]}}`)
 		}
 		if req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/tasks/task_initial/result") {
 			resultCalls++

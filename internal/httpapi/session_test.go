@@ -272,7 +272,8 @@ func TestHTTPTargetLeaseFetchesOnlyAssignedTask(t *testing.T) {
 	}
 
 	handler := NewServerWithOperatorAuth(gw, "", httpTestOperatorAuth(t)).Handler()
-	path := "/v1/sessions/" + url.PathEscape(session.ID) + "/tasks/" + url.PathEscape(task.ID) + "?endpoint_id=" + url.QueryEscape(endpoint.ID)
+	taskPath := "/v1/sessions/" + url.PathEscape(session.ID) + "/tasks/" + url.PathEscape(task.ID)
+	path := taskPath + "?endpoint_id=" + url.QueryEscape(endpoint.ID)
 
 	missingLease := httptest.NewRequest(http.MethodGet, path, nil)
 	missingLeaseRec := httptest.NewRecorder()
@@ -294,6 +295,14 @@ func TestHTTPTargetLeaseFetchesOnlyAssignedTask(t *testing.T) {
 	decodeHTTP(t, recorder, &response)
 	if response.Task.ID != task.ID || response.Task.TargetEndpointID != endpoint.ID {
 		t.Fatalf("target task fetch response = %#v", response.Task)
+	}
+
+	missingResultLease := httptest.NewRequest(http.MethodPost, taskPath+"/result?endpoint_id="+url.QueryEscape(endpoint.ID), strings.NewReader(`{"idempotency_key":"missing-result-lease","status":"succeeded"}`))
+	missingResultLease.Header.Set("Content-Type", "application/json")
+	missingResultLeaseRec := httptest.NewRecorder()
+	handler.ServeHTTP(missingResultLeaseRec, missingResultLease)
+	if missingResultLeaseRec.Code != http.StatusUnauthorized {
+		t.Fatalf("missing target result lease status = %d, want 401: %s", missingResultLeaseRec.Code, missingResultLeaseRec.Body.String())
 	}
 }
 
@@ -470,7 +479,7 @@ func TestHTTPSessionTaskResultArtifactAndTerminalBehavior(t *testing.T) {
 		t.Fatalf("artifact status = %d body=%s", artifactRec.Code, artifactRec.Body.String())
 	}
 
-	resultRec := postJSON(t, handler, "/v1/sessions/"+url.PathEscape(created.Session.ID)+"/tasks/"+url.PathEscape(taskPayload.Task.ID)+"/result", `{
+	resultRec := postJSON(t, handler, "/v1/sessions/"+url.PathEscape(created.Session.ID)+"/tasks/"+url.PathEscape(taskPayload.Task.ID)+"/result?endpoint_id="+url.QueryEscape(joined.Endpoint.ID), `{
 		"attempt_id":"`+taskPayload.Task.AttemptID+`",
 		"idempotency_key":"result-1",
 		"status":"succeeded",
