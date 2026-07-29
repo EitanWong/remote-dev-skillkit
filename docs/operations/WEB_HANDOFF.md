@@ -18,6 +18,8 @@ listener and routes the public base URL to the local gateway process.
 rdev-gateway \
   --addr 127.0.0.1:8787 \
   --operator-auth-file /protected/operators.json \
+  --state-file /protected/rdev-gateway/state.json \
+  --signing-key-file /protected/rdev-gateway/signing-key.json \
   --public-base-url https://gateway.example \
   --windows-amd64-host-binary /opt/rdev-gateway/bin/rdev-host.exe
 ```
@@ -25,6 +27,9 @@ rdev-gateway \
 `--public-base-url` and `--windows-amd64-host-binary` are a required pair. The
 binary is loaded and hashed at gateway startup. Readiness reports
 `web_handoff_enabled: true` only after both values are valid.
+Managed deployments require the protected state/key pair so signed trust
+renewals persist across restart; see [Session host operations](SESSION_HOST.md)
+for file-mode requirements.
 
 ## Operator flow
 
@@ -99,7 +104,9 @@ browser-control bypass is used.
 - Claim revalidates that the session is still joinable before issuing a
   bootstrap; an ineligible session leaves the handoff unclaimed rather than
   issuing a script that cannot join.
-- Gateway restart invalidates active pilot sessions and in-memory handoffs.
+- Gateway restart ends live long-polls and invalidates in-memory handoffs. With
+  the configured state/key pair, session, audit, and trust state restore; a
+  managed host reconnects through its persisted local identity.
 - `GET /v1/trust-bundle` renews its signed bundle before expiry (and repairs an
   expired persisted bundle) using the same signing key and a linked sequence;
   a configured state store persists the renewal. A healthy `/healthz` alone
