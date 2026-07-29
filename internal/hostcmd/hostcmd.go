@@ -745,7 +745,7 @@ func (a App) runSessionTaskWithRoutes(ctx context.Context, opts serveOptions, cl
 		if pooled {
 			requestCtx, cancelRequest = routeRequestContext(ctx, snapshot, sessionRequestTimeout(opts))
 		}
-		_, _, completeErr := completeSessionTask(requestCtx, client, opts.GatewayURL, sessionID, endpointID, task.ID, leaseSecret, payload)
+		_, _, completeErr := completeSessionTask(requestCtx, client, opts.GatewayURL, sessionID, endpointID, leaseSecret, task.ID, payload)
 		cancelRequest()
 		if completeErr == nil {
 			if pooled {
@@ -1002,7 +1002,7 @@ func fetchSessionTask(ctx context.Context, client *http.Client, gatewayURL, sess
 	return payload.Task, nil
 }
 
-func completeSessionTask(ctx context.Context, client *http.Client, gatewayURL, sessionID, endpointID, taskID, leaseSecret string, result map[string]any) (controlplane.Task, controlplane.Event, error) {
+func completeSessionTask(ctx context.Context, client *http.Client, gatewayURL, sessionID, endpointID, leaseSecret, taskID string, result map[string]any) (controlplane.Task, controlplane.Event, error) {
 	body, err := json.Marshal(result)
 	if err != nil {
 		return controlplane.Task{}, controlplane.Event{}, err

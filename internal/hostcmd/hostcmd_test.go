@@ -637,7 +637,7 @@ func TestCompleteSessionTaskRetriesTransientEOFWithIdempotencyKey(t *testing.T) 
 	})
 	client := &http.Client{Transport: retryingRoundTripper{Base: base, MaxRetries: 2}}
 
-	task, event, err := completeSessionTask(context.Background(), client, "https://gateway.example.test", "ses_1", "ep_1", "task_1", "lease_1", map[string]any{
+	task, event, err := completeSessionTask(context.Background(), client, "https://gateway.example.test", "ses_1", "ep_1", "lease_1", "task_1", map[string]any{
 		"status":           "succeeded",
 		"attempt_id":       "attempt_1",
 		"idempotency_key":  "result_1",

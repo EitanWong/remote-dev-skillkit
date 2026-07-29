@@ -246,6 +246,7 @@ func TestHTTPTargetLeaseFetchesOnlyAssignedTask(t *testing.T) {
 		Profile:      "managed",
 		Reason:       "target task fetch",
 		Capabilities: []string{"shell.user"},
+		JoinPolicy:   "multi-target",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -254,6 +255,16 @@ func TestHTTPTargetLeaseFetchesOnlyAssignedTask(t *testing.T) {
 		Role:                controlplane.EndpointRoleTarget,
 		Platform:            "windows/amd64",
 		IdentityFingerprint: "target-task-fetch",
+		Capabilities:        []string{"shell.user"},
+		Transport:           controlplane.TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, otherEndpoint, otherLease, err := gw.JoinSession(session.ID, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "other-target-task-fetch",
 		Capabilities:        []string{"shell.user"},
 		Transport:           controlplane.TransportLongPoll,
 	})
@@ -280,6 +291,21 @@ func TestHTTPTargetLeaseFetchesOnlyAssignedTask(t *testing.T) {
 	handler.ServeHTTP(missingLeaseRec, missingLease)
 	if missingLeaseRec.Code != http.StatusUnauthorized {
 		t.Fatalf("missing target lease status = %d, want 401: %s", missingLeaseRec.Code, missingLeaseRec.Body.String())
+	}
+
+	otherRequest := httptest.NewRequest(http.MethodGet, taskPath+"?endpoint_id="+url.QueryEscape(otherEndpoint.ID), nil)
+	otherRequest.Header.Set("Authorization", "Bearer "+otherLease.Secret)
+	otherRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(otherRecorder, otherRequest)
+	if otherRecorder.Code != http.StatusNotFound {
+		t.Fatalf("other target task fetch status = %d, want 404: %s", otherRecorder.Code, otherRecorder.Body.String())
+	}
+	var otherResponse struct {
+		Error controlplane.ProtocolError `json:"error"`
+	}
+	decodeHTTP(t, otherRecorder, &otherResponse)
+	if otherResponse.Error.Code != controlplane.ErrTaskNotFound {
+		t.Fatalf("other target task fetch error = %#v", otherResponse.Error)
 	}
 
 	request := httptest.NewRequest(http.MethodGet, path, nil)
