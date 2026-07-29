@@ -7,7 +7,11 @@ import (
 )
 
 func (g *MemoryGateway) CreateSession(spec controlplane.SessionSpec) (controlplane.Session, error) {
-	return g.controlPlane().CreateSession(spec)
+	session, err := g.controlPlane().CreateSession(spec)
+	if err == nil {
+		g.appendAudit("operator", "session.create", session.ID, "created session")
+	}
+	return session, err
 }
 
 func (g *MemoryGateway) Session(sessionID string) (controlplane.Session, error) {
@@ -15,11 +19,19 @@ func (g *MemoryGateway) Session(sessionID string) (controlplane.Session, error) 
 }
 
 func (g *MemoryGateway) JoinSessionByCode(joinCode string, spec controlplane.EndpointSpec) (controlplane.Session, controlplane.Endpoint, controlplane.Lease, []controlplane.Event, error) {
-	return g.controlPlane().JoinByCode(joinCode, spec)
+	session, endpoint, lease, events, err := g.controlPlane().JoinByCode(joinCode, spec)
+	if err == nil {
+		g.appendAudit("target", "session.join", endpoint.ID, "endpoint joined session")
+	}
+	return session, endpoint, lease, events, err
 }
 
 func (g *MemoryGateway) JoinSession(sessionID string, spec controlplane.EndpointSpec) (controlplane.Session, controlplane.Endpoint, controlplane.Lease, error) {
-	return g.controlPlane().JoinSession(sessionID, spec)
+	session, endpoint, lease, err := g.controlPlane().JoinSession(sessionID, spec)
+	if err == nil {
+		g.appendAudit("target", "session.join", endpoint.ID, "endpoint joined session")
+	}
+	return session, endpoint, lease, err
 }
 
 func (g *MemoryGateway) AppendSessionEvent(sessionID string, event controlplane.Event) (controlplane.Event, error) {
@@ -43,15 +55,27 @@ func (g *MemoryGateway) ValidateSessionLease(sessionID, endpointID, secret strin
 }
 
 func (g *MemoryGateway) SubmitSessionTask(sessionID string, spec controlplane.TaskSpec) (controlplane.Task, controlplane.Event, error) {
-	return g.controlPlane().SubmitTask(sessionID, spec)
+	task, event, err := g.controlPlane().SubmitTask(sessionID, spec)
+	if err == nil {
+		g.appendAudit("operator", "session.task.submit", task.ID, "offered task to target endpoint")
+	}
+	return task, event, err
 }
 
 func (g *MemoryGateway) CancelSessionTask(sessionID, taskID, reason, idempotencyKey string) (controlplane.Task, controlplane.Event, error) {
-	return g.controlPlane().CancelTask(sessionID, taskID, reason, idempotencyKey)
+	task, event, err := g.controlPlane().CancelTask(sessionID, taskID, reason, idempotencyKey)
+	if err == nil {
+		g.appendAudit("operator", "session.task.cancel", task.ID, "canceled task")
+	}
+	return task, event, err
 }
 
 func (g *MemoryGateway) ResumeSessionTask(sessionID, taskID, checkpointID, idempotencyKey string) (controlplane.Task, controlplane.Event, error) {
-	return g.controlPlane().ResumeTask(sessionID, taskID, checkpointID, idempotencyKey)
+	task, event, err := g.controlPlane().ResumeTask(sessionID, taskID, checkpointID, idempotencyKey)
+	if err == nil {
+		g.appendAudit("operator", "session.task.resume", task.ID, "resumed task from checkpoint")
+	}
+	return task, event, err
 }
 
 func (g *MemoryGateway) CompleteSessionTask(sessionID, taskID string, result map[string]any) (controlplane.Task, controlplane.Event, error) {
@@ -67,7 +91,19 @@ func (g *MemoryGateway) UpsertSessionArtifact(sessionID string, ref controlplane
 }
 
 func (g *MemoryGateway) CloseSession(sessionID string) (controlplane.Session, controlplane.Event, error) {
-	return g.controlPlane().CloseSession(sessionID)
+	session, event, err := g.controlPlane().CloseSession(sessionID)
+	if err == nil {
+		g.appendAudit("operator", "session.close", session.ID, "closed session")
+	}
+	return session, event, err
+}
+
+func (g *MemoryGateway) RevokeSession(sessionID string) (controlplane.Session, controlplane.Event, error) {
+	session, event, err := g.controlPlane().RevokeSession(sessionID)
+	if err == nil {
+		g.appendAudit("operator", "session.revoke", session.ID, "revoked session and endpoint leases")
+	}
+	return session, event, err
 }
 
 func (g *MemoryGateway) CompactSessionEvents(sessionID string, snapshotSeq uint64) error {

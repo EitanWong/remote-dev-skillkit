@@ -18,20 +18,37 @@ rdev gateway serve --dev
 
 This command binds loopback only and is suitable for local development. A remote host requires an operator-managed HTTPS gateway endpoint.
 
-## Managed pilot gateway
+## Long-lived managed gateway
 
-An operator-managed pilot may place HTTPS termination in front of the same
-loopback-only process and load a protected, hashed-principal auth file:
+An operator-managed gateway may place HTTPS termination in front of the same
+loopback-only process. Long-lived control is explicit: persist the state and
+the signing key together, and require protected operator auth:
 
 ```bash
-rdev gateway serve --dev --operator-auth-file /protected/operators.json
+rdev gateway serve \
+  --operator-auth-file /protected/operators.json \
+  --state-file /protected/rdev-gateway/state.json \
+  --signing-key-file /protected/rdev-gateway/signing-key.json
 ```
 
 The rdev process never binds a public address. The auth file contains token
 hashes, not token values; the MCP proxy reads its bearer token separately from
-its protected local token file. This pilot is intentionally ephemeral: a
-gateway restart invalidates active sessions and requires a new session and host
-join.
+its protected local token file. `--state-file` and `--signing-key-file` are a
+required pair; persistent mode also requires `--operator-auth-file`. Both
+runtime files must be ordinary `0600` files. The gateway creates the signing
+key locally on first start and refuses an existing state file with wider
+permissions. Keep the pair across restart to restore session, endpoint lease,
+task, event, and audit state. Browser handoff proofs remain intentionally
+short-lived and are not restored after a gateway restart.
+
+The host keeps an outbound authenticated long-poll. A permitted operator task
+is appended by the gateway and wakes that poll; no inbound host port or
+unrestricted resident shell is created. Task authority remains bound to the
+session capability, workspace policy, adapter, and local host policy.
+
+For an immediate control stop, call `rdev.sessions.close` with
+`action: "revoke"`. It invalidates endpoint leases immediately and records the
+lifecycle action in the durable audit log. Normal `close` remains the default.
 
 ## Join a host
 
@@ -40,6 +57,24 @@ rdev host serve --join-code CODE --gateway https://gateway.example --once
 ```
 
 Useful host options from the current help surface include `--mode`, `--transport`, `--trust-pin`, `--trust-store`, `--identity-store`, and `--workspace-lock-store`.
+
+For an explicit long-lived managed connector, keep the operator-visible process
+running for the scoped session instead of using the safe one-shot default:
+
+```bash
+rdev host serve \
+  --mode managed \
+  --gateway https://gateway.example \
+  --join-code CODE \
+  --once=false \
+  --transport long-poll \
+  --max-tasks 0
+```
+
+This does not grant new authority: every task is still checked against the
+session capability ceiling, workspace policy, adapter policy, and local host
+policy. Keep the connector visible and stop it when the session is closed or
+revoked.
 
 ## Browser handoff for managed Windows hosts
 
@@ -70,4 +105,4 @@ bearer in environment variables or command arguments.
 
 ## Verification
 
-After a host joins, query session status and events through MCP. Before reporting completion, inspect task terminal state and artifact metadata, then close only on the operator's decision.
+After a host joins, query session status and events through MCP. Before reporting completion, inspect task terminal state and artifact metadata, then close or revoke only on the operator's decision. Operators and auditors can inspect durable lifecycle records through `GET /v1/audit`.

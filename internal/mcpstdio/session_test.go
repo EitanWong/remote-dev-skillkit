@@ -123,6 +123,35 @@ func TestSessionsMCPCreateStatusTaskEventsAndClose(t *testing.T) {
 	}
 }
 
+func TestSessionsMCPCloseSupportsRevocation(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	server := NewServer(gw)
+	created := callSessionTool(t, server, "rdev.sessions.create", map[string]any{"profile": "managed", "reason": "revocable managed host"})
+	sessionID := stringValue(t, mapValue(t, created, "session"), "id")
+	joinCode := stringValue(t, mapValue(t, created, "session"), "join_code")
+	_, endpoint, lease, _, err := gw.JoinSessionByCode(joinCode, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-mcp-revoke",
+		Transport:           controlplane.TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	revoked := callSessionTool(t, server, "rdev.sessions.close", map[string]any{
+		"session_id": sessionID,
+		"action":     "revoke",
+		"reason":     "operator revoked managed control",
+	})
+	if stringValue(t, mapValue(t, revoked, "session"), "status") != string(controlplane.SessionStatusRevoked) {
+		t.Fatalf("sessions.close(action=revoke) did not return revoked session: %#v", revoked)
+	}
+	if err := gw.ValidateSessionLease(sessionID, endpoint.ID, lease.Secret); err == nil {
+		t.Fatal("revoked session retained endpoint lease")
+	}
+}
+
 func TestSessionsMCPPreflightsEngineeringTask(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	server := NewServer(gw)

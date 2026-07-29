@@ -183,6 +183,63 @@ func TestHTTPSessionEventsLongPollWaitsForNewEvent(t *testing.T) {
 	}
 }
 
+func TestHTTPTaskDispatchWakesManagedLongPollTarget(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	session, err := gw.CreateSession(controlplane.SessionSpec{Profile: "managed", Reason: "proactive dispatch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, endpoint, lease, err := gw.JoinSession(session.ID, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-proactive-dispatch",
+		Capabilities:        []string{"shell.user"},
+		Transport:           controlplane.TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined, err := gw.Session(session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithOperatorAuth(gw, "", httpTestOperatorAuth(t)).Handler()
+	request := httptest.NewRequest(http.MethodGet, "/v1/sessions/"+url.PathEscape(session.ID)+"/events?endpoint_id="+url.QueryEscape(endpoint.ID)+"&after_seq="+fmt.Sprint(joined.LastSeq)+"&wait_ms=500", nil)
+	request.Header.Set("Authorization", "Bearer "+lease.Secret)
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(recorder, request)
+		close(done)
+	}()
+
+	time.Sleep(40 * time.Millisecond)
+	taskRec := postJSON(t, handler, "/v1/sessions/"+url.PathEscape(session.ID)+"/tasks", `{
+		"adapter":"shell",
+		"capabilities":["shell.user"],
+		"idempotency_key":"managed-dispatch-task"
+	}`, "operator-secret")
+	if taskRec.Code != http.StatusAccepted {
+		t.Fatalf("operator task dispatch status = %d body=%s", taskRec.Code, taskRec.Body.String())
+	}
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("managed target long-poll did not wake for operator task dispatch")
+	}
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("managed target poll status = %d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Events []controlplane.Event `json:"events"`
+	}
+	decodeHTTP(t, recorder, &response)
+	if len(response.Events) != 1 || response.Events[0].Type != controlplane.EventTypeTask || response.Events[0].ToEndpointID != endpoint.ID {
+		t.Fatalf("managed dispatch events = %#v", response.Events)
+	}
+}
+
 func TestHTTPSessionEventsLongPollIgnoresInvisibleEvent(t *testing.T) {
 	gw := gateway.NewMemoryGateway()
 	session, err := gw.CreateSession(controlplane.SessionSpec{Reason: "long poll visibility fixture"})
@@ -496,6 +553,52 @@ func TestHTTPSessionEventsPersistsRenewedLeaseForGatewayRestart(t *testing.T) {
 	restartedHandler.ServeHTTP(resumeRec, resumeReq)
 	if resumeRec.Code != http.StatusOK {
 		t.Fatalf("renewed lease should survive gateway restart, status = %d body=%s", resumeRec.Code, resumeRec.Body.String())
+	}
+}
+
+func TestHTTPRevokeSessionInvalidatesLeaseAndIsAudited(t *testing.T) {
+	gw := gateway.NewMemoryGateway()
+	session, err := gw.CreateSession(controlplane.SessionSpec{Profile: "managed", Reason: "operator revocation"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, endpoint, lease, err := gw.JoinSession(session.ID, controlplane.EndpointSpec{
+		Role:                controlplane.EndpointRoleTarget,
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-revoke",
+		Transport:           controlplane.TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewServerWithOperatorAuth(gw, "", httpTestOperatorAuth(t)).Handler()
+
+	revoke := postJSON(t, handler, "/v1/sessions/"+url.PathEscape(session.ID)+"/revoke", `{}`, "operator-secret")
+	if revoke.Code != http.StatusAccepted {
+		t.Fatalf("revoke status = %d body=%s", revoke.Code, revoke.Body.String())
+	}
+	var revoked struct {
+		Session controlplane.Session `json:"session"`
+	}
+	decodeHTTP(t, revoke, &revoked)
+	if revoked.Session.Status != controlplane.SessionStatusRevoked {
+		t.Fatalf("revoke status = %q, want %q", revoked.Session.Status, controlplane.SessionStatusRevoked)
+	}
+
+	events := httptest.NewRequest(http.MethodGet, "/v1/sessions/"+url.PathEscape(session.ID)+"/events?endpoint_id="+url.QueryEscape(endpoint.ID), nil)
+	events.Header.Set("Authorization", "Bearer "+lease.Secret)
+	eventsRec := httptest.NewRecorder()
+	handler.ServeHTTP(eventsRec, events)
+	if eventsRec.Code != http.StatusConflict {
+		t.Fatalf("revoked lease events status = %d body=%s", eventsRec.Code, eventsRec.Body.String())
+	}
+
+	auditReq := httptest.NewRequest(http.MethodGet, "/v1/audit", nil)
+	auditReq.Header.Set("Authorization", "Bearer auditor-secret")
+	auditRec := httptest.NewRecorder()
+	handler.ServeHTTP(auditRec, auditReq)
+	if auditRec.Code != http.StatusOK || !strings.Contains(auditRec.Body.String(), "session.revoke") {
+		t.Fatalf("revoke audit = status %d body=%s", auditRec.Code, auditRec.Body.String())
 	}
 }
 

@@ -123,11 +123,12 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.sessions.close",
-			Description: "Close a Control Plane v1 session and return final status with user_summary, agent_next_action, recoverable, retry_after_ms, and close event. Event reads remain available until retention expiry.",
-			Safety:      "Closes the session control plane. Does not uninstall software, delete local data, or mutate target OS settings.",
+			Description: "Close or revoke a Control Plane v1 session and return final status with user_summary, agent_next_action, recoverable, retry_after_ms, and lifecycle event. action defaults to close; revoke immediately invalidates endpoint leases. Event reads remain available until retention expiry.",
+			Safety:      "Closes or revokes the session control plane only. Does not uninstall software, delete local data, or mutate target OS settings.",
 			InputSchema: object(map[string]any{
 				"gateway_url":     gatewayURL,
 				"session_id":      sessionID,
+				"action":          enum("close", "revoke"),
 				"reason":          stringField(),
 				"idempotency_key": stringField(),
 			}, []string{"session_id"}),

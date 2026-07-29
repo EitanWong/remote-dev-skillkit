@@ -184,6 +184,9 @@ func (a App) gateway(ctx context.Context, args []string) error {
 	addr := fs.String("addr", "127.0.0.1:8787", "loopback listen address")
 	dev := fs.Bool("dev", false, "mark the local gateway as development mode")
 	operatorAuthFile := fs.String("operator-auth-file", "", "optional protected operator-auth principals file")
+	stateFile := fs.String("state-file", "", "protected persistent gateway state file; requires --signing-key-file and --operator-auth-file")
+	signingKeyFile := fs.String("signing-key-file", "", "protected persistent gateway Ed25519 signing key file; requires --state-file")
+	signingKeyID := fs.String("signing-key-id", defaultManagedGatewaySigningKeyID, "gateway signing key id for persistent state")
 	publicBaseURL := fs.String("public-base-url", "", "optional public HTTPS base URL for browser handoff links")
 	windowsAMD64HostBinary := fs.String("windows-amd64-host-binary", "", "optional current rdev-host.exe artifact for browser handoffs")
 	if err := fs.Parse(args[1:]); err != nil {
@@ -192,11 +195,15 @@ func (a App) gateway(ctx context.Context, args []string) error {
 	if err := requireLoopbackAddress(*addr); err != nil {
 		return err
 	}
+	runtime, err := newGatewayRuntime(*stateFile, *signingKeyFile, *signingKeyID, *operatorAuthFile)
+	if err != nil {
+		return err
+	}
 	webHandoffOptions, webHandoffEnabled, err := gatewayWebHandoffOptions(*publicBaseURL, *windowsAMD64HostBinary)
 	if err != nil {
 		return err
 	}
-	handler, operatorAuthEnabled, err := gatewayHandlerWithWebHandoff(*operatorAuthFile, webHandoffOptions)
+	handler, operatorAuthEnabled, err := gatewayHandlerWithRuntime(runtime.Gateway, runtime.StateStore, *operatorAuthFile, webHandoffOptions)
 	if err != nil {
 		return err
 	}
@@ -212,6 +219,7 @@ func (a App) gateway(ctx context.Context, args []string) error {
 		"url":                   "http://" + listener.Addr().String(),
 		"mode":                  map[bool]string{true: "development", false: "local"}[*dev],
 		"operator_auth_enabled": operatorAuthEnabled,
+		"persistence_enabled":   runtime.Persistent,
 		"web_handoff_enabled":   webHandoffEnabled,
 		"protocol":              "rdev.session.v1",
 	}); err != nil {
@@ -258,18 +266,24 @@ func gatewayHandler(operatorAuthFile string) (http.Handler, bool, error) {
 }
 
 func gatewayHandlerWithWebHandoff(operatorAuthFile string, webHandoffOptions httpapi.WebHandoffOptions) (http.Handler, bool, error) {
-	gw := gateway.NewMemoryGateway()
+	return gatewayHandlerWithRuntime(gateway.NewMemoryGateway(), nil, operatorAuthFile, webHandoffOptions)
+}
+
+func gatewayHandlerWithRuntime(gw *gateway.MemoryGateway, stateStore gateway.StateStore, operatorAuthFile string, webHandoffOptions httpapi.WebHandoffOptions) (http.Handler, bool, error) {
+	if gw == nil {
+		return nil, false, fmt.Errorf("gateway runtime is required")
+	}
 	operatorAuthFile = strings.TrimSpace(operatorAuthFile)
 	var server httpapi.Server
 	operatorAuthEnabled := operatorAuthFile != ""
 	if operatorAuthFile == "" {
-		server = httpapi.NewServer(gw)
+		server = httpapi.NewServerWithStateStore(gw, stateStore)
 	} else {
 		auth, _, err := operatorauth.Load(operatorAuthFile)
 		if err != nil {
 			return nil, false, fmt.Errorf("load operator auth file: %w", err)
 		}
-		server = httpapi.NewServerWithOperatorAuth(gw, "", auth)
+		server = httpapi.NewServerWithOperatorAuthAndStateStore(gw, stateStore, auth)
 	}
 	if strings.TrimSpace(webHandoffOptions.PublicBaseURL) != "" || len(webHandoffOptions.WindowsAMD64.Content) > 0 {
 		configured, err := server.WithWebHandoff(webHandoffOptions)
@@ -310,7 +324,7 @@ func (a App) printCommandUsage(command string) {
 	case "host":
 		_, _ = fmt.Fprintln(a.Stdout, "rdev host serve --join-code CODE --gateway URL")
 	case "gateway":
-		_, _ = fmt.Fprintln(a.Stdout, "rdev gateway serve [--addr 127.0.0.1:8787] [--dev] [--operator-auth-file PATH] [--public-base-url HTTPS_URL --windows-amd64-host-binary PATH]")
+		_, _ = fmt.Fprintln(a.Stdout, "rdev gateway serve [--addr 127.0.0.1:8787] [--dev] [--operator-auth-file PATH] [--state-file PATH --signing-key-file PATH] [--public-base-url HTTPS_URL --windows-amd64-host-binary PATH]")
 	default:
 		a.printUsage()
 	}
