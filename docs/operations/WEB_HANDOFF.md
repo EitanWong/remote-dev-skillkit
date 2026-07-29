@@ -5,7 +5,7 @@ connection flow:
 
 ```text
 operator MCP -> session handoff URL -> browser fragment claim
-             -> localized Windows launcher download -> verified rdev-host.exe
+             -> localized PowerShell command copy -> verified rdev-host.exe
              -> outbound long-poll session join
 ```
 
@@ -35,14 +35,13 @@ binary is loaded and hashed at gateway startup. Readiness reports
 4. The operator opens the link on the target Windows machine. The page chooses
    its text from browser language preferences, confirms it is a Windows browser,
    then exposes the one-time claim action.
-5. The operator clicks **Download Windows launcher**, then double-clicks the
-   downloaded `Connect-Rdev.cmd`. It opens a visible console, downloads the
-   host binary through the short-lived ticket, verifies its SHA-256, and starts
-   managed long-poll.
-6. If `Connect-Rdev.cmd` cannot run (for example, `curl.exe` is unavailable),
-   the claimed page exposes a user-initiated **Copy PowerShell fallback**. Paste
-   it into an already-open PowerShell window; do not download and run a `.ps1`
-   file.
+5. The operator clicks **Copy connection command**. The page claims the link
+   once, copies the short-lived PowerShell bootstrap, and leaves the command
+   selected on the page if browser clipboard access is unavailable.
+6. The operator pastes the command into an already-open PowerShell window and
+   presses Enter. The bootstrap fetches the host binary through the short-lived
+   ticket, verifies its SHA-256, and starts managed long-poll visibly. The
+   operator does not download or run a `.cmd` or `.ps1` file.
 7. Wait for the target endpoint through `rdev.sessions.status` before sending a
    task.
 
@@ -63,14 +62,14 @@ Only `HANDOFF_ID` reaches the gateway in the initial HTTP request. The browser
 reads `FRAGMENT_PROOF` locally, removes it from browser history, and submits it
 in a same-origin POST body. The gateway stores only a SHA-256 hash of the proof.
 
-After a successful claim, the browser receives a Windows `.cmd` launcher and
-may copy a PowerShell fallback into an already-open prompt. Both use the same
-short-lived artifact ticket to download the Windows host binary using
-`X-Rdev-Handoff-Ticket`; each verifies the configured SHA-256 before execution.
+After a successful claim, the browser receives one copyable PowerShell
+connection command. It uses a short-lived artifact ticket to fetch the Windows
+host binary using `X-Rdev-Handoff-Ticket` and verifies the configured SHA-256
+before execution.
 Operator credentials and gateway private keys do not appear in the initial
 page, HTTP URL, referrer, or query string.
 
-The launcher starts the host visibly with managed mode and outbound long-poll.
+The bootstrap starts the host visibly with managed mode and outbound long-poll.
 It persists identity, trust, and workspace-lock state under the current
 Windows user's `%LOCALAPPDATA%\RemoteDevSkillkit\managed-host`. It creates no
 Windows service, scheduled task, firewall rule, inbound listener, elevation
@@ -81,17 +80,17 @@ request, or execution-policy bypass.
 The page has no external provisioning script or client-side configuration step:
 it is served by the same session gateway and consumes the same one-time handoff
 contract used by MCP. It uses `Accept-Language` for an initial server-rendered
-fallback, then browser and `Intl` locale preferences for the final rendered
-locale. English, Simplified Chinese, and Traditional Chinese are currently
-included.
+locale, then browser language preferences for the final rendered locale.
+English, Simplified Chinese, and Traditional Chinese are currently included.
 
 The page uses `navigator.userAgentData.platform` when available, with standard
 browser platform/user-agent fallbacks, and keeps the claim button disabled when
 the browser is not Windows. This prevents a link opened on the wrong machine
-from being consumed. On Windows, the shortest path is **open link → download
-launcher → double-click launcher**. The final double-click remains a visible
-Windows user action; no JavaScript, service, elevation, or browser-control
-bypass is used.
+from being consumed. On Windows, the shortest path is **open link → copy
+command → paste into an existing PowerShell window → Enter**. Clipboard denial
+reveals and selects the same command for manual copy. The host runs in that
+visible PowerShell window; no JavaScript, service, elevation, or
+browser-control bypass is used.
 
 ## Operational boundaries
 
@@ -101,6 +100,10 @@ bypass is used.
   bootstrap; an ineligible session leaves the handoff unclaimed rather than
   issuing a script that cannot join.
 - Gateway restart invalidates active pilot sessions and in-memory handoffs.
+- `GET /v1/trust-bundle` renews its signed bundle before expiry (and repairs an
+  expired persisted bundle) using the same signing key and a linked sequence;
+  a configured state store persists the renewal. A healthy `/healthz` alone
+  does not prove that host trust verification can succeed.
 - `/healthz` proves that the gateway process is reachable; a browser handoff
   requires the new gateway binary and the configured host binary asset.
 - The first task after join should be read-only host triage. Later work remains

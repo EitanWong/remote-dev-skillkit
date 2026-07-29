@@ -76,29 +76,21 @@ func TestWebHandoffLinkClaimsBootstrapAndDeliversVerifiedHostBinary(t *testing.T
 	}
 	claimBody := claim.Body.String()
 	var claimed struct {
-		Bootstrap         string `json:"bootstrap"`
-		BootstrapFilename string `json:"bootstrap_filename"`
-		FallbackBootstrap string `json:"fallback_bootstrap"`
+		Bootstrap string `json:"bootstrap"`
 	}
 	decodeHTTP(t, claim, &claimed)
-	if claimed.BootstrapFilename != "Connect-Rdev.cmd" {
-		t.Fatalf("bootstrap filename = %q, want Connect-Rdev.cmd", claimed.BootstrapFilename)
+	if strings.Contains(claimBody, `"bootstrap_filename"`) || strings.Contains(claimBody, `"fallback_bootstrap"`) {
+		t.Fatal("claim must expose only the copyable connection command")
 	}
-	if strings.Contains(claimBody, `"fallback_bootstrap_filename"`) {
-		t.Fatal("claim must not expose a downloadable PowerShell filename")
+	if !strings.Contains(claimed.Bootstrap, session.JoinCode) || !strings.Contains(claimed.Bootstrap, "Invoke-WebRequest") || !strings.Contains(claimed.Bootstrap, "Get-FileHash") {
+		t.Fatal("copyable bootstrap did not contain scoped connection material")
 	}
-	if !strings.Contains(claimed.Bootstrap, session.JoinCode) || !strings.Contains(claimed.Bootstrap, "curl.exe") || !strings.Contains(claimed.Bootstrap, "certutil.exe") || !strings.Contains(claimed.Bootstrap, `tokens=* delims= `) || !strings.Contains(claimed.Bootstrap, `set "ACTUAL_SHA256=%ACTUAL_SHA256: =%"`) {
-		t.Fatalf("native launcher did not contain scoped connection material: %s", claimed.Bootstrap)
+	if strings.Contains(claimed.Bootstrap, "operator-secret") || strings.Contains(claimed.Bootstrap, "ExecutionPolicy") || strings.Contains(claimed.Bootstrap, "Connect-Rdev.cmd") || strings.Contains(claimed.Bootstrap, "\nexit ") {
+		t.Fatal("copyable bootstrap leaked protected material, manual launcher, or bypass behavior")
 	}
-	if strings.Contains(claimed.Bootstrap, "operator-secret") || strings.Contains(claimed.Bootstrap, "ExecutionPolicy") {
-		t.Fatal("native launcher leaked protected material or bypass behavior")
-	}
-	if !strings.Contains(claimed.FallbackBootstrap, session.JoinCode) || strings.Contains(claimed.FallbackBootstrap, "ExecutionPolicy") || strings.Contains(claimed.FallbackBootstrap, "\nexit ") {
-		t.Fatalf("fallback bootstrap did not preserve the bounded PowerShell flow: %s", claimed.FallbackBootstrap)
-	}
-	ticketMatch := regexp.MustCompile(`(?m)^set "ARTIFACT_TICKET=([^"\r\n]+)"\r?$`).FindStringSubmatch(claimed.Bootstrap)
+	ticketMatch := regexp.MustCompile(`(?m)^\$artifactTicket = '([^'\r\n]+)'\r?$`).FindStringSubmatch(claimed.Bootstrap)
 	if len(ticketMatch) != 2 {
-		t.Fatalf("native launcher did not contain an artifact ticket assignment: %s", claimed.Bootstrap)
+		t.Fatal("copyable bootstrap did not contain an artifact ticket assignment")
 	}
 
 	artifactReq := httptest.NewRequest(http.MethodGet, link.Path+"/rdev-host.exe", nil)
@@ -183,26 +175,27 @@ func TestWebHandoffPageLocalizesAndGatesWindowsBootstrap(t *testing.T) {
 	for _, want := range []string{
 		`<html lang="zh-Hans">`,
 		"连接这台 Windows 主机",
-		"Connect-Rdev.cmd",
-		"Connect-Rdev.cmd 无法启动",
-		"复制 PowerShell 脚本",
-		"copy-fallback",
-		"fallback-script",
+		"复制连接命令",
+		"copy-command",
+		"connection-script",
 		"navigator.userAgentData",
 		"isWindowsBrowser",
-		"Intl.DateTimeFormat().resolvedOptions().locale",
-		"navigator.clipboard.writeText(fallbackBootstrap.value)",
-		"fallbackBootstrap.hidden = false",
-		"fallbackBootstrap.select()",
-		"fallbackBootstrap.setAttribute('aria-label', copy.fallbackAction)",
+		"const browserLanguages = [...(navigator.languages || []), navigator.language].filter(Boolean);",
+		"const locale = localeFor(browserLanguages.length ? browserLanguages : [initialLocale]);",
+		"navigator.clipboard.writeText(connectionBootstrap.value)",
+		"connectionBootstrap.hidden = false",
+		"connectionBootstrap.select()",
+		"connectionBootstrap.setAttribute('aria-label', copy.copyAction)",
 		"请在 Windows 设备上打开此连接页。它尚未被领取。",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("localized handoff page missing %q: %s", want, body)
 		}
 	}
-	if strings.Contains(body, "fallback.download") || strings.Contains(body, "fallback_bootstrap_filename") {
-		t.Fatal("handoff page must not expose a downloadable PowerShell fallback")
+	for _, forbidden := range []string{"Connect-Rdev.cmd", "fallback_bootstrap", "bootstrap_filename", "Intl.DateTimeFormat", "const download"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("handoff page must not expose manual download surface %q", forbidden)
+		}
 	}
 }
 
@@ -322,7 +315,7 @@ func TestWebHandoffClaimRevalidatesSessionBeforeIssuingBootstrap(t *testing.T) {
 			t.Fatalf("claim attempt %d status = %d, want 409: %s", attempt, claim.Code, claim.Body.String())
 		}
 		if strings.Contains(claim.Body.String(), "bootstrap") {
-			t.Fatalf("claim attempt %d issued a bootstrap: %s", attempt, claim.Body.String())
+			t.Fatalf("claim attempt %d issued a bootstrap", attempt)
 		}
 	}
 }

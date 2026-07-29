@@ -20,6 +20,11 @@ var (
 	ErrIdempotencyConflict = errors.New("idempotency conflict")
 )
 
+const (
+	signedTrustBundleLifetime    = 24 * time.Hour
+	signedTrustBundleRenewBefore = time.Hour
+)
+
 // MemoryGateway is the in-memory session Control Plane state with its gateway
 // trust bundle and audit stream. Host access is represented exclusively by
 // Control Plane sessions and endpoints.
@@ -78,7 +83,7 @@ func initialSignedTrustBundle(signingID string, publicKey ed25519.PublicKey, pri
 		BundleID:     "dev-gateway",
 		Sequence:     1,
 		NotBefore:    now.UTC(),
-		NotAfter:     now.UTC().Add(24 * time.Hour),
+		NotAfter:     now.UTC().Add(signedTrustBundleLifetime),
 		SigningKeyID: signingID,
 		Keys: []model.TrustKey{
 			model.NewTrustKey(signingID, publicKey, model.TrustKeyStatusActive, now.UTC()),
@@ -107,6 +112,49 @@ func (g *MemoryGateway) SignedTrustBundle() model.SignedTrustBundle {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.trustBundle
+}
+
+// RenewSignedTrustBundle refreshes the gateway-signed bundle before it expires
+// and retains the previous bundle hash so managed hosts can verify the update.
+func (g *MemoryGateway) RenewSignedTrustBundle() (model.SignedTrustBundle, bool, error) {
+	if g == nil {
+		return model.SignedTrustBundle{}, false, ErrInvalidState
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	now := g.now().UTC()
+	if now.Add(signedTrustBundleRenewBefore).Before(g.trustBundle.NotAfter.UTC()) {
+		return g.trustBundle, false, nil
+	}
+	if _, err := g.trustBundle.ActiveTrustBundle(g.signingID, now); err != nil {
+		return model.SignedTrustBundle{}, false, fmt.Errorf("renew trust bundle signing key: %w", err)
+	}
+	previousHash, err := g.trustBundle.Hash()
+	if err != nil {
+		return model.SignedTrustBundle{}, false, fmt.Errorf("hash previous trust bundle: %w", err)
+	}
+	next, err := model.NewSignedTrustBundle(model.SignedTrustBundleSpec{
+		BundleID:           g.trustBundle.BundleID,
+		Sequence:           g.trustBundle.Sequence + 1,
+		NotBefore:          now,
+		NotAfter:           now.Add(signedTrustBundleLifetime),
+		PreviousBundleHash: previousHash,
+		SigningKeyID:       g.signingID,
+		Keys: []model.TrustKey{
+			model.NewTrustKey(g.signingID, g.publicKey, model.TrustKeyStatusActive, now),
+		},
+	}, now)
+	if err != nil {
+		return model.SignedTrustBundle{}, false, fmt.Errorf("build renewed trust bundle: %w", err)
+	}
+	next, err = next.Sign(g.privateKey)
+	if err != nil {
+		return model.SignedTrustBundle{}, false, fmt.Errorf("sign renewed trust bundle: %w", err)
+	}
+	g.trustBundle = next
+	g.appendAuditLocked("gateway", "trust_bundle.renew", next.BundleID, fmt.Sprintf("renewed trust bundle to sequence %d", next.Sequence))
+	return g.trustBundle, true, nil
 }
 
 func (g *MemoryGateway) UpdateSignedTrustBundle(next model.SignedTrustBundle) (model.SignedTrustBundle, error) {

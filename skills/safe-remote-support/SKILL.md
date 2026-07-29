@@ -29,13 +29,15 @@ description: Use when an agent needs to connect to, operate, or audit a remote m
 - A managed pilot may use `--operator-auth-file PATH`; it loads hashed
   principals while the MCP bearer token stays in a separate protected local
   file. Gateway restart ends active pilot sessions.
-- Host trust is verified through the signed trust-bundle endpoint.
+- Host trust is verified through the signed trust-bundle endpoint, which renews
+  the gateway-signed bundle before expiry and persists that renewal when managed
+  state is configured.
 - Use `rdev mcp serve --gateway-url URL --operator-token-file PATH` for a configured remote MCP proxy; the token remains only in the protected local file.
 - A web handoff URL carries an opaque fragment proof only; the browser claims it
-  once, localizes and gates the page to Windows, then downloads a double-click
-  `Connect-Rdev.cmd` launcher that fetches the hash-checked host binary with a
-  short-lived header ticket. The explicit PowerShell fallback is copied into an
-  already-open prompt rather than downloaded as a `.ps1` file.
+  once, localizes and gates the page to Windows, then copies a short-lived
+  PowerShell connection command. The operator pastes it into an already-open
+  prompt; it fetches the hash-checked host binary with a short-lived header
+  ticket without a manual `.cmd` or `.ps1` download.
   It is not a host listener or a substitute for session policy.
 
 ## Adaptive configuration
