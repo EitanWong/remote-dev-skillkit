@@ -506,6 +506,7 @@ func (s Server) webHandoffPowerShellBootstrap(handoff gateway.WebHandoff, joinCo
 	return fmt.Sprintf(`# Remote Dev Skillkit managed-host bootstrap.
 	# Paste this script into an already-open PowerShell window. It verifies the
 	# connector, then requests a visible administrator-approved Windows service install.
+& {
 $ErrorActionPreference = 'Stop'
 $gateway = %s
 $joinCode = %s
@@ -523,14 +524,21 @@ $trustStore = Join-Path $stagingRoot 'trust.json'
 New-Item -ItemType Directory -Force -Path $stagingRoot | Out-Null
 Invoke-WebRequest -Uri $artifactUri -Headers @{ %s = $artifactTicket } -OutFile $tempBinary
 $actualSHA256 = (Get-FileHash -LiteralPath $tempBinary -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($actualSHA256 -ne $expectedSHA256) { throw 'rdev-host.exe SHA-256 verification failed.' }
-Move-Item -LiteralPath $tempBinary -Destination $hostBinary -Force
+if ($actualSHA256 -ne $expectedSHA256) { throw 'rdev-host.exe download SHA-256 verification failed.' }
+Copy-Item -LiteralPath $tempBinary -Destination $hostBinary -Force
+$installedSHA256 = (Get-FileHash -LiteralPath $hostBinary -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($installedSHA256 -ne $expectedSHA256) { throw 'rdev-host.exe staging SHA-256 verification failed.' }
+Remove-Item -LiteralPath $tempBinary -Force
 
 Write-Host 'Requesting the visible Windows service installation approval.'
 $installArgs = @('service', 'install', '--service-name', $serviceName, '--gateway', $gateway, '--join-code', $joinCode, '--state-root', $serviceRoot, '--identity-source', $identityStore, '--trust-source', $trustStore)
 $install = Start-Process -FilePath $hostBinary -ArgumentList $installArgs -Verb RunAs -Wait -PassThru
-if ($install.ExitCode -ne 0) { throw "rdev-host.exe service install exited with code $($install.ExitCode)." }
-Write-Host 'Managed Remote Dev Skillkit service is installed and started. You may close this PowerShell window.'
+if ($install.ExitCode -eq 0) {
+  Write-Host 'Managed Remote Dev Skillkit service is installed and started. You may close this PowerShell window.'
+} else {
+  throw "rdev-host.exe service install exited with code $($install.ExitCode)."
+}
+}
 `, powershellLiteral(s.webHandoff.publicBaseURL), powershellLiteral(joinCode), powershellLiteral(assetURL), powershellLiteral(ticket), powershellLiteral(s.webHandoff.windowsAMD64.SHA256), powershellLiteral(webHandoffArtifactTicketKey))
 }
 
