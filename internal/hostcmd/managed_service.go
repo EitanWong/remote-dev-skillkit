@@ -1,6 +1,7 @@
 package hostcmd
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -17,6 +18,7 @@ const (
 	defaultManagedServiceName     = "RemoteDevSkillkitHost"
 	managedServiceConfigFilename  = "service.json"
 	managedServiceBinaryFilename  = "rdev-host.exe"
+	managedServiceReleasesDir     = "releases"
 	managedServiceIdentityFile    = "identity.json"
 	managedServiceTrustFile       = "trust.json"
 	managedServiceWorkspaceLocker = "workspace-locks"
@@ -138,12 +140,69 @@ func copyManagedServiceFileIfPresent(source, destination string) error {
 	if source == "" {
 		return nil
 	}
+	if _, err := os.Stat(destination); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return err
+	}
 	if _, err := os.Stat(source); os.IsNotExist(err) {
 		return nil
 	} else if err != nil {
 		return err
 	}
 	return copyManagedServiceFile(source, destination)
+}
+
+// prepareManagedServiceRelease copies a host executable into an immutable,
+// content-addressed release path. A running service can keep its prior release
+// open while a replacement is prepared at a different path.
+func prepareManagedServiceRelease(root, source string) (string, error) {
+	source = filepath.Clean(strings.TrimSpace(source))
+	if source == "" || source == "." {
+		return "", fmt.Errorf("managed service release source is required")
+	}
+	sum, err := managedServiceFileSHA256(source)
+	if err != nil {
+		return "", fmt.Errorf("hash managed service release source: %w", err)
+	}
+	destination := filepath.Join(root, managedServiceReleasesDir, sum, managedServiceBinaryFilename)
+	if _, err := os.Stat(destination); err == nil {
+		installedSum, err := managedServiceFileSHA256(destination)
+		if err != nil {
+			return "", fmt.Errorf("hash existing managed service release: %w", err)
+		}
+		if installedSum != sum {
+			return "", fmt.Errorf("managed service release hash mismatch at %s", destination)
+		}
+		return destination, nil
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("inspect managed service release: %w", err)
+	}
+	if err := copyManagedServiceFile(source, destination); err != nil {
+		return "", err
+	}
+	installedSum, err := managedServiceFileSHA256(destination)
+	if err != nil {
+		return "", fmt.Errorf("hash staged managed service release: %w", err)
+	}
+	if installedSum != sum {
+		return "", fmt.Errorf("managed service release hash mismatch after staging")
+	}
+	return destination, nil
+}
+
+func managedServiceFileSHA256(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil)), nil
 }
 
 func copyManagedServiceFile(source, destination string) error {
