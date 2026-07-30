@@ -55,6 +55,9 @@ func (a App) Run(ctx context.Context, args []string) error {
 	if args[0] == "serve" {
 		return a.serve(ctx, args[1:])
 	}
+	if args[0] == "service" {
+		return a.service(ctx, args[1:])
+	}
 	if strings.HasPrefix(args[0], "-") {
 		return a.serve(ctx, args)
 	}
@@ -71,6 +74,7 @@ func (a App) printUsage() {
 Usage:
   rdev-host serve --gateway https://gateway.example --join-code JOIN-CODE
   rdev-host --gateway https://gateway.example --join-code JOIN-CODE
+  rdev-host service install --gateway https://gateway.example --join-code JOIN-CODE --state-root PATH
 
 This binary intentionally exposes only the host connector path. Use full rdev
 for operator CLI, MCP, gateway, acceptance, and managed-service authoring.`))
@@ -818,9 +822,6 @@ func sessionTaskSpec(task controlplane.Task, endpointID, identityFingerprint str
 	payload := cloneStringAnyMap(task.Payload)
 	workspaceRoot := stringValueFromAny(payload["workspace_root"])
 	writeScope := stringSliceFromAny(payload["write_scope"])
-	if len(writeScope) == 0 && workspaceRoot != "" {
-		writeScope = []string{workspaceRoot}
-	}
 	return hostrunner.SessionTaskSpec{
 		TaskID:              task.ID,
 		AttemptID:           task.AttemptID,

@@ -44,8 +44,9 @@ func TestWebHandoffLinkClaimsBootstrapAndDeliversVerifiedHostBinary(t *testing.T
 	}
 	var handoff struct {
 		Handoff struct {
-			ID  string `json:"id"`
-			URL string `json:"url"`
+			ID               string `json:"id"`
+			URL              string `json:"url"`
+			ConfirmationCode string `json:"confirmation_code"`
 		} `json:"handoff"`
 	}
 	decodeHTTP(t, created, &handoff)
@@ -55,6 +56,9 @@ func TestWebHandoffLinkClaimsBootstrapAndDeliversVerifiedHostBinary(t *testing.T
 	}
 	if link.Scheme != "https" || link.Host != "remote.example.test" || link.Fragment == "" || link.RawQuery != "" {
 		t.Fatalf("unexpected handoff link %q", handoff.Handoff.URL)
+	}
+	if handoff.Handoff.ConfirmationCode == "" || handoff.Handoff.ConfirmationCode != link.Fragment {
+		t.Fatalf("handoff confirmation code must match the fragment proof: %#v", handoff.Handoff)
 	}
 
 	pageReq := httptest.NewRequest(http.MethodGet, link.Path, nil)
@@ -84,6 +88,14 @@ func TestWebHandoffLinkClaimsBootstrapAndDeliversVerifiedHostBinary(t *testing.T
 	}
 	if !strings.Contains(claimed.Bootstrap, session.JoinCode) || !strings.Contains(claimed.Bootstrap, "Invoke-WebRequest") || !strings.Contains(claimed.Bootstrap, "Get-FileHash") {
 		t.Fatal("copyable bootstrap did not contain scoped connection material")
+	}
+	for _, want := range []string{"service install", "Start-Process", "-Verb RunAs", "$serviceRoot = Join-Path $env:ProgramData", "You may close this PowerShell window"} {
+		if !strings.Contains(claimed.Bootstrap, want) {
+			t.Fatalf("copyable bootstrap missing managed-service installation step %q", want)
+		}
+	}
+	if strings.Contains(claimed.Bootstrap, "& $hostBinary serve") {
+		t.Fatal("copyable bootstrap must not keep the connector tied to the initiating PowerShell")
 	}
 	if strings.Contains(claimed.Bootstrap, "operator-secret") || strings.Contains(claimed.Bootstrap, "ExecutionPolicy") || strings.Contains(claimed.Bootstrap, "Connect-Rdev.cmd") || strings.Contains(claimed.Bootstrap, "\nexit ") {
 		t.Fatal("copyable bootstrap leaked protected material, manual launcher, or bypass behavior")
@@ -201,6 +213,8 @@ func TestWebHandoffPageLocalizesAndGatesWindowsBootstrap(t *testing.T) {
 		"connection-script",
 		"detected-platform",
 		"connection-steps",
+		"confirmation-code",
+		"confirmation-code-label",
 		"navigator.userAgentData",
 		"const initialPlatform = \"windows\";",
 		"const platformFor = () => {",
@@ -214,6 +228,9 @@ func TestWebHandoffPageLocalizesAndGatesWindowsBootstrap(t *testing.T) {
 		"connectionBootstrap.hidden = false",
 		"connectionBootstrap.select()",
 		"connectionBootstrap.setAttribute('aria-label', copy.copyAction)",
+		"const claim = async proof => {",
+		"confirmationCode.hidden = false",
+		"copy.confirmAction",
 		"已检测到系统：",
 		"打开 Windows PowerShell。",
 		"请在目标 Windows 电脑上打开同一链接。",

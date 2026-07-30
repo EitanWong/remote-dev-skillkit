@@ -4,8 +4,9 @@ A browser handoff turns a normal session into a short-lived Windows host
 connection flow:
 
 ```text
-operator MCP -> session handoff URL -> browser fragment claim
-             -> localized PowerShell command copy -> verified rdev-host.exe
+operator MCP -> session handoff URL + recovery confirmation code
+             -> browser fragment/code claim -> localized PowerShell command copy
+             -> verified rdev-host.exe -> visible UAC service install
              -> outbound long-poll session join
 ```
 
@@ -36,21 +37,23 @@ for file-mode requirements.
 1. Create a session with `selected_gateway_url` set to the configured public
    base URL.
 2. Call `rdev.sessions.handoff` with the session id and `windows-amd64`.
-3. Send the returned URL unchanged to the intended target. There is no separate
-   `web` or `powershell` delivery choice, and an Agent must not claim the URL on
-   the user's behalf.
+3. Send the returned URL unchanged to the intended target. Retain the returned
+   `confirmation_code` beside it: it is only used if a messenger or redirect
+   strips the URL fragment. There is no separate `web` or `powershell` delivery
+   choice, and an Agent must not claim the URL on the user's behalf.
 4. The page localizes itself and identifies the opened system. On Windows it
    displays four numbered connection steps. On macOS, Linux, or an unknown
    system it names the detected system, leaves the link unclaimed, and tells the
    user to open the same URL on the target Windows computer.
 5. On the target Windows machine, open **Windows PowerShell**, click **Copy
    connection command**, paste it into the already-open PowerShell window, then
-   press Enter. Keep that window open while the Agent verifies endpoint
-   readiness. Clipboard denial reveals and selects the same command for manual
-   copy.
+   press Enter. Approve the visible Windows UAC prompt; the service install then
+   completes and that PowerShell window may close. Clipboard denial reveals and
+   selects the same command for manual copy.
 6. The Windows bootstrap fetches the host binary through the short-lived ticket,
-   verifies its SHA-256, and starts managed long-poll visibly. The operator does
-   not download or run a `.cmd` or `.ps1` file.
+   verifies its SHA-256, migrates an existing host identity when present, and
+   installs an auto-start outbound long-poll service. The operator does not
+   download or run a `.cmd` or `.ps1` file.
 7. Wait for the target endpoint through `rdev.sessions.status` before sending a
    task.
 
@@ -70,6 +73,9 @@ https://gateway.example/connect/HANDOFF_ID#FRAGMENT_PROOF
 Only `HANDOFF_ID` reaches the gateway in the initial HTTP request. The browser
 reads `FRAGMENT_PROOF` locally, removes it from browser history, and submits it
 in a same-origin POST body. The gateway stores only a SHA-256 hash of the proof.
+If a delivery layer removes the fragment, the Windows page asks for the returned
+`confirmation_code` and submits that value in the same POST body; it never puts
+the code into a URL, query string, or referrer.
 
 After a successful claim, the browser receives one copyable PowerShell
 connection command. It uses a short-lived artifact ticket to fetch the Windows
@@ -78,11 +84,19 @@ before execution.
 Operator credentials and gateway private keys do not appear in the initial
 page, HTTP URL, referrer, or query string.
 
-The bootstrap starts the host visibly with managed mode and outbound long-poll.
-It persists identity, trust, and workspace-lock state under the current
-Windows user's `%LOCALAPPDATA%\RemoteDevSkillkit\managed-host`. It creates no
-Windows service, scheduled task, firewall rule, inbound listener, elevation
-request, or execution-policy bypass.
+The bootstrap stages the verified executable under the current user's
+`%LOCALAPPDATA%\RemoteDevSkillkit\managed-host`, then requests visible UAC
+approval to install `RemoteDevSkillkitHost`. The auto-start service runs as
+LocalSystem from `%ProgramData%\RemoteDevSkillkit\managed-host`; its identity,
+trust, configuration, and workspace-lock state are ACL-restricted to
+LocalSystem and Administrators. It creates no inbound listener, firewall rule,
+scheduled task, or execution-policy bypass.
+
+To remove the managed connector, use an elevated PowerShell window:
+
+```powershell
+& "$env:ProgramData\RemoteDevSkillkit\managed-host\rdev-host.exe" service uninstall --service-name RemoteDevSkillkitHost --state-root "$env:ProgramData\RemoteDevSkillkit\managed-host"
+```
 
 ## Native adaptive page behavior
 
@@ -98,10 +112,11 @@ another system before it exposes a claim action. A non-Windows page explicitly
 names the detected system, explains that this handoff supplies a Windows
 connector, and leaves the link unclaimed so the same URL can be opened on the
 target Windows machine. On Windows, the page gives the shortest verified path:
-**open PowerShell → copy command → paste → Enter → keep the window open while
-the Agent verifies readiness**. Clipboard denial reveals and selects the same
-command for manual copy. The host runs in that visible PowerShell window; no
-JavaScript, service, elevation, or browser-control bypass is used.
+**open PowerShell → copy command → paste → Enter → approve UAC → close
+PowerShell**. If its fragment is absent, it exposes a confirmation-code field
+instead of silently failing. Clipboard denial reveals and selects the same
+command for manual copy. The service install is initiated only by that user-run
+bootstrap and remains visible to Windows service management tools.
 
 ## Operational boundaries
 

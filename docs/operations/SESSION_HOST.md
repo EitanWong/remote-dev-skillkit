@@ -62,8 +62,8 @@ rdev host serve --join-code CODE --gateway https://gateway.example --once
 
 Useful host options from the current help surface include `--mode`, `--transport`, `--trust-pin`, `--trust-store`, `--identity-store`, and `--workspace-lock-store`.
 
-For an explicit long-lived managed connector, keep the operator-visible process
-running for the scoped session instead of using the safe one-shot default:
+For an explicit long-lived managed connector during local debugging, keep the
+operator-visible process running instead of using the one-shot default:
 
 ```bash
 rdev host serve \
@@ -77,24 +77,26 @@ rdev host serve \
 
 This does not grant new authority: every task is still checked against the
 session capability ceiling, workspace policy, adapter policy, and local host
-policy. Keep the connector visible and stop it when the session is closed or
-revoked.
+policy. For a boot-start Windows connector, use the browser handoff service
+install below rather than wrapping this console command with `sc.exe`.
 
 ## Browser handoff for managed Windows hosts
 
 An operator-managed HTTPS gateway can serve a short-lived browser handoff when
 it starts with `--public-base-url HTTPS_URL` and
 `--windows-amd64-host-binary PATH`. Create the link through
-`rdev.sessions.handoff`, then send that one browser link unchanged to the
-intended target. The page is the single delivery form: it localizes and detects
-the opened system. Windows shows numbered copy/paste instructions; macOS,
-Linux, and other systems remain unclaimed and are told to open the same link on
-the target Windows machine. On Windows, the operator copies the command, pastes
-it into an existing PowerShell window, presses Enter, and leaves it visible
-while the Agent checks readiness. The command automatically fetches and
-hash-verifies the host binary before connecting outward via managed long-poll. See
-[`WEB_HANDOFF.md`](WEB_HANDOFF.md) for deployment, expiry, and capability
-details.
+`rdev.sessions.handoff`, then send its browser link and retain its
+`confirmation_code` for fragment-loss recovery. The page is the single delivery
+form: it localizes and detects the opened system. Windows shows numbered
+copy/paste instructions; macOS, Linux, and other systems remain unclaimed and
+are told to open the same link on the target Windows machine. On Windows, the
+operator copies the command, pastes it into an existing PowerShell window, and
+presses Enter. After visible UAC approval, the verified binary is installed as
+the auto-start `RemoteDevSkillkitHost` service and the initiating PowerShell may
+exit. The service retains the current host identity when available, reconnects
+outward via managed long-poll, and keeps state under protected ProgramData. See
+[`WEB_HANDOFF.md`](WEB_HANDOFF.md) for deployment, expiry, removal, and
+capability details.
 
 ## Remote MCP proxy
 

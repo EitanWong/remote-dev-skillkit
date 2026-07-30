@@ -58,8 +58,9 @@ type webHandoffState struct {
 }
 
 // CreateWebHandoff returns a public handoff record and a high-entropy proof.
-// The caller must place the proof only in a browser URL fragment so it is not
-// sent to the gateway in an HTTP URL, referrer, or query string.
+// The caller may place the proof in a browser URL fragment or provide it as an
+// out-of-band confirmation code; it must never appear in an HTTP URL, referrer,
+// or query string.
 func (g *MemoryGateway) CreateWebHandoff(spec WebHandoffSpec) (WebHandoff, string, error) {
 	spec.SessionID = strings.TrimSpace(spec.SessionID)
 	spec.Platform = strings.TrimSpace(spec.Platform)

@@ -34,8 +34,8 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.sessions.handoff",
-			Description: "Create one short-lived browser handoff link for a Windows managed-host session. The native page adapts to browser language and opened system: Windows gets numbered copy/paste connection steps; macOS, Linux, and other systems remain unclaimed and are told to open the same link on the target Windows host. A Windows user claims the URL fragment proof once and receives a PowerShell command that fetches and hash-checks the scoped host binary automatically. It returns handoff metadata plus user_summary and agent_next_action recovery fields.",
-			Safety:      "Creates a scoped, expiring distribution capability only. It does not execute on a target, expose an operator bearer token or private key, install persistence, mutate network settings, or bypass local OS controls.",
+			Description: "Create one short-lived browser handoff link for a Windows managed-host session. The native page adapts to browser language and opened system: Windows gets numbered copy/paste connection steps; macOS, Linux, and other systems remain unclaimed and are told to open the same link on the target Windows host. A Windows user claims the URL fragment proof once, or pastes the returned confirmation_code if a messenger stripped that fragment, then receives a PowerShell command that fetches and hash-checks the scoped host binary. With visible UAC approval, that command installs and starts the outbound Windows service. It returns handoff metadata plus user_summary and agent_next_action recovery fields.",
+			Safety:      "Creates a scoped, expiring distribution capability only; creating it does not execute on a target. A target user may explicitly run the returned bootstrap, which requests visible UAC approval before installing its service. It does not expose an operator bearer token or private key, create an inbound listener, mutate network settings, or bypass local OS controls.",
 			InputSchema: object(map[string]any{
 				"gateway_url":   gatewayURL,
 				"session_id":    sessionID,

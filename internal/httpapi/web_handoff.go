@@ -39,6 +39,8 @@ type webHandoffPageCopy struct {
 	NonWindowsDescription string            `json:"nonWindowsDescription"`
 	NonWindowsSteps       []string          `json:"nonWindowsSteps"`
 	CopyAction            string            `json:"copyAction"`
+	ConfirmationCode      string            `json:"confirmationCode"`
+	ConfirmAction         string            `json:"confirmAction"`
 	MissingProof          string            `json:"missingProof"`
 	WindowsOnly           string            `json:"windowsOnly"`
 	Preparing             string            `json:"preparing"`
@@ -52,15 +54,17 @@ var webHandoffPageCopies = map[string]webHandoffPageCopy{
 	"en": {
 		Title:                 "Remote Dev Host Connection",
 		Heading:               "Connect this Windows host",
-		Description:           "This page prepares a short-lived connection command. Copy it, paste it into an already-open PowerShell window, and press Enter. The connector is fetched and verified automatically.",
+		Description:           "This page prepares a short-lived managed-host installer. Copy it, paste it into an already-open PowerShell window, and press Enter. The connector is fetched, verified, and installed as a Windows service after visible approval.",
 		DetectedPlatform:      "Detected system: {platform}.",
 		PlatformNames:         map[string]string{"windows": "Windows", "macos": "macOS", "linux": "Linux", "other": "an unsupported system"},
-		WindowsSteps:          []string{"Open Windows PowerShell.", "Click “Copy connection command” below.", "Paste it into the already-open PowerShell window and press Enter.", "Keep that PowerShell window open while the agent verifies the connection."},
+		WindowsSteps:          []string{"Open Windows PowerShell.", "Click “Copy connection command” below.", "Paste it into the already-open PowerShell window and press Enter.", "Approve the visible Windows service installation; then you may close PowerShell."},
 		NonWindowsHeading:     "Open this handoff on the target Windows host",
 		NonWindowsDescription: "This link prepares a Windows connector, but this browser is running on {platform}.",
 		NonWindowsSteps:       []string{"Do not claim this link on this device.", "Open the same link on the target Windows computer.", "Then follow the Windows connection steps shown there."},
 		CopyAction:            "Copy connection command",
-		MissingProof:          "This handoff link is missing its confirmation fragment.",
+		ConfirmationCode:      "Confirmation code",
+		ConfirmAction:         "Continue",
+		MissingProof:          "This handoff link is missing its confirmation fragment. Paste the confirmation code sent with the link, then continue.",
 		WindowsOnly:           "This handoff has not been claimed. Open the same link on the target Windows computer.",
 		Preparing:             "Preparing connection command…",
 		ClaimFailed:           "The handoff could not be claimed. Ask the operator for a fresh link.",
@@ -71,15 +75,17 @@ var webHandoffPageCopies = map[string]webHandoffPageCopy{
 	"zh-Hans": {
 		Title:                 "远程开发主机连接",
 		Heading:               "连接这台 Windows 主机",
-		Description:           "此页面会准备一条短期连接命令。复制后粘贴到当前已打开的 PowerShell 窗口并按 Enter；连接器会自动获取并校验。",
+		Description:           "此页面会准备一条短期托管主机安装命令。复制后粘贴到当前已打开的 PowerShell 窗口并按 Enter；连接器会自动获取、校验，并在可见确认后安装为 Windows 服务。",
 		DetectedPlatform:      "已检测到系统：{platform}。",
 		PlatformNames:         map[string]string{"windows": "Windows", "macos": "macOS", "linux": "Linux", "other": "不受支持的系统"},
-		WindowsSteps:          []string{"打开 Windows PowerShell。", "点击下方“复制连接命令”。", "将命令粘贴到已打开的 PowerShell 窗口并按 Enter。", "保持该 PowerShell 窗口打开，等待 Agent 验证连接。"},
+		WindowsSteps:          []string{"打开 Windows PowerShell。", "点击下方“复制连接命令”。", "将命令粘贴到已打开的 PowerShell 窗口并按 Enter。", "在可见提示中确认 Windows 服务安装；之后即可关闭 PowerShell。"},
 		NonWindowsHeading:     "请在目标 Windows 主机上打开此连接页",
 		NonWindowsDescription: "此链接将准备 Windows 连接器，但当前浏览器运行在 {platform}。",
 		NonWindowsSteps:       []string{"不要在当前设备领取此链接。", "请在目标 Windows 电脑上打开同一链接。", "然后按该页面显示的 Windows 连接步骤操作。"},
 		CopyAction:            "复制连接命令",
-		MissingProof:          "此连接链接缺少确认片段。",
+		ConfirmationCode:      "确认码",
+		ConfirmAction:         "继续",
+		MissingProof:          "此连接链接缺少确认片段。请粘贴随链接发送的确认码，然后继续。",
 		WindowsOnly:           "此连接尚未领取。请在目标 Windows 电脑上打开同一链接。",
 		Preparing:             "正在准备连接命令…",
 		ClaimFailed:           "此连接未能领取。请向操作员获取新的链接。",
@@ -90,15 +96,17 @@ var webHandoffPageCopies = map[string]webHandoffPageCopy{
 	"zh-Hant": {
 		Title:                 "遠端開發主機連線",
 		Heading:               "連線這台 Windows 主機",
-		Description:           "此頁面會準備一條短期連線指令。複製後貼到目前已開啟的 PowerShell 視窗並按 Enter；連線器會自動取得並驗證。",
+		Description:           "此頁面會準備一條短期受管主機安裝指令。複製後貼到目前已開啟的 PowerShell 視窗並按 Enter；連線器會自動取得、驗證，並在可見確認後安裝為 Windows 服務。",
 		DetectedPlatform:      "已偵測到系統：{platform}。",
 		PlatformNames:         map[string]string{"windows": "Windows", "macos": "macOS", "linux": "Linux", "other": "不支援的系統"},
-		WindowsSteps:          []string{"開啟 Windows PowerShell。", "按一下下方的「複製連線指令」。", "將指令貼到已開啟的 PowerShell 視窗並按 Enter。", "保持該 PowerShell 視窗開啟，等待 Agent 驗證連線。"},
+		WindowsSteps:          []string{"開啟 Windows PowerShell。", "按一下下方的「複製連線指令」。", "將指令貼到已開啟的 PowerShell 視窗並按 Enter。", "在可見提示中確認 Windows 服務安裝；之後即可關閉 PowerShell。"},
 		NonWindowsHeading:     "請在目標 Windows 主機上開啟此連線頁",
 		NonWindowsDescription: "此連結會準備 Windows 連線器，但目前瀏覽器執行於 {platform}。",
 		NonWindowsSteps:       []string{"不要在目前裝置領取此連結。", "請在目標 Windows 電腦上開啟同一個連結。", "再依該頁面顯示的 Windows 連線步驟操作。"},
 		CopyAction:            "複製連線指令",
-		MissingProof:          "此連線連結缺少確認片段。",
+		ConfirmationCode:      "確認碼",
+		ConfirmAction:         "繼續",
+		MissingProof:          "此連線連結缺少確認片段。請貼上隨連結傳送的確認碼，然後繼續。",
 		WindowsOnly:           "此連線尚未被領取。請在目標 Windows 電腦上開啟同一個連結。",
 		Preparing:             "正在準備連線指令…",
 		ClaimFailed:           "此連線未能領取。請向操作員取得新的連結。",
@@ -251,6 +259,7 @@ func (s Server) createWebHandoff(w http.ResponseWriter, r *http.Request, session
 			"session_id":          handoff.SessionID,
 			"platform":            handoff.Platform,
 			"url":                 link,
+			"confirmation_code":   proof,
 			"expires_at":          handoff.ExpiresAt,
 			"artifact_filename":   s.webHandoff.windowsAMD64.Filename,
 			"artifact_sha256":     s.webHandoff.windowsAMD64.SHA256,
@@ -344,8 +353,8 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
 	_, _ = fmt.Fprintf(w, `<!doctype html>
 <html lang="%s">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>%s</title>
-<style>body{font-family:system-ui,sans-serif;max-width:42rem;margin:4rem auto;padding:0 1.25rem;color:#172033}button{padding:.7rem 1rem;font:inherit}#status,#detected-platform{min-height:1.5rem}#connection-script{box-sizing:border-box;display:block;width:100%%;min-height:14rem;margin-top:.75rem;font-family:ui-monospace,monospace}</style></head>
-<body><main><h1 id="heading">%s</h1><p id="description">%s</p><p id="detected-platform"></p><ol id="connection-steps"></ol><button id="copy-command" type="button">%s</button><p id="status" role="status"></p><textarea id="connection-script" hidden readonly spellcheck="false"></textarea></main>
+<style>body{font-family:system-ui,sans-serif;max-width:42rem;margin:4rem auto;padding:0 1.25rem;color:#172033}button,input{padding:.7rem 1rem;font:inherit}#status,#detected-platform{min-height:1.5rem}#confirmation-code{box-sizing:border-box;display:block;width:100%%;margin:.5rem 0}#connection-script{box-sizing:border-box;display:block;width:100%%;min-height:14rem;margin-top:.75rem;font-family:ui-monospace,monospace}</style></head>
+<body><main><h1 id="heading">%s</h1><p id="description">%s</p><p id="detected-platform"></p><ol id="connection-steps"></ol><label id="confirmation-code-label" for="confirmation-code" hidden></label><input id="confirmation-code" hidden autocomplete="one-time-code" spellcheck="false"><button id="copy-command" type="button">%s</button><p id="status" role="status"></p><textarea id="connection-script" hidden readonly spellcheck="false"></textarea></main>
 <script>
 (() => {
   const pageCopies = %s;
@@ -355,6 +364,8 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
   const button = document.getElementById('copy-command');
   const status = document.getElementById('status');
   const connectionBootstrap = document.getElementById('connection-script');
+  const confirmationCode = document.getElementById('confirmation-code');
+  const confirmationCodeLabel = document.getElementById('confirmation-code-label');
   const heading = document.getElementById('heading');
   const description = document.getElementById('description');
   const detectedPlatform = document.getElementById('detected-platform');
@@ -373,6 +384,7 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
   document.documentElement.lang = locale;
   document.title = copy.title;
   button.textContent = copy.copyAction;
+  confirmationCodeLabel.textContent = copy.confirmationCode;
   connectionBootstrap.setAttribute('aria-label', copy.copyAction);
   const platformFor = () => {
     const clientHintPlatform = navigator.userAgentData && navigator.userAgentData.platform;
@@ -412,11 +424,7 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
       status.textContent = copy.copyManual;
     }
   };
-  const proof = window.location.hash.slice(1);
-  if (!proof) { button.disabled = true; status.textContent = copy.missingProof; return; }
-  history.replaceState(null, '', window.location.pathname);
-  if (!isWindows) { status.textContent = copy.windowsOnly; return; }
-  button.addEventListener('click', async () => {
+  const claim = async proof => {
     let claimed = false;
     button.disabled = true;
     status.textContent = copy.preparing;
@@ -435,7 +443,23 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
       status.textContent = claimed ? copy.unexpectedBootstrap : copy.claimFailed;
       if (!claimed) { button.disabled = false; }
     }
-  });
+  };
+  const proof = window.location.hash.slice(1);
+  if (proof) { history.replaceState(null, '', window.location.pathname); }
+  if (!isWindows) { status.textContent = copy.windowsOnly; return; }
+  if (!proof) {
+    confirmationCode.hidden = false;
+    confirmationCodeLabel.hidden = false;
+    button.textContent = copy.confirmAction;
+    const setConfirmationState = () => { button.disabled = !confirmationCode.value.trim(); };
+    confirmationCode.addEventListener('input', setConfirmationState);
+    button.addEventListener('click', () => claim(confirmationCode.value.trim()));
+    setConfirmationState();
+    status.textContent = copy.missingProof;
+    confirmationCode.focus();
+    return;
+  }
+  button.addEventListener('click', () => claim(proof));
 })();
 </script></body></html>`, locale, copy.Title, copy.Heading, copy.Description, copy.CopyAction, string(copies), string(initialLocale), string(initialPlatform), string(claimPath))
 }
@@ -480,31 +504,33 @@ func (s Server) claimWebHandoff(w http.ResponseWriter, r *http.Request, id strin
 func (s Server) webHandoffPowerShellBootstrap(handoff gateway.WebHandoff, joinCode, ticket string) string {
 	assetURL := s.webHandoff.publicBaseURL + "/connect/" + url.PathEscape(handoff.ID) + "/rdev-host.exe"
 	return fmt.Sprintf(`# Remote Dev Skillkit managed-host bootstrap.
-	# Paste this script into an already-open PowerShell window. It does not create
-	# a service, scheduled task, firewall rule, or execution-policy bypass.
+	# Paste this script into an already-open PowerShell window. It verifies the
+	# connector, then requests a visible administrator-approved Windows service install.
 $ErrorActionPreference = 'Stop'
 $gateway = %s
 $joinCode = %s
 $artifactUri = %s
 $artifactTicket = %s
 $expectedSHA256 = %s
-$stateRoot = Join-Path $env:LOCALAPPDATA 'RemoteDevSkillkit\managed-host'
-$hostBinary = Join-Path $stateRoot 'rdev-host.exe'
-$tempBinary = Join-Path $stateRoot 'rdev-host.download.exe'
-$identityStore = Join-Path $stateRoot 'identity.json'
-$trustStore = Join-Path $stateRoot 'trust.json'
-$lockStore = Join-Path $stateRoot 'workspace-locks'
+$stagingRoot = Join-Path $env:LOCALAPPDATA 'RemoteDevSkillkit\managed-host'
+$serviceRoot = Join-Path $env:ProgramData 'RemoteDevSkillkit\managed-host'
+$serviceName = 'RemoteDevSkillkitHost'
+$hostBinary = Join-Path $stagingRoot 'rdev-host.exe'
+$tempBinary = Join-Path $stagingRoot 'rdev-host.download.exe'
+$identityStore = Join-Path $stagingRoot 'identity.json'
+$trustStore = Join-Path $stagingRoot 'trust.json'
 
-New-Item -ItemType Directory -Force -Path $stateRoot, $lockStore | Out-Null
+New-Item -ItemType Directory -Force -Path $stagingRoot | Out-Null
 Invoke-WebRequest -Uri $artifactUri -Headers @{ %s = $artifactTicket } -OutFile $tempBinary
 $actualSHA256 = (Get-FileHash -LiteralPath $tempBinary -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actualSHA256 -ne $expectedSHA256) { throw 'rdev-host.exe SHA-256 verification failed.' }
 Move-Item -LiteralPath $tempBinary -Destination $hostBinary -Force
 
-Write-Host 'Starting managed Remote Dev Skillkit connector in this visible PowerShell window.'
-& $hostBinary serve --mode managed --gateway $gateway --join-code $joinCode --once=false --max-tasks 0 --transport long-poll --identity-store $identityStore --trust-store $trustStore --workspace-lock-store $lockStore
-$connectorExitCode = $LASTEXITCODE
-if ($connectorExitCode -ne 0) { throw "rdev-host.exe exited with code $connectorExitCode." }
+Write-Host 'Requesting the visible Windows service installation approval.'
+$installArgs = @('service', 'install', '--service-name', $serviceName, '--gateway', $gateway, '--join-code', $joinCode, '--state-root', $serviceRoot, '--identity-source', $identityStore, '--trust-source', $trustStore)
+$install = Start-Process -FilePath $hostBinary -ArgumentList $installArgs -Verb RunAs -Wait -PassThru
+if ($install.ExitCode -ne 0) { throw "rdev-host.exe service install exited with code $($install.ExitCode)." }
+Write-Host 'Managed Remote Dev Skillkit service is installed and started. You may close this PowerShell window.'
 `, powershellLiteral(s.webHandoff.publicBaseURL), powershellLiteral(joinCode), powershellLiteral(assetURL), powershellLiteral(ticket), powershellLiteral(s.webHandoff.windowsAMD64.SHA256), powershellLiteral(webHandoffArtifactTicketKey))
 }
 
