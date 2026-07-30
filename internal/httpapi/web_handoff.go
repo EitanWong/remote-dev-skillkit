@@ -489,22 +489,27 @@ $expectedSHA256 = %s
 $stagingRoot = Join-Path $env:LOCALAPPDATA 'RemoteDevSkillkit\managed-host'
 $serviceRoot = Join-Path $env:ProgramData 'RemoteDevSkillkit\managed-host'
 $serviceName = 'RemoteDevSkillkitHost'
-$hostBinary = Join-Path $stagingRoot 'rdev-host.exe'
-$tempBinary = Join-Path $stagingRoot 'rdev-host.download.exe'
+$releaseRoot = Join-Path (Join-Path $stagingRoot 'releases') $expectedSHA256
+$hostBinary = Join-Path $releaseRoot 'rdev-host.exe'
+$tempBinary = Join-Path $releaseRoot 'rdev-host.download.exe'
 $identityStore = Join-Path $stagingRoot 'identity.json'
 $trustStore = Join-Path $stagingRoot 'trust.json'
 
-New-Item -ItemType Directory -Force -Path $stagingRoot | Out-Null
-Invoke-WebRequest -Uri $artifactUri -Headers @{ %s = $artifactTicket } -OutFile $tempBinary
-$actualSHA256 = (Get-FileHash -LiteralPath $tempBinary -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($actualSHA256 -ne $expectedSHA256) { throw 'rdev-host.exe download SHA-256 verification failed.' }
-Copy-Item -LiteralPath $tempBinary -Destination $hostBinary -Force
-$installedSHA256 = (Get-FileHash -LiteralPath $hostBinary -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($installedSHA256 -ne $expectedSHA256) { throw 'rdev-host.exe staging SHA-256 verification failed.' }
-Remove-Item -LiteralPath $tempBinary -Force
+New-Item -ItemType Directory -Force -Path $releaseRoot | Out-Null
+if (Test-Path -LiteralPath $hostBinary) {
+  $installedSHA256 = (Get-FileHash -LiteralPath $hostBinary -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($installedSHA256 -ne $expectedSHA256) { throw 'rdev-host.exe staged release SHA-256 verification failed.' }
+} else {
+  Invoke-WebRequest -Uri $artifactUri -Headers @{ %s = $artifactTicket } -OutFile $tempBinary
+  $actualSHA256 = (Get-FileHash -LiteralPath $tempBinary -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($actualSHA256 -ne $expectedSHA256) { throw 'rdev-host.exe download SHA-256 verification failed.' }
+  Move-Item -LiteralPath $tempBinary -Destination $hostBinary
+  $installedSHA256 = (Get-FileHash -LiteralPath $hostBinary -Algorithm SHA256).Hash.ToLowerInvariant()
+  if ($installedSHA256 -ne $expectedSHA256) { throw 'rdev-host.exe staged release SHA-256 verification failed.' }
+}
 
 Write-Host 'Requesting the visible Windows service installation approval.'
-$installArgs = @('service', 'install', '--service-name', $serviceName, '--gateway', $gateway, '--join-code', $joinCode, '--state-root', $serviceRoot, '--identity-source', $identityStore, '--trust-source', $trustStore)
+$installArgs = @('service', 'install', '--replace-existing', '--service-name', $serviceName, '--gateway', $gateway, '--join-code', $joinCode, '--state-root', $serviceRoot, '--identity-source', $identityStore, '--trust-source', $trustStore)
 $install = Start-Process -FilePath $hostBinary -ArgumentList $installArgs -Verb RunAs -Wait -PassThru
 if ($install.ExitCode -eq 0) {
   Write-Host 'Managed Remote Dev Skillkit service is installed and started. You may close this PowerShell window.'

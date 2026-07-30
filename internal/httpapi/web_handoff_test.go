@@ -88,13 +88,18 @@ func TestWebHandoffLinkClaimsBootstrapAndDeliversVerifiedHostBinary(t *testing.T
 	if !strings.Contains(claimed.Bootstrap, session.JoinCode) || !strings.Contains(claimed.Bootstrap, "Invoke-WebRequest") || !strings.Contains(claimed.Bootstrap, "Get-FileHash") {
 		t.Fatal("copyable bootstrap did not contain scoped connection material")
 	}
-	for _, want := range []string{"& {", "service install", "Start-Process", "-Verb RunAs", "$serviceRoot = Join-Path $env:ProgramData", "Copy-Item -LiteralPath $tempBinary -Destination $hostBinary -Force", "$installedSHA256", "if ($install.ExitCode -eq 0)", "You may close this PowerShell window"} {
+	for _, want := range []string{"& {", "service install", "--replace-existing", "Start-Process", "-Verb RunAs", "$serviceRoot = Join-Path $env:ProgramData", "$releaseRoot = Join-Path (Join-Path $stagingRoot 'releases') $expectedSHA256", "$hostBinary = Join-Path $releaseRoot 'rdev-host.exe'", "if (Test-Path -LiteralPath $hostBinary)", "if ($install.ExitCode -eq 0)", "You may close this PowerShell window"} {
 		if !strings.Contains(claimed.Bootstrap, want) {
 			t.Fatalf("copyable bootstrap missing managed-service installation step %q", want)
 		}
 	}
-	if strings.Contains(claimed.Bootstrap, "Move-Item -LiteralPath $tempBinary") {
-		t.Fatal("copyable bootstrap must overwrite an existing staging binary instead of using Move-Item")
+	for _, forbidden := range []string{
+		"$hostBinary = Join-Path $stagingRoot 'rdev-host.exe'",
+		"Copy-Item -LiteralPath $tempBinary -Destination $hostBinary -Force",
+	} {
+		if strings.Contains(claimed.Bootstrap, forbidden) {
+			t.Fatalf("copyable bootstrap must not overwrite a potentially running host binary: %q", forbidden)
+		}
 	}
 	if strings.Index(claimed.Bootstrap, "You may close this PowerShell window") < strings.Index(claimed.Bootstrap, "if ($install.ExitCode -eq 0)") {
 		t.Fatal("copyable bootstrap must not print success before checking the service install exit code")

@@ -51,8 +51,10 @@ for file-mode requirements.
    selects the same command for manual copy.
 6. The Windows bootstrap fetches the host binary through the short-lived ticket,
    verifies its SHA-256, migrates an existing host identity when present, and
-   installs an auto-start outbound long-poll service. The operator does not
-   download or run a `.cmd` or `.ps1` file.
+   installs an auto-start outbound long-poll service. A replacement stages a
+   new SHA-256-addressed release rather than overwriting an executable held by
+   the running service. The operator does not download or run a `.cmd` or
+   `.ps1` file.
 7. Wait for the target endpoint through `rdev.sessions.status` before sending a
    task.
 
@@ -83,18 +85,24 @@ before execution.
 Operator credentials and gateway private keys do not appear in the initial
 page, HTTP URL, referrer, or query string.
 
-The bootstrap stages the verified executable under the current user's
-`%LOCALAPPDATA%\RemoteDevSkillkit\managed-host`, then requests visible UAC
-approval to install `RemoteDevSkillkitHost`. The auto-start service runs as
-LocalSystem from `%ProgramData%\RemoteDevSkillkit\managed-host`; its identity,
-trust, configuration, and workspace-lock state are ACL-restricted to
-LocalSystem and Administrators. It creates no inbound listener, firewall rule,
-scheduled task, or execution-policy bypass.
+The bootstrap stages each verified executable under the current user's
+`%LOCALAPPDATA%\RemoteDevSkillkit\managed-host\releases\<sha256>`, then requests
+visible UAC approval to install `RemoteDevSkillkitHost`. The auto-start service
+runs as LocalSystem from a separate immutable
+`%ProgramData%\RemoteDevSkillkit\managed-host\releases\<sha256>` release. On a
+replacement, it stops the prior service through SCM, preserves identity, trust,
+configuration, and workspace-lock state, then reconfigures SCM to the new
+release. A failed replacement restores the previous service configuration
+before restarting it. Protected state remains ACL-restricted to LocalSystem and
+Administrators. It creates no inbound listener, firewall rule, scheduled task,
+or execution-policy bypass.
 
 To remove the managed connector, use an elevated PowerShell window:
 
 ```powershell
-& "$env:ProgramData\RemoteDevSkillkit\managed-host\rdev-host.exe" service uninstall --service-name RemoteDevSkillkitHost --state-root "$env:ProgramData\RemoteDevSkillkit\managed-host"
+Stop-Service -Name RemoteDevSkillkitHost -ErrorAction Stop
+sc.exe delete RemoteDevSkillkitHost
+Remove-Item -LiteralPath "$env:ProgramData\RemoteDevSkillkit\managed-host" -Recurse -Force
 ```
 
 ## Native adaptive page behavior

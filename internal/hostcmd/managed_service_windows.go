@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -37,6 +38,7 @@ func (a App) installManagedService(args []string) error {
 	fs := flag.NewFlagSet("rdev-host service install", flag.ContinueOnError)
 	fs.SetOutput(a.Stderr)
 	serviceName := fs.String("service-name", defaultManagedServiceName, "Windows service name")
+	replaceExisting := fs.Bool("replace-existing", false, "replace an installed managed service while preserving its protected state")
 	gatewayURL := fs.String("gateway", "", "Control Plane session gateway URL")
 	joinCode := fs.String("join-code", "", "Control Plane session join code")
 	stateRoot := fs.String("state-root", "", "protected service state directory")
@@ -67,12 +69,6 @@ func (a App) installManagedService(args []string) error {
 		return fmt.Errorf("connect to Windows service manager (run from the visible UAC-approved process): %w", err)
 	}
 	defer manager.Disconnect()
-	if existing, err := manager.OpenService(config.ServiceName); err == nil {
-		existing.Close()
-		return fmt.Errorf("managed service %q is already installed", config.ServiceName)
-	} else if !errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
-		return fmt.Errorf("inspect managed service %q: %w", config.ServiceName, err)
-	}
 
 	executable, err := os.Executable()
 	if err != nil {
@@ -88,10 +84,19 @@ func (a App) installManagedService(args []string) error {
 	if err := protectManagedServiceState(root); err != nil {
 		return err
 	}
-	binaryPath := filepath.Join(root, managedServiceBinaryFilename)
-	configPath := filepath.Join(root, managedServiceConfigFilename)
-	if err := copyManagedServiceFile(executable, binaryPath); err != nil {
+	binaryPath, err := prepareManagedServiceRelease(root, executable)
+	if err != nil {
 		return err
+	}
+	configPath := filepath.Join(root, managedServiceConfigFilename)
+	if existing, err := manager.OpenService(config.ServiceName); err == nil {
+		defer existing.Close()
+		if !*replaceExisting {
+			return fmt.Errorf("managed service %q is already installed", config.ServiceName)
+		}
+		return a.replaceManagedService(existing, binaryPath, configPath, config)
+	} else if !errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+		return fmt.Errorf("inspect managed service %q: %w", config.ServiceName, err)
 	}
 	if err := copyManagedServiceFileIfPresent(*identitySource, filepath.Join(root, managedServiceIdentityFile)); err != nil {
 		return fmt.Errorf("migrate host identity: %w", err)
@@ -119,6 +124,57 @@ func (a App) installManagedService(args []string) error {
 	}
 	_, err = fmt.Fprintf(a.Stdout, "managed service installed and started: %s\n", config.ServiceName)
 	return err
+}
+
+func (a App) replaceManagedService(service *mgr.Service, binaryPath, configPath string, replacement managedServiceConfig) error {
+	previousConfig, err := readManagedServiceConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("read installed managed service config before replace: %w", err)
+	}
+	previousServiceConfig, err := service.Config()
+	if err != nil {
+		return fmt.Errorf("read installed managed service settings before replace: %w", err)
+	}
+	if err := stopManagedService(service); err != nil {
+		return err
+	}
+	if err := writeManagedServiceConfig(configPath, replacement); err != nil {
+		return rollbackManagedServiceReplacement(service, previousServiceConfig, configPath, previousConfig, fmt.Errorf("write replacement managed service config: %w", err))
+	}
+	nextServiceConfig := previousServiceConfig
+	nextServiceConfig.BinaryPathName = managedServiceCommandLine(binaryPath, configPath)
+	nextServiceConfig.StartType = mgr.StartAutomatic
+	nextServiceConfig.ErrorControl = mgr.ErrorNormal
+	nextServiceConfig.DisplayName = "Remote Dev Skillkit Host"
+	nextServiceConfig.Description = "Outbound managed Remote Dev Skillkit connector"
+	if err := service.UpdateConfig(nextServiceConfig); err != nil {
+		return rollbackManagedServiceReplacement(service, previousServiceConfig, configPath, previousConfig, fmt.Errorf("update managed Windows service: %w", err))
+	}
+	if err := service.Start(); err != nil {
+		return rollbackManagedServiceReplacement(service, previousServiceConfig, configPath, previousConfig, fmt.Errorf("start replacement managed Windows service: %w", err))
+	}
+	_, err = fmt.Fprintf(a.Stdout, "managed service replaced and started: %s\n", replacement.ServiceName)
+	return err
+}
+
+func rollbackManagedServiceReplacement(service *mgr.Service, previousServiceConfig mgr.Config, configPath string, previousConfig managedServiceConfig, cause error) error {
+	if err := stopManagedService(service); err != nil {
+		return fmt.Errorf("%w; stop replacement before rollback: %v", cause, err)
+	}
+	if err := writeManagedServiceConfig(configPath, previousConfig); err != nil {
+		return fmt.Errorf("%w; restore managed service config: %v", cause, err)
+	}
+	if err := service.UpdateConfig(previousServiceConfig); err != nil {
+		return fmt.Errorf("%w; restore managed Windows service settings: %v", cause, err)
+	}
+	if err := service.Start(); err != nil {
+		return fmt.Errorf("%w; restart previous managed Windows service: %v", cause, err)
+	}
+	return cause
+}
+
+func managedServiceCommandLine(binaryPath, configPath string) string {
+	return strings.Join([]string{syscall.EscapeArg(binaryPath), "service", "run", "--config", syscall.EscapeArg(configPath)}, " ")
 }
 
 func (a App) runManagedService(ctx context.Context, args []string) error {
