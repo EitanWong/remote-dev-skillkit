@@ -1105,6 +1105,20 @@ func TestSessionTaskSpecMapsGitWorktreeFields(t *testing.T) {
 	}
 }
 
+func TestSessionTaskSpecDoesNotInventWriteScopeForReadOnlyTask(t *testing.T) {
+	spec := sessionTaskSpec(controlplane.Task{
+		ID:      "task-read-only",
+		Adapter: "powershell",
+		Payload: map[string]any{
+			"workspace_root": ".",
+			"command":        "Get-Location",
+		},
+	}, "endpoint-read-only", "identity-read-only")
+	if len(spec.Workspace.WriteScope) != 0 {
+		t.Fatalf("read-only task must not gain an implicit write scope: %#v", spec.Workspace)
+	}
+}
+
 func hostcmdGit(t *testing.T, repo string, args ...string) {
 	t.Helper()
 	if output, err := exec.Command("git", append([]string{"-C", repo}, args...)...).CombinedOutput(); err != nil {
