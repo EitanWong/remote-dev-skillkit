@@ -85,16 +85,16 @@ install below rather than wrapping this console command with `sc.exe`.
 An operator-managed HTTPS gateway can serve a short-lived browser handoff when
 it starts with `--public-base-url HTTPS_URL` and
 `--windows-amd64-host-binary PATH`. Create the link through
-`rdev.sessions.handoff`, then send its browser link and retain its
-`confirmation_code` for fragment-loss recovery. The page is the single delivery
-form: it localizes and detects the opened system. Windows shows numbered
-copy/paste instructions; macOS, Linux, and other systems remain unclaimed and
-are told to open the same link on the target Windows machine. On Windows, the
-operator copies the command, pastes it into an existing PowerShell window, and
-presses Enter. After visible UAC approval, the verified binary is installed as
-the auto-start `RemoteDevSkillkitHost` service and the initiating PowerShell may
-exit. The service retains the current host identity when available, reconnects
-outward via managed long-poll, and keeps state under protected ProgramData. See
+`rdev.sessions.handoff`, then send its one browser link to the target. The page
+is the single delivery form: it localizes and detects the opened system. Windows
+automatically presents the copyable command; macOS, Linux, and other systems
+remain unclaimed and are told to open the same link on the target Windows
+machine. On Windows, the operator copies the command, pastes it into an
+existing PowerShell window, and presses Enter. After visible UAC approval, the
+verified binary is installed as the auto-start `RemoteDevSkillkitHost` service
+and the initiating PowerShell may exit. The service retains the current host
+identity when available, reconnects outward via managed long-poll, and keeps
+state under protected ProgramData. See
 [`WEB_HANDOFF.md`](WEB_HANDOFF.md) for deployment, expiry, removal, and
 capability details.
 

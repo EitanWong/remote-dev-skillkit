@@ -29,7 +29,7 @@ func TestRemoteSessionsMCPHandoffProxiesOperatorRequest(t *testing.T) {
 			t.Fatalf("unexpected handoff request: %#v", request)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = io.WriteString(w, `{"handoff":{"id":"hnd_test","url":"https://remote.example/connect/hnd_test#proof","confirmation_code":"proof","expires_at":"2026-07-28T12:00:00Z"}}`)
+		_, _ = io.WriteString(w, `{"handoff":{"id":"hnd_test","url":"https://remote.example/connect/hnd_test","expires_at":"2026-07-28T12:00:00Z"}}`)
 	}))
 	defer remote.Close()
 
@@ -40,10 +40,10 @@ func TestRemoteSessionsMCPHandoffProxiesOperatorRequest(t *testing.T) {
 		"expires_in_ms": float64(600000),
 	})
 	handoff := mapValue(t, result, "handoff")
-	if stringValue(t, handoff, "url") != "https://remote.example/connect/hnd_test#proof" {
+	if stringValue(t, handoff, "url") != "https://remote.example/connect/hnd_test" {
 		t.Fatalf("unexpected MCP handoff result: %#v", result)
 	}
-	if stringValue(t, handoff, "confirmation_code") != "proof" {
-		t.Fatalf("MCP handoff lost fragment recovery code: %#v", result)
+	if _, exists := handoff["confirmation_code"]; exists {
+		t.Fatalf("MCP handoff must not return a confirmation code: %#v", result)
 	}
 }

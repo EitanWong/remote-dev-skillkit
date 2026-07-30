@@ -39,11 +39,9 @@ type webHandoffPageCopy struct {
 	NonWindowsDescription string            `json:"nonWindowsDescription"`
 	NonWindowsSteps       []string          `json:"nonWindowsSteps"`
 	CopyAction            string            `json:"copyAction"`
-	ConfirmationCode      string            `json:"confirmationCode"`
-	ConfirmAction         string            `json:"confirmAction"`
-	MissingProof          string            `json:"missingProof"`
 	WindowsOnly           string            `json:"windowsOnly"`
 	Preparing             string            `json:"preparing"`
+	Ready                 string            `json:"ready"`
 	ClaimFailed           string            `json:"claimFailed"`
 	Copied                string            `json:"copied"`
 	CopyManual            string            `json:"copyManual"`
@@ -62,11 +60,9 @@ var webHandoffPageCopies = map[string]webHandoffPageCopy{
 		NonWindowsDescription: "This link prepares a Windows connector, but this browser is running on {platform}.",
 		NonWindowsSteps:       []string{"Do not claim this link on this device.", "Open the same link on the target Windows computer.", "Then follow the Windows connection steps shown there."},
 		CopyAction:            "Copy connection command",
-		ConfirmationCode:      "Confirmation code",
-		ConfirmAction:         "Continue",
-		MissingProof:          "This handoff link is missing its confirmation fragment. Paste the confirmation code sent with the link, then continue.",
 		WindowsOnly:           "This handoff has not been claimed. Open the same link on the target Windows computer.",
 		Preparing:             "Preparing connection command…",
+		Ready:                 "Connection command ready. Copy it, paste it into the open PowerShell window, and press Enter.",
 		ClaimFailed:           "The handoff could not be claimed. Ask the operator for a fresh link.",
 		Copied:                "Copied. Paste into the open PowerShell window and press Enter.",
 		CopyManual:            "Copy is unavailable. The command is selected below; copy it, then paste it into the open PowerShell window and press Enter.",
@@ -83,11 +79,9 @@ var webHandoffPageCopies = map[string]webHandoffPageCopy{
 		NonWindowsDescription: "此链接将准备 Windows 连接器，但当前浏览器运行在 {platform}。",
 		NonWindowsSteps:       []string{"不要在当前设备领取此链接。", "请在目标 Windows 电脑上打开同一链接。", "然后按该页面显示的 Windows 连接步骤操作。"},
 		CopyAction:            "复制连接命令",
-		ConfirmationCode:      "确认码",
-		ConfirmAction:         "继续",
-		MissingProof:          "此连接链接缺少确认片段。请粘贴随链接发送的确认码，然后继续。",
-		WindowsOnly:           "此连接尚未领取。请在目标 Windows 电脑上打开同一链接。",
+		WindowsOnly:           "此连接尚未领取。请在目标 Windows 主机上打开同一链接。",
 		Preparing:             "正在准备连接命令…",
+		Ready:                 "连接命令已就绪。复制后粘贴到当前 PowerShell 窗口并按 Enter 执行。",
 		ClaimFailed:           "此连接未能领取。请向操作员获取新的链接。",
 		Copied:                "已复制。请粘贴到当前 PowerShell 窗口并按 Enter 执行。",
 		CopyManual:            "浏览器未允许复制。下方命令已被选中，请复制后粘贴到当前 PowerShell 窗口并按 Enter 执行。",
@@ -104,11 +98,9 @@ var webHandoffPageCopies = map[string]webHandoffPageCopy{
 		NonWindowsDescription: "此連結會準備 Windows 連線器，但目前瀏覽器執行於 {platform}。",
 		NonWindowsSteps:       []string{"不要在目前裝置領取此連結。", "請在目標 Windows 電腦上開啟同一個連結。", "再依該頁面顯示的 Windows 連線步驟操作。"},
 		CopyAction:            "複製連線指令",
-		ConfirmationCode:      "確認碼",
-		ConfirmAction:         "繼續",
-		MissingProof:          "此連線連結缺少確認片段。請貼上隨連結傳送的確認碼，然後繼續。",
 		WindowsOnly:           "此連線尚未被領取。請在目標 Windows 電腦上開啟同一個連結。",
 		Preparing:             "正在準備連線指令…",
+		Ready:                 "連線指令已就緒。複製後貼到目前 PowerShell 視窗並按 Enter 執行。",
 		ClaimFailed:           "此連線未能領取。請向操作員取得新的連結。",
 		Copied:                "已複製。請貼到目前 PowerShell 視窗並按 Enter 執行。",
 		CopyManual:            "瀏覽器未允許複製。下方指令已被選取，請複製後貼到目前 PowerShell 視窗並按 Enter 執行。",
@@ -239,7 +231,7 @@ func (s Server) createWebHandoff(w http.ResponseWriter, r *http.Request, session
 		return
 	}
 
-	handoff, proof, err := s.Gateway.CreateWebHandoff(gateway.WebHandoffSpec{
+	handoff, err := s.Gateway.CreateWebHandoff(gateway.WebHandoffSpec{
 		SessionID: session.ID,
 		Platform:  request.Platform,
 		ExpiresAt: s.Gateway.Now().Add(ttl),
@@ -251,7 +243,7 @@ func (s Server) createWebHandoff(w http.ResponseWriter, r *http.Request, session
 	if !s.persistState(w) {
 		return
 	}
-	link := s.webHandoff.publicBaseURL + "/connect/" + url.PathEscape(handoff.ID) + "#" + proof
+	link := s.webHandoff.publicBaseURL + "/connect/" + url.PathEscape(handoff.ID)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"handoff": map[string]any{
 			"schema_version":      handoff.SchemaVersion,
@@ -259,7 +251,6 @@ func (s Server) createWebHandoff(w http.ResponseWriter, r *http.Request, session
 			"session_id":          handoff.SessionID,
 			"platform":            handoff.Platform,
 			"url":                 link,
-			"confirmation_code":   proof,
 			"expires_at":          handoff.ExpiresAt,
 			"artifact_filename":   s.webHandoff.windowsAMD64.Filename,
 			"artifact_sha256":     s.webHandoff.windowsAMD64.SHA256,
@@ -353,8 +344,8 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
 	_, _ = fmt.Fprintf(w, `<!doctype html>
 <html lang="%s">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>%s</title>
-<style>body{font-family:system-ui,sans-serif;max-width:42rem;margin:4rem auto;padding:0 1.25rem;color:#172033}button,input{padding:.7rem 1rem;font:inherit}#status,#detected-platform{min-height:1.5rem}#confirmation-code{box-sizing:border-box;display:block;width:100%%;margin:.5rem 0}#connection-script{box-sizing:border-box;display:block;width:100%%;min-height:14rem;margin-top:.75rem;font-family:ui-monospace,monospace}</style></head>
-<body><main><h1 id="heading">%s</h1><p id="description">%s</p><p id="detected-platform"></p><ol id="connection-steps"></ol><label id="confirmation-code-label" for="confirmation-code" hidden></label><input id="confirmation-code" hidden autocomplete="one-time-code" spellcheck="false"><button id="copy-command" type="button">%s</button><p id="status" role="status"></p><textarea id="connection-script" hidden readonly spellcheck="false"></textarea></main>
+<style>body{font-family:system-ui,sans-serif;max-width:42rem;margin:4rem auto;padding:0 1.25rem;color:#172033}button{padding:.7rem 1rem;font:inherit}#status,#detected-platform{min-height:1.5rem}#connection-script{box-sizing:border-box;display:block;width:100%%;min-height:14rem;margin-top:.75rem;font-family:ui-monospace,monospace}</style></head>
+<body><main><h1 id="heading">%s</h1><p id="description">%s</p><p id="detected-platform"></p><ol id="connection-steps"></ol><button id="copy-command" type="button">%s</button><p id="status" role="status"></p><textarea id="connection-script" hidden readonly spellcheck="false"></textarea></main>
 <script>
 (() => {
   const pageCopies = %s;
@@ -364,8 +355,6 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
   const button = document.getElementById('copy-command');
   const status = document.getElementById('status');
   const connectionBootstrap = document.getElementById('connection-script');
-  const confirmationCode = document.getElementById('confirmation-code');
-  const confirmationCodeLabel = document.getElementById('confirmation-code-label');
   const heading = document.getElementById('heading');
   const description = document.getElementById('description');
   const detectedPlatform = document.getElementById('detected-platform');
@@ -384,7 +373,6 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
   document.documentElement.lang = locale;
   document.title = copy.title;
   button.textContent = copy.copyAction;
-  confirmationCodeLabel.textContent = copy.confirmationCode;
   connectionBootstrap.setAttribute('aria-label', copy.copyAction);
   const platformFor = () => {
     const clientHintPlatform = navigator.userAgentData && navigator.userAgentData.platform;
@@ -424,12 +412,12 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
       status.textContent = copy.copyManual;
     }
   };
-  const claim = async proof => {
+  const claim = async () => {
     let claimed = false;
     button.disabled = true;
     status.textContent = copy.preparing;
     try {
-      const response = await fetch(claimPath, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({proof})});
+      const response = await fetch(claimPath, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({})});
       if (!response.ok) { throw new Error('claim failed'); }
       const payload = await response.json();
       if (typeof payload.bootstrap !== 'string' || !payload.bootstrap) {
@@ -438,36 +426,21 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
       claimed = true;
       connectionBootstrap.value = payload.bootstrap;
       connectionBootstrap.hidden = false;
-      await copyBootstrap();
+      button.disabled = false;
+      status.textContent = copy.ready;
     } catch (_) {
       status.textContent = claimed ? copy.unexpectedBootstrap : copy.claimFailed;
-      if (!claimed) { button.disabled = false; }
     }
   };
-  const proof = window.location.hash.slice(1);
-  if (proof) { history.replaceState(null, '', window.location.pathname); }
   if (!isWindows) { status.textContent = copy.windowsOnly; return; }
-  if (!proof) {
-    confirmationCode.hidden = false;
-    confirmationCodeLabel.hidden = false;
-    button.textContent = copy.confirmAction;
-    const setConfirmationState = () => { button.disabled = !confirmationCode.value.trim(); };
-    confirmationCode.addEventListener('input', setConfirmationState);
-    button.addEventListener('click', () => claim(confirmationCode.value.trim()));
-    setConfirmationState();
-    status.textContent = copy.missingProof;
-    confirmationCode.focus();
-    return;
-  }
-  button.addEventListener('click', () => claim(proof));
+  button.addEventListener('click', copyBootstrap);
+  claim();
 })();
 </script></body></html>`, locale, copy.Title, copy.Heading, copy.Description, copy.CopyAction, string(copies), string(initialLocale), string(initialPlatform), string(claimPath))
 }
 
 func (s Server) claimWebHandoff(w http.ResponseWriter, r *http.Request, id string) {
-	var request struct {
-		Proof string `json:"proof"`
-	}
+	var request struct{}
 	r.Body = http.MaxBytesReader(w, r.Body, maxWebHandoffRequestBytes)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
@@ -475,7 +448,7 @@ func (s Server) claimWebHandoff(w http.ResponseWriter, r *http.Request, id strin
 		writeError(w, http.StatusBadRequest, "invalid web handoff claim")
 		return
 	}
-	handoff, ticket, err := s.Gateway.ClaimWebHandoff(id, request.Proof, defaultArtifactTicketTTL)
+	handoff, ticket, err := s.Gateway.ClaimWebHandoff(id, defaultArtifactTicketTTL)
 	if err != nil {
 		writeWebHandoffError(w, err)
 		return
@@ -506,6 +479,7 @@ func (s Server) webHandoffPowerShellBootstrap(handoff gateway.WebHandoff, joinCo
 	return fmt.Sprintf(`# Remote Dev Skillkit managed-host bootstrap.
 	# Paste this script into an already-open PowerShell window. It verifies the
 	# connector, then requests a visible administrator-approved Windows service install.
+& {
 $ErrorActionPreference = 'Stop'
 $gateway = %s
 $joinCode = %s
@@ -523,14 +497,21 @@ $trustStore = Join-Path $stagingRoot 'trust.json'
 New-Item -ItemType Directory -Force -Path $stagingRoot | Out-Null
 Invoke-WebRequest -Uri $artifactUri -Headers @{ %s = $artifactTicket } -OutFile $tempBinary
 $actualSHA256 = (Get-FileHash -LiteralPath $tempBinary -Algorithm SHA256).Hash.ToLowerInvariant()
-if ($actualSHA256 -ne $expectedSHA256) { throw 'rdev-host.exe SHA-256 verification failed.' }
-Move-Item -LiteralPath $tempBinary -Destination $hostBinary -Force
+if ($actualSHA256 -ne $expectedSHA256) { throw 'rdev-host.exe download SHA-256 verification failed.' }
+Copy-Item -LiteralPath $tempBinary -Destination $hostBinary -Force
+$installedSHA256 = (Get-FileHash -LiteralPath $hostBinary -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($installedSHA256 -ne $expectedSHA256) { throw 'rdev-host.exe staging SHA-256 verification failed.' }
+Remove-Item -LiteralPath $tempBinary -Force
 
 Write-Host 'Requesting the visible Windows service installation approval.'
 $installArgs = @('service', 'install', '--service-name', $serviceName, '--gateway', $gateway, '--join-code', $joinCode, '--state-root', $serviceRoot, '--identity-source', $identityStore, '--trust-source', $trustStore)
 $install = Start-Process -FilePath $hostBinary -ArgumentList $installArgs -Verb RunAs -Wait -PassThru
-if ($install.ExitCode -ne 0) { throw "rdev-host.exe service install exited with code $($install.ExitCode)." }
-Write-Host 'Managed Remote Dev Skillkit service is installed and started. You may close this PowerShell window.'
+if ($install.ExitCode -eq 0) {
+  Write-Host 'Managed Remote Dev Skillkit service is installed and started. You may close this PowerShell window.'
+} else {
+  throw "rdev-host.exe service install exited with code $($install.ExitCode)."
+}
+}
 `, powershellLiteral(s.webHandoff.publicBaseURL), powershellLiteral(joinCode), powershellLiteral(assetURL), powershellLiteral(ticket), powershellLiteral(s.webHandoff.windowsAMD64.SHA256), powershellLiteral(webHandoffArtifactTicketKey))
 }
 
@@ -569,7 +550,7 @@ func writeWebHandoffError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "web handoff not found")
 	case errors.Is(err, gateway.ErrWebHandoffExpired), errors.Is(err, gateway.ErrWebHandoffClaimed):
 		writeError(w, http.StatusGone, "web handoff has expired or was already claimed")
-	case errors.Is(err, gateway.ErrWebHandoffInvalidProof), errors.Is(err, gateway.ErrWebHandoffInvalidTicket):
+	case errors.Is(err, gateway.ErrWebHandoffInvalidTicket):
 		writeError(w, http.StatusForbidden, "web handoff authorization failed")
 	case errors.Is(err, gateway.ErrWebHandoffSessionInvalid):
 		writeError(w, http.StatusConflict, "session is not eligible for a web handoff")

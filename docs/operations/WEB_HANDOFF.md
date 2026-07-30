@@ -4,8 +4,8 @@ A browser handoff turns a normal session into a short-lived Windows host
 connection flow:
 
 ```text
-operator MCP -> session handoff URL + recovery confirmation code
-             -> browser fragment/code claim -> localized PowerShell command copy
+operator MCP -> one-time browser handoff URL
+             -> target Windows page claim -> localized PowerShell command copy
              -> verified rdev-host.exe -> visible UAC service install
              -> outbound long-poll session join
 ```
@@ -37,10 +37,9 @@ for file-mode requirements.
 1. Create a session with `selected_gateway_url` set to the configured public
    base URL.
 2. Call `rdev.sessions.handoff` with the session id and `windows-amd64`.
-3. Send the returned URL unchanged to the intended target. Retain the returned
-   `confirmation_code` beside it: it is only used if a messenger or redirect
-   strips the URL fragment. There is no separate `web` or `powershell` delivery
-   choice, and an Agent must not claim the URL on the user's behalf.
+3. Send the returned URL unchanged to the intended target. There is no separate
+   confirmation code or `web`/`powershell` delivery choice, and an Agent must
+   not claim the URL on the user's behalf.
 4. The page localizes itself and identifies the opened system. On Windows it
    displays four numbered connection steps. On macOS, Linux, or an unknown
    system it names the detected system, leaves the link unclaimed, and tells the
@@ -67,15 +66,15 @@ a fresh link is required after expiry or claim.
 The URL has the form:
 
 ```text
-https://gateway.example/connect/HANDOFF_ID#FRAGMENT_PROOF
+https://gateway.example/connect/HANDOFF_ID
 ```
 
-Only `HANDOFF_ID` reaches the gateway in the initial HTTP request. The browser
-reads `FRAGMENT_PROOF` locally, removes it from browser history, and submits it
-in a same-origin POST body. The gateway stores only a SHA-256 hash of the proof.
-If a delivery layer removes the fragment, the Windows page asks for the returned
-`confirmation_code` and submits that value in the same POST body; it never puts
-the code into a URL, query string, or referrer.
+`HANDOFF_ID` is a high-entropy, short-lived, one-time browser capability. On
+Windows the page posts an empty same-origin claim request, then directly shows
+the copyable command. There is no URL fragment or confirmation code. The page
+uses `no-store` and `no-referrer`; gateway audit events record only a derived
+handoff reference, never the raw capability. The HTTPS reverse proxy must redact
+`/connect/` request paths from access logs while a link can be claimed.
 
 After a successful claim, the browser receives one copyable PowerShell
 connection command. It uses a short-lived artifact ticket to fetch the Windows
@@ -113,10 +112,10 @@ names the detected system, explains that this handoff supplies a Windows
 connector, and leaves the link unclaimed so the same URL can be opened on the
 target Windows machine. On Windows, the page gives the shortest verified path:
 **open PowerShell → copy command → paste → Enter → approve UAC → close
-PowerShell**. If its fragment is absent, it exposes a confirmation-code field
-instead of silently failing. Clipboard denial reveals and selects the same
-command for manual copy. The service install is initiated only by that user-run
-bootstrap and remains visible to Windows service management tools.
+PowerShell**. It claims the one-time URL on Windows and directly displays the
+command. Clipboard denial reveals and selects the same command for manual copy.
+The service install is initiated only by that user-run bootstrap and remains
+visible to Windows service management tools.
 
 ## Operational boundaries
 

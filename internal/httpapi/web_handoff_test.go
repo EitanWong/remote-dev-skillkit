@@ -44,9 +44,8 @@ func TestWebHandoffLinkClaimsBootstrapAndDeliversVerifiedHostBinary(t *testing.T
 	}
 	var handoff struct {
 		Handoff struct {
-			ID               string `json:"id"`
-			URL              string `json:"url"`
-			ConfirmationCode string `json:"confirmation_code"`
+			ID  string `json:"id"`
+			URL string `json:"url"`
 		} `json:"handoff"`
 	}
 	decodeHTTP(t, created, &handoff)
@@ -54,11 +53,11 @@ func TestWebHandoffLinkClaimsBootstrapAndDeliversVerifiedHostBinary(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if link.Scheme != "https" || link.Host != "remote.example.test" || link.Fragment == "" || link.RawQuery != "" {
+	if link.Scheme != "https" || link.Host != "remote.example.test" || link.Fragment != "" || link.RawQuery != "" {
 		t.Fatalf("unexpected handoff link %q", handoff.Handoff.URL)
 	}
-	if handoff.Handoff.ConfirmationCode == "" || handoff.Handoff.ConfirmationCode != link.Fragment {
-		t.Fatalf("handoff confirmation code must match the fragment proof: %#v", handoff.Handoff)
+	if strings.Contains(created.Body.String(), `"confirmation_code"`) {
+		t.Fatal("direct browser handoff must not return a separate confirmation code")
 	}
 
 	pageReq := httptest.NewRequest(http.MethodGet, link.Path, nil)
@@ -67,14 +66,14 @@ func TestWebHandoffLinkClaimsBootstrapAndDeliversVerifiedHostBinary(t *testing.T
 	if pageRec.Code != http.StatusOK {
 		t.Fatalf("handoff page status = %d body=%s", pageRec.Code, pageRec.Body.String())
 	}
-	if strings.Contains(pageRec.Body.String(), session.JoinCode) || strings.Contains(pageRec.Body.String(), link.Fragment) {
-		t.Fatal("handoff page must not expose the join code or fragment proof")
+	if strings.Contains(pageRec.Body.String(), session.JoinCode) {
+		t.Fatal("handoff page must not expose the join code")
 	}
 	if pageRec.Header().Get("Content-Security-Policy") == "" || pageRec.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("handoff page missing security headers: %#v", pageRec.Header())
 	}
 
-	claim := postJSON(t, handler, link.Path+"/claim", `{"proof":"`+link.Fragment+`"}`, "")
+	claim := postJSON(t, handler, link.Path+"/claim", `{}`, "")
 	if claim.Code != http.StatusOK {
 		t.Fatalf("claim status = %d body=%s", claim.Code, claim.Body.String())
 	}
@@ -89,10 +88,16 @@ func TestWebHandoffLinkClaimsBootstrapAndDeliversVerifiedHostBinary(t *testing.T
 	if !strings.Contains(claimed.Bootstrap, session.JoinCode) || !strings.Contains(claimed.Bootstrap, "Invoke-WebRequest") || !strings.Contains(claimed.Bootstrap, "Get-FileHash") {
 		t.Fatal("copyable bootstrap did not contain scoped connection material")
 	}
-	for _, want := range []string{"service install", "Start-Process", "-Verb RunAs", "$serviceRoot = Join-Path $env:ProgramData", "You may close this PowerShell window"} {
+	for _, want := range []string{"& {", "service install", "Start-Process", "-Verb RunAs", "$serviceRoot = Join-Path $env:ProgramData", "Copy-Item -LiteralPath $tempBinary -Destination $hostBinary -Force", "$installedSHA256", "if ($install.ExitCode -eq 0)", "You may close this PowerShell window"} {
 		if !strings.Contains(claimed.Bootstrap, want) {
 			t.Fatalf("copyable bootstrap missing managed-service installation step %q", want)
 		}
+	}
+	if strings.Contains(claimed.Bootstrap, "Move-Item -LiteralPath $tempBinary") {
+		t.Fatal("copyable bootstrap must overwrite an existing staging binary instead of using Move-Item")
+	}
+	if strings.Index(claimed.Bootstrap, "You may close this PowerShell window") < strings.Index(claimed.Bootstrap, "if ($install.ExitCode -eq 0)") {
+		t.Fatal("copyable bootstrap must not print success before checking the service install exit code")
 	}
 	if strings.Contains(claimed.Bootstrap, "& $hostBinary serve") {
 		t.Fatal("copyable bootstrap must not keep the connector tied to the initiating PowerShell")
@@ -116,7 +121,7 @@ func TestWebHandoffLinkClaimsBootstrapAndDeliversVerifiedHostBinary(t *testing.T
 		t.Fatalf("artifact response missing no-store: %#v", artifactRec.Header())
 	}
 
-	replayed := postJSON(t, handler, link.Path+"/claim", `{"proof":"`+link.Fragment+`"}`, "")
+	replayed := postJSON(t, handler, link.Path+"/claim", `{}`, "")
 	if replayed.Code != http.StatusGone {
 		t.Fatalf("second claim status = %d, want 410: %s", replayed.Code, replayed.Body.String())
 	}
@@ -213,8 +218,6 @@ func TestWebHandoffPageLocalizesAndGatesWindowsBootstrap(t *testing.T) {
 		"connection-script",
 		"detected-platform",
 		"connection-steps",
-		"confirmation-code",
-		"confirmation-code-label",
 		"navigator.userAgentData",
 		"const initialPlatform = \"windows\";",
 		"const platformFor = () => {",
@@ -228,9 +231,9 @@ func TestWebHandoffPageLocalizesAndGatesWindowsBootstrap(t *testing.T) {
 		"connectionBootstrap.hidden = false",
 		"connectionBootstrap.select()",
 		"connectionBootstrap.setAttribute('aria-label', copy.copyAction)",
-		"const claim = async proof => {",
-		"confirmationCode.hidden = false",
-		"copy.confirmAction",
+		"const claim = async () => {",
+		"body:JSON.stringify({})",
+		"claim();",
 		"已检测到系统：",
 		"打开 Windows PowerShell。",
 		"请在目标 Windows 电脑上打开同一链接。",
@@ -239,7 +242,7 @@ func TestWebHandoffPageLocalizesAndGatesWindowsBootstrap(t *testing.T) {
 			t.Fatalf("localized handoff page missing %q: %s", want, body)
 		}
 	}
-	for _, forbidden := range []string{"Connect-Rdev.cmd", "fallback_bootstrap", "bootstrap_filename", "Intl.DateTimeFormat", "const download"} {
+	for _, forbidden := range []string{"Connect-Rdev.cmd", "fallback_bootstrap", "bootstrap_filename", "Intl.DateTimeFormat", "const download", "confirmation-code", "confirmation_code", "copy.confirmAction"} {
 		if strings.Contains(body, forbidden) {
 			t.Fatalf("handoff page must not expose manual download surface %q", forbidden)
 		}
@@ -275,7 +278,7 @@ func TestWebHandoffRequiresConfiguredAssetAndMatchingGateway(t *testing.T) {
 	}
 }
 
-func TestWebHandoffClaimRejectsExpiredProof(t *testing.T) {
+func TestWebHandoffClaimRejectsExpiredDirectLink(t *testing.T) {
 	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
 	asset, err := NewWindowsAMD64WebHandoffAsset("rdev-host.exe", []byte("MZ"))
 	if err != nil {
@@ -307,7 +310,7 @@ func TestWebHandoffClaimRejectsExpiredProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	now = now.Add(61 * time.Second)
-	claim := postJSON(t, server.Handler(), link.Path+"/claim", `{"proof":"`+link.Fragment+`"}`, "")
+	claim := postJSON(t, server.Handler(), link.Path+"/claim", `{}`, "")
 	if claim.Code != http.StatusGone {
 		t.Fatalf("expired claim status = %d, want 410: %s", claim.Code, claim.Body.String())
 	}
@@ -357,7 +360,7 @@ func TestWebHandoffClaimRevalidatesSessionBeforeIssuingBootstrap(t *testing.T) {
 	}
 
 	for attempt := 1; attempt <= 2; attempt++ {
-		claim := postJSON(t, handler, link.Path+"/claim", `{"proof":"`+link.Fragment+`"}`, "")
+		claim := postJSON(t, handler, link.Path+"/claim", `{}`, "")
 		if claim.Code != http.StatusConflict {
 			t.Fatalf("claim attempt %d status = %d, want 409: %s", attempt, claim.Code, claim.Body.String())
 		}
