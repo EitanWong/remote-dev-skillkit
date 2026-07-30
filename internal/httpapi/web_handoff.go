@@ -29,58 +29,82 @@ const (
 )
 
 type webHandoffPageCopy struct {
-	Title               string `json:"title"`
-	Heading             string `json:"heading"`
-	Description         string `json:"description"`
-	CopyAction          string `json:"copyAction"`
-	MissingProof        string `json:"missingProof"`
-	WindowsOnly         string `json:"windowsOnly"`
-	Preparing           string `json:"preparing"`
-	ClaimFailed         string `json:"claimFailed"`
-	Copied              string `json:"copied"`
-	CopyManual          string `json:"copyManual"`
-	UnexpectedBootstrap string `json:"unexpectedBootstrap"`
+	Title                 string            `json:"title"`
+	Heading               string            `json:"heading"`
+	Description           string            `json:"description"`
+	DetectedPlatform      string            `json:"detectedPlatform"`
+	PlatformNames         map[string]string `json:"platformNames"`
+	WindowsSteps          []string          `json:"windowsSteps"`
+	NonWindowsHeading     string            `json:"nonWindowsHeading"`
+	NonWindowsDescription string            `json:"nonWindowsDescription"`
+	NonWindowsSteps       []string          `json:"nonWindowsSteps"`
+	CopyAction            string            `json:"copyAction"`
+	MissingProof          string            `json:"missingProof"`
+	WindowsOnly           string            `json:"windowsOnly"`
+	Preparing             string            `json:"preparing"`
+	ClaimFailed           string            `json:"claimFailed"`
+	Copied                string            `json:"copied"`
+	CopyManual            string            `json:"copyManual"`
+	UnexpectedBootstrap   string            `json:"unexpectedBootstrap"`
 }
 
 var webHandoffPageCopies = map[string]webHandoffPageCopy{
 	"en": {
-		Title:               "Remote Dev Host Connection",
-		Heading:             "Connect this Windows host",
-		Description:         "This page prepares a short-lived connection command. Copy it, paste it into an already-open PowerShell window, and press Enter. The connector is fetched and verified automatically.",
-		CopyAction:          "Copy connection command",
-		MissingProof:        "This handoff link is missing its confirmation fragment.",
-		WindowsOnly:         "Open this handoff on a Windows device. It has not been claimed.",
-		Preparing:           "Preparing connection command…",
-		ClaimFailed:         "The handoff could not be claimed. Ask the operator for a fresh link.",
-		Copied:              "Copied. Paste into the open PowerShell window and press Enter.",
-		CopyManual:          "Copy is unavailable. The command is selected below; copy it, then paste it into the open PowerShell window and press Enter.",
-		UnexpectedBootstrap: "The handoff response did not include a connection command.",
+		Title:                 "Remote Dev Host Connection",
+		Heading:               "Connect this Windows host",
+		Description:           "This page prepares a short-lived connection command. Copy it, paste it into an already-open PowerShell window, and press Enter. The connector is fetched and verified automatically.",
+		DetectedPlatform:      "Detected system: {platform}.",
+		PlatformNames:         map[string]string{"windows": "Windows", "macos": "macOS", "linux": "Linux", "other": "an unsupported system"},
+		WindowsSteps:          []string{"Open Windows PowerShell.", "Click “Copy connection command” below.", "Paste it into the already-open PowerShell window and press Enter.", "Keep that PowerShell window open while the agent verifies the connection."},
+		NonWindowsHeading:     "Open this handoff on the target Windows host",
+		NonWindowsDescription: "This link prepares a Windows connector, but this browser is running on {platform}.",
+		NonWindowsSteps:       []string{"Do not claim this link on this device.", "Open the same link on the target Windows computer.", "Then follow the Windows connection steps shown there."},
+		CopyAction:            "Copy connection command",
+		MissingProof:          "This handoff link is missing its confirmation fragment.",
+		WindowsOnly:           "This handoff has not been claimed. Open the same link on the target Windows computer.",
+		Preparing:             "Preparing connection command…",
+		ClaimFailed:           "The handoff could not be claimed. Ask the operator for a fresh link.",
+		Copied:                "Copied. Paste into the open PowerShell window and press Enter.",
+		CopyManual:            "Copy is unavailable. The command is selected below; copy it, then paste it into the open PowerShell window and press Enter.",
+		UnexpectedBootstrap:   "The handoff response did not include a connection command.",
 	},
 	"zh-Hans": {
-		Title:               "远程开发主机连接",
-		Heading:             "连接这台 Windows 主机",
-		Description:         "此页面会准备一条短期连接命令。复制后粘贴到当前已打开的 PowerShell 窗口并按 Enter；连接器会自动获取并校验。",
-		CopyAction:          "复制连接命令",
-		MissingProof:        "此连接链接缺少确认片段。",
-		WindowsOnly:         "请在 Windows 设备上打开此连接页。它尚未被领取。",
-		Preparing:           "正在准备连接命令…",
-		ClaimFailed:         "此连接未能领取。请向操作员获取新的链接。",
-		Copied:              "已复制。请粘贴到当前 PowerShell 窗口并按 Enter 执行。",
-		CopyManual:          "浏览器未允许复制。下方命令已被选中，请复制后粘贴到当前 PowerShell 窗口并按 Enter 执行。",
-		UnexpectedBootstrap: "连接响应未包含连接命令。",
+		Title:                 "远程开发主机连接",
+		Heading:               "连接这台 Windows 主机",
+		Description:           "此页面会准备一条短期连接命令。复制后粘贴到当前已打开的 PowerShell 窗口并按 Enter；连接器会自动获取并校验。",
+		DetectedPlatform:      "已检测到系统：{platform}。",
+		PlatformNames:         map[string]string{"windows": "Windows", "macos": "macOS", "linux": "Linux", "other": "不受支持的系统"},
+		WindowsSteps:          []string{"打开 Windows PowerShell。", "点击下方“复制连接命令”。", "将命令粘贴到已打开的 PowerShell 窗口并按 Enter。", "保持该 PowerShell 窗口打开，等待 Agent 验证连接。"},
+		NonWindowsHeading:     "请在目标 Windows 主机上打开此连接页",
+		NonWindowsDescription: "此链接将准备 Windows 连接器，但当前浏览器运行在 {platform}。",
+		NonWindowsSteps:       []string{"不要在当前设备领取此链接。", "请在目标 Windows 电脑上打开同一链接。", "然后按该页面显示的 Windows 连接步骤操作。"},
+		CopyAction:            "复制连接命令",
+		MissingProof:          "此连接链接缺少确认片段。",
+		WindowsOnly:           "此连接尚未领取。请在目标 Windows 电脑上打开同一链接。",
+		Preparing:             "正在准备连接命令…",
+		ClaimFailed:           "此连接未能领取。请向操作员获取新的链接。",
+		Copied:                "已复制。请粘贴到当前 PowerShell 窗口并按 Enter 执行。",
+		CopyManual:            "浏览器未允许复制。下方命令已被选中，请复制后粘贴到当前 PowerShell 窗口并按 Enter 执行。",
+		UnexpectedBootstrap:   "连接响应未包含连接命令。",
 	},
 	"zh-Hant": {
-		Title:               "遠端開發主機連線",
-		Heading:             "連線這台 Windows 主機",
-		Description:         "此頁面會準備一條短期連線指令。複製後貼到目前已開啟的 PowerShell 視窗並按 Enter；連線器會自動取得並驗證。",
-		CopyAction:          "複製連線指令",
-		MissingProof:        "此連線連結缺少確認片段。",
-		WindowsOnly:         "請在 Windows 裝置上開啟此連線頁。它尚未被領取。",
-		Preparing:           "正在準備連線指令…",
-		ClaimFailed:         "此連線未能領取。請向操作員取得新的連結。",
-		Copied:              "已複製。請貼到目前 PowerShell 視窗並按 Enter 執行。",
-		CopyManual:          "瀏覽器未允許複製。下方指令已被選取，請複製後貼到目前 PowerShell 視窗並按 Enter 執行。",
-		UnexpectedBootstrap: "連線回應未包含連線指令。",
+		Title:                 "遠端開發主機連線",
+		Heading:               "連線這台 Windows 主機",
+		Description:           "此頁面會準備一條短期連線指令。複製後貼到目前已開啟的 PowerShell 視窗並按 Enter；連線器會自動取得並驗證。",
+		DetectedPlatform:      "已偵測到系統：{platform}。",
+		PlatformNames:         map[string]string{"windows": "Windows", "macos": "macOS", "linux": "Linux", "other": "不支援的系統"},
+		WindowsSteps:          []string{"開啟 Windows PowerShell。", "按一下下方的「複製連線指令」。", "將指令貼到已開啟的 PowerShell 視窗並按 Enter。", "保持該 PowerShell 視窗開啟，等待 Agent 驗證連線。"},
+		NonWindowsHeading:     "請在目標 Windows 主機上開啟此連線頁",
+		NonWindowsDescription: "此連結會準備 Windows 連線器，但目前瀏覽器執行於 {platform}。",
+		NonWindowsSteps:       []string{"不要在目前裝置領取此連結。", "請在目標 Windows 電腦上開啟同一個連結。", "再依該頁面顯示的 Windows 連線步驟操作。"},
+		CopyAction:            "複製連線指令",
+		MissingProof:          "此連線連結缺少確認片段。",
+		WindowsOnly:           "此連線尚未被領取。請在目標 Windows 電腦上開啟同一個連結。",
+		Preparing:             "正在準備連線指令…",
+		ClaimFailed:           "此連線未能領取。請向操作員取得新的連結。",
+		Copied:                "已複製。請貼到目前 PowerShell 視窗並按 Enter 執行。",
+		CopyManual:            "瀏覽器未允許複製。下方指令已被選取，請複製後貼到目前 PowerShell 視窗並按 Enter 執行。",
+		UnexpectedBootstrap:   "連線回應未包含連線指令。",
 	},
 }
 
@@ -292,6 +316,22 @@ func webHandoffPageLocale(acceptLanguage string) string {
 	return "en"
 }
 
+func webHandoffClientPlatform(userAgent string) string {
+	userAgent = strings.ToLower(userAgent)
+	switch {
+	case strings.Contains(userAgent, "android"), strings.Contains(userAgent, "iphone"), strings.Contains(userAgent, "ipad"), strings.Contains(userAgent, "ipod"):
+		return "other"
+	case strings.Contains(userAgent, "windows"):
+		return "windows"
+	case strings.Contains(userAgent, "macintosh"), strings.Contains(userAgent, "mac os x"):
+		return "macos"
+	case strings.Contains(userAgent, "linux"), strings.Contains(userAgent, "x11"):
+		return "linux"
+	default:
+		return "other"
+	}
+}
+
 func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id string) {
 	writeWebHandoffSecurityHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -300,19 +340,25 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
 	claimPath, _ := json.Marshal("/connect/" + url.PathEscape(id) + "/claim")
 	copies, _ := json.Marshal(webHandoffPageCopies)
 	initialLocale, _ := json.Marshal(locale)
+	initialPlatform, _ := json.Marshal(webHandoffClientPlatform(r.UserAgent()))
 	_, _ = fmt.Fprintf(w, `<!doctype html>
 <html lang="%s">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>%s</title>
-<style>body{font-family:system-ui,sans-serif;max-width:42rem;margin:4rem auto;padding:0 1.25rem;color:#172033}button{padding:.7rem 1rem;font:inherit}#status{min-height:1.5rem}#connection-script{box-sizing:border-box;display:block;width:100%%;min-height:14rem;margin-top:.75rem;font-family:ui-monospace,monospace}</style></head>
-<body><main><h1 id="heading">%s</h1><p id="description">%s</p><button id="copy-command" type="button">%s</button><p id="status" role="status"></p><textarea id="connection-script" hidden readonly spellcheck="false"></textarea></main>
+<style>body{font-family:system-ui,sans-serif;max-width:42rem;margin:4rem auto;padding:0 1.25rem;color:#172033}button{padding:.7rem 1rem;font:inherit}#status,#detected-platform{min-height:1.5rem}#connection-script{box-sizing:border-box;display:block;width:100%%;min-height:14rem;margin-top:.75rem;font-family:ui-monospace,monospace}</style></head>
+<body><main><h1 id="heading">%s</h1><p id="description">%s</p><p id="detected-platform"></p><ol id="connection-steps"></ol><button id="copy-command" type="button">%s</button><p id="status" role="status"></p><textarea id="connection-script" hidden readonly spellcheck="false"></textarea></main>
 <script>
 (() => {
   const pageCopies = %s;
   const initialLocale = %s;
+  const initialPlatform = %s;
   const claimPath = %s;
   const button = document.getElementById('copy-command');
   const status = document.getElementById('status');
   const connectionBootstrap = document.getElementById('connection-script');
+  const heading = document.getElementById('heading');
+  const description = document.getElementById('description');
+  const detectedPlatform = document.getElementById('detected-platform');
+  const connectionSteps = document.getElementById('connection-steps');
   const browserLanguages = [...(navigator.languages || []), navigator.language].filter(Boolean);
   const localeFor = values => {
     for (const value of values) {
@@ -326,15 +372,32 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
   const copy = pageCopies[locale] || pageCopies.en;
   document.documentElement.lang = locale;
   document.title = copy.title;
-  document.getElementById('heading').textContent = copy.heading;
-  document.getElementById('description').textContent = copy.description;
   button.textContent = copy.copyAction;
   connectionBootstrap.setAttribute('aria-label', copy.copyAction);
-  const isWindowsBrowser = () => {
+  const platformFor = () => {
     const clientHintPlatform = navigator.userAgentData && navigator.userAgentData.platform;
-    const platform = String(clientHintPlatform || navigator.platform || '');
-    return /^win/i.test(platform) || /windows/i.test(navigator.userAgent || '');
+    const platform = String(clientHintPlatform || navigator.platform || navigator.userAgent || initialPlatform).toLowerCase();
+    if (/android|iphone|ipad|ipod/.test(platform)) return 'other';
+    if (/win/.test(platform)) return 'windows';
+    if (/mac/.test(platform)) return 'macos';
+    if (/linux|x11/.test(platform)) return 'linux';
+    return initialPlatform;
   };
+  const platform = platformFor();
+  const isWindows = platform === 'windows';
+  const platformName = (copy.platformNames && copy.platformNames[platform]) || copy.platformNames.other;
+  const replacePlatform = value => String(value).replace('{platform}', platformName);
+  heading.textContent = isWindows ? copy.heading : copy.nonWindowsHeading;
+  description.textContent = replacePlatform(isWindows ? copy.description : copy.nonWindowsDescription);
+  detectedPlatform.textContent = replacePlatform(copy.detectedPlatform);
+  const steps = isWindows ? copy.windowsSteps : copy.nonWindowsSteps;
+  connectionSteps.replaceChildren(...steps.map(step => {
+    const item = document.createElement('li');
+    item.textContent = replacePlatform(step);
+    return item;
+  }));
+  button.hidden = !isWindows;
+  button.disabled = !isWindows;
   const selectForManualCopy = () => {
     connectionBootstrap.hidden = false;
     connectionBootstrap.focus();
@@ -352,7 +415,7 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
   const proof = window.location.hash.slice(1);
   if (!proof) { button.disabled = true; status.textContent = copy.missingProof; return; }
   history.replaceState(null, '', window.location.pathname);
-  if (!isWindowsBrowser()) { button.disabled = true; status.textContent = copy.windowsOnly; return; }
+  if (!isWindows) { status.textContent = copy.windowsOnly; return; }
   button.addEventListener('click', async () => {
     let claimed = false;
     button.disabled = true;
@@ -374,7 +437,7 @@ func (s Server) renderWebHandoffPage(w http.ResponseWriter, r *http.Request, id 
     }
   });
 })();
-</script></body></html>`, locale, copy.Title, copy.Heading, copy.Description, copy.CopyAction, string(copies), string(initialLocale), string(claimPath))
+</script></body></html>`, locale, copy.Title, copy.Heading, copy.Description, copy.CopyAction, string(copies), string(initialLocale), string(initialPlatform), string(claimPath))
 }
 
 func (s Server) claimWebHandoff(w http.ResponseWriter, r *http.Request, id string) {

@@ -34,7 +34,7 @@ func Tools() []Tool {
 		},
 		{
 			Name:        "rdev.sessions.handoff",
-			Description: "Create a short-lived browser handoff link for one Windows managed-host session. The native page adapts to browser language and Windows detection, claims a URL fragment proof once, then copies a PowerShell connection command for the user to paste into an existing visible prompt; the command fetches and hash-checks the scoped host binary automatically. It returns handoff metadata plus user_summary and agent_next_action recovery fields.",
+			Description: "Create one short-lived browser handoff link for a Windows managed-host session. The native page adapts to browser language and opened system: Windows gets numbered copy/paste connection steps; macOS, Linux, and other systems remain unclaimed and are told to open the same link on the target Windows host. A Windows user claims the URL fragment proof once and receives a PowerShell command that fetches and hash-checks the scoped host binary automatically. It returns handoff metadata plus user_summary and agent_next_action recovery fields.",
 			Safety:      "Creates a scoped, expiring distribution capability only. It does not execute on a target, expose an operator bearer token or private key, install persistence, mutate network settings, or bypass local OS controls.",
 			InputSchema: object(map[string]any{
 				"gateway_url":   gatewayURL,

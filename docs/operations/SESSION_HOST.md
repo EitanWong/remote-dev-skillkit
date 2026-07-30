@@ -85,12 +85,14 @@ revoked.
 An operator-managed HTTPS gateway can serve a short-lived browser handoff when
 it starts with `--public-base-url HTTPS_URL` and
 `--windows-amd64-host-binary PATH`. Create the link through
-`rdev.sessions.handoff`, then send that link to the Windows operator. The
-browser exposes a copyable PowerShell connection command only after a one-time
-claim; the page localizes itself, gates the action to Windows, and the operator
-pastes the command into an existing PowerShell window. The command automatically
-fetches and hash-verifies the host binary before connecting outward via managed
-long-poll. See
+`rdev.sessions.handoff`, then send that one browser link unchanged to the
+intended target. The page is the single delivery form: it localizes and detects
+the opened system. Windows shows numbered copy/paste instructions; macOS,
+Linux, and other systems remain unclaimed and are told to open the same link on
+the target Windows machine. On Windows, the operator copies the command, pastes
+it into an existing PowerShell window, presses Enter, and leaves it visible
+while the Agent checks readiness. The command automatically fetches and
+hash-verifies the host binary before connecting outward via managed long-poll. See
 [`WEB_HANDOFF.md`](WEB_HANDOFF.md) for deployment, expiry, and capability
 details.
 

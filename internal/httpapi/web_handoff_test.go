@@ -130,6 +130,26 @@ func TestWebHandoffPageLocale(t *testing.T) {
 	}
 }
 
+func TestWebHandoffClientPlatform(t *testing.T) {
+	tests := []struct {
+		name      string
+		userAgent string
+		want      string
+	}{
+		{name: "windows", userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", want: "windows"},
+		{name: "macos", userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5)", want: "macos"},
+		{name: "linux", userAgent: "Mozilla/5.0 (X11; Linux x86_64)", want: "linux"},
+		{name: "unknown", userAgent: "Mozilla/5.0 (Android 15)", want: "other"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := webHandoffClientPlatform(test.userAgent); got != test.want {
+				t.Fatalf("webHandoffClientPlatform(%q) = %q, want %q", test.userAgent, got, test.want)
+			}
+		})
+	}
+}
+
 func TestWebHandoffPageLocalizesAndGatesWindowsBootstrap(t *testing.T) {
 	asset, err := NewWindowsAMD64WebHandoffAsset("rdev-host.exe", []byte("MZ"))
 	if err != nil {
@@ -166,6 +186,7 @@ func TestWebHandoffPageLocalizesAndGatesWindowsBootstrap(t *testing.T) {
 
 	pageReq := httptest.NewRequest(http.MethodGet, link.Path, nil)
 	pageReq.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	pageReq.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
 	pageRec := httptest.NewRecorder()
 	server.Handler().ServeHTTP(pageRec, pageReq)
 	if pageRec.Code != http.StatusOK {
@@ -178,15 +199,24 @@ func TestWebHandoffPageLocalizesAndGatesWindowsBootstrap(t *testing.T) {
 		"复制连接命令",
 		"copy-command",
 		"connection-script",
+		"detected-platform",
+		"connection-steps",
 		"navigator.userAgentData",
-		"isWindowsBrowser",
+		"const initialPlatform = \"windows\";",
+		"const platformFor = () => {",
+		"return 'macos';",
+		"return 'linux';",
+		"connectionSteps.replaceChildren",
+		"button.hidden = !isWindows;",
 		"const browserLanguages = [...(navigator.languages || []), navigator.language].filter(Boolean);",
 		"const locale = localeFor(browserLanguages.length ? browserLanguages : [initialLocale]);",
 		"navigator.clipboard.writeText(connectionBootstrap.value)",
 		"connectionBootstrap.hidden = false",
 		"connectionBootstrap.select()",
 		"connectionBootstrap.setAttribute('aria-label', copy.copyAction)",
-		"请在 Windows 设备上打开此连接页。它尚未被领取。",
+		"已检测到系统：",
+		"打开 Windows PowerShell。",
+		"请在目标 Windows 电脑上打开同一链接。",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("localized handoff page missing %q: %s", want, body)

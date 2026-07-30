@@ -15,8 +15,9 @@ description: Use when an agent needs to connect to, operate, or audit a remote m
 
 1. Create the session through MCP.
 2. For a configured managed HTTPS gateway, create `rdev.sessions.handoff` and
-   send its short-lived browser URL to the Windows operator. Otherwise give the
-   host only its current join code and gateway URL.
+   send its one short-lived browser URL unchanged to the intended target. The
+   adaptive page is the only delivery form; otherwise give the host only its
+   current join code and gateway URL.
 3. Confirm endpoint readiness with session status and events.
 4. Submit a narrow task.
 5. Inspect events and artifact metadata before saying work is complete.
@@ -33,12 +34,13 @@ description: Use when an agent needs to connect to, operate, or audit a remote m
   the gateway-signed bundle before expiry and persists that renewal when managed
   state is configured.
 - Use `rdev mcp serve --gateway-url URL --operator-token-file PATH` for a configured remote MCP proxy; the token remains only in the protected local file.
-- A web handoff URL carries an opaque fragment proof only; the browser claims it
-  once, localizes and gates the page to Windows, then copies a short-lived
-  PowerShell connection command. The operator pastes it into an already-open
-  prompt; it fetches the hash-checked host binary with a short-lived header
-  ticket without a manual `.cmd` or `.ps1` download.
-  It is not a host listener or a substitute for session policy.
+- A web handoff URL carries an opaque fragment proof only. Its one adaptive page
+  localizes and identifies the opened system: Windows shows copy/paste steps and
+  can claim once; macOS, Linux, and other systems leave the link unclaimed and
+  direct the user to open it on the target Windows computer. The Windows command
+  fetches the hash-checked host binary with a short-lived header ticket without
+  a manual `.cmd` or `.ps1` download. It is not a host listener or a substitute
+  for session policy.
 
 ## Adaptive configuration
 

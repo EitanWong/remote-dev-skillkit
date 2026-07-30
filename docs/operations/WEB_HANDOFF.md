@@ -36,17 +36,21 @@ for file-mode requirements.
 1. Create a session with `selected_gateway_url` set to the configured public
    base URL.
 2. Call `rdev.sessions.handoff` with the session id and `windows-amd64`.
-3. Send the returned URL to the Windows operator.
-4. The operator opens the link on the target Windows machine. The page chooses
-   its text from browser language preferences, confirms it is a Windows browser,
-   then exposes the one-time claim action.
-5. The operator clicks **Copy connection command**. The page claims the link
-   once, copies the short-lived PowerShell bootstrap, and leaves the command
-   selected on the page if browser clipboard access is unavailable.
-6. The operator pastes the command into an already-open PowerShell window and
-   presses Enter. The bootstrap fetches the host binary through the short-lived
-   ticket, verifies its SHA-256, and starts managed long-poll visibly. The
-   operator does not download or run a `.cmd` or `.ps1` file.
+3. Send the returned URL unchanged to the intended target. There is no separate
+   `web` or `powershell` delivery choice, and an Agent must not claim the URL on
+   the user's behalf.
+4. The page localizes itself and identifies the opened system. On Windows it
+   displays four numbered connection steps. On macOS, Linux, or an unknown
+   system it names the detected system, leaves the link unclaimed, and tells the
+   user to open the same URL on the target Windows computer.
+5. On the target Windows machine, open **Windows PowerShell**, click **Copy
+   connection command**, paste it into the already-open PowerShell window, then
+   press Enter. Keep that window open while the Agent verifies endpoint
+   readiness. Clipboard denial reveals and selects the same command for manual
+   copy.
+6. The Windows bootstrap fetches the host binary through the short-lived ticket,
+   verifies its SHA-256, and starts managed long-poll visibly. The operator does
+   not download or run a `.cmd` or `.ps1` file.
 7. Wait for the target endpoint through `rdev.sessions.status` before sending a
    task.
 
@@ -89,13 +93,15 @@ locale, then browser language preferences for the final rendered locale.
 English, Simplified Chinese, and Traditional Chinese are currently included.
 
 The page uses `navigator.userAgentData.platform` when available, with standard
-browser platform/user-agent fallbacks, and keeps the claim button disabled when
-the browser is not Windows. This prevents a link opened on the wrong machine
-from being consumed. On Windows, the shortest path is **open link → copy
-command → paste into an existing PowerShell window → Enter**. Clipboard denial
-reveals and selects the same command for manual copy. The host runs in that
-visible PowerShell window; no JavaScript, service, elevation, or
-browser-control bypass is used.
+browser platform/user-agent fallbacks. It identifies Windows, macOS, Linux, or
+another system before it exposes a claim action. A non-Windows page explicitly
+names the detected system, explains that this handoff supplies a Windows
+connector, and leaves the link unclaimed so the same URL can be opened on the
+target Windows machine. On Windows, the page gives the shortest verified path:
+**open PowerShell → copy command → paste → Enter → keep the window open while
+the Agent verifies readiness**. Clipboard denial reveals and selects the same
+command for manual copy. The host runs in that visible PowerShell window; no
+JavaScript, service, elevation, or browser-control bypass is used.
 
 ## Operational boundaries
 
