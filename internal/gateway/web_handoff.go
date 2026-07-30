@@ -25,7 +25,6 @@ var (
 	ErrWebHandoffNotFound       = errors.New("web handoff not found")
 	ErrWebHandoffExpired        = errors.New("web handoff expired")
 	ErrWebHandoffClaimed        = errors.New("web handoff already claimed")
-	ErrWebHandoffInvalidProof   = errors.New("web handoff proof is invalid")
 	ErrWebHandoffInvalidTicket  = errors.New("web handoff artifact ticket is invalid")
 	ErrWebHandoffSessionInvalid = errors.New("web handoff session is not joinable")
 )
@@ -53,43 +52,35 @@ type WebHandoff struct {
 
 type webHandoffState struct {
 	WebHandoff
-	proofHash          [sha256.Size]byte
 	artifactTicketHash [sha256.Size]byte
 }
 
-// CreateWebHandoff returns a public handoff record and a high-entropy proof.
-// The caller may place the proof in a browser URL fragment or provide it as an
-// out-of-band confirmation code; it must never appear in an HTTP URL, referrer,
-// or query string.
-func (g *MemoryGateway) CreateWebHandoff(spec WebHandoffSpec) (WebHandoff, string, error) {
+// CreateWebHandoff returns a public handoff record whose high-entropy ID is its
+// one-time browser capability.
+func (g *MemoryGateway) CreateWebHandoff(spec WebHandoffSpec) (WebHandoff, error) {
 	spec.SessionID = strings.TrimSpace(spec.SessionID)
 	spec.Platform = strings.TrimSpace(spec.Platform)
 	if spec.SessionID == "" || spec.Platform != WebHandoffPlatformWindowsAMD64 || spec.ExpiresAt.IsZero() {
-		return WebHandoff{}, "", fmt.Errorf("invalid web handoff specification")
+		return WebHandoff{}, fmt.Errorf("invalid web handoff specification")
 	}
 
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	now := g.webHandoffNowLocked()
 	if !spec.ExpiresAt.After(now) {
-		return WebHandoff{}, "", ErrWebHandoffExpired
+		return WebHandoff{}, ErrWebHandoffExpired
 	}
 	session, err := g.webHandoffSessionLocked(spec.SessionID)
 	if err != nil {
-		return WebHandoff{}, "", err
+		return WebHandoff{}, err
 	}
 	if !webHandoffSessionJoinable(session, now) {
-		return WebHandoff{}, "", ErrWebHandoffSessionInvalid
+		return WebHandoff{}, ErrWebHandoffSessionInvalid
 	}
 	if !session.ExpiresAt.IsZero() && spec.ExpiresAt.After(session.ExpiresAt) {
 		spec.ExpiresAt = session.ExpiresAt
 	}
 
-	proof, err := newWebHandoffSecret()
-	if err != nil {
-		return WebHandoff{}, "", err
-	}
-	proofHash := sha256.Sum256([]byte(proof))
 	state := webHandoffState{
 		WebHandoff: WebHandoff{
 			SchemaVersion: WebHandoffSchemaVersion,
@@ -98,7 +89,6 @@ func (g *MemoryGateway) CreateWebHandoff(spec WebHandoffSpec) (WebHandoff, strin
 			CreatedAt:     now,
 			ExpiresAt:     spec.ExpiresAt.UTC(),
 		},
-		proofHash: proofHash,
 	}
 	if g.webHandoffs == nil {
 		g.webHandoffs = map[string]webHandoffState{}
@@ -106,25 +96,25 @@ func (g *MemoryGateway) CreateWebHandoff(spec WebHandoffSpec) (WebHandoff, strin
 	for {
 		id, err := newWebHandoffIdentifier()
 		if err != nil {
-			return WebHandoff{}, "", err
+			return WebHandoff{}, err
 		}
 		if _, exists := g.webHandoffs[id]; exists {
 			continue
 		}
 		state.ID = id
 		g.webHandoffs[id] = state
-		g.appendAuditLocked("operator", "web_handoff.create", id, "created a short-lived browser host handoff")
-		return state.WebHandoff, proof, nil
+		g.appendAuditLocked("operator", "web_handoff.create", webHandoffAuditTarget(id), "created a short-lived browser host handoff")
+		return state.WebHandoff, nil
 	}
 }
 
-// ClaimWebHandoff consumes a browser proof and returns a fresh, header-only
-// artifact ticket. The ticket lifetime never extends beyond the handoff TTL.
-func (g *MemoryGateway) ClaimWebHandoff(id, proof string, artifactTicketTTL time.Duration) (WebHandoff, string, error) {
+// ClaimWebHandoff consumes a direct browser link and returns a fresh,
+// header-only artifact ticket. The ticket lifetime never extends beyond the
+// handoff TTL.
+func (g *MemoryGateway) ClaimWebHandoff(id string, artifactTicketTTL time.Duration) (WebHandoff, string, error) {
 	id = strings.TrimSpace(id)
-	proof = strings.TrimSpace(proof)
-	if id == "" || proof == "" || artifactTicketTTL <= 0 {
-		return WebHandoff{}, "", ErrWebHandoffInvalidProof
+	if id == "" || artifactTicketTTL <= 0 {
+		return WebHandoff{}, "", ErrWebHandoffNotFound
 	}
 	if artifactTicketTTL > webHandoffMaxArtifactTicketTTL {
 		artifactTicketTTL = webHandoffMaxArtifactTicketTTL
@@ -143,10 +133,6 @@ func (g *MemoryGateway) ClaimWebHandoff(id, proof string, artifactTicketTTL time
 	if !state.ClaimedAt.IsZero() {
 		return WebHandoff{}, "", ErrWebHandoffClaimed
 	}
-	proofHash := sha256.Sum256([]byte(proof))
-	if subtle.ConstantTimeCompare(state.proofHash[:], proofHash[:]) != 1 {
-		return WebHandoff{}, "", ErrWebHandoffInvalidProof
-	}
 	session, err := g.webHandoffSessionLocked(state.SessionID)
 	if err != nil || !webHandoffSessionJoinable(session, now) {
 		return WebHandoff{}, "", ErrWebHandoffSessionInvalid
@@ -164,8 +150,13 @@ func (g *MemoryGateway) ClaimWebHandoff(id, proof string, artifactTicketTTL time
 	state.ArtifactTicketExpiresAt = ticketExpiresAt
 	state.artifactTicketHash = sha256.Sum256([]byte(ticket))
 	g.webHandoffs[id] = state
-	g.appendAuditLocked("handoff", "web_handoff.claim", id, "claimed browser host handoff and issued artifact ticket")
+	g.appendAuditLocked("handoff", "web_handoff.claim", webHandoffAuditTarget(id), "claimed browser host handoff and issued artifact ticket")
 	return state.WebHandoff, ticket, nil
+}
+
+func webHandoffAuditTarget(id string) string {
+	sum := sha256.Sum256([]byte(id))
+	return fmt.Sprintf("web_handoff:%x", sum[:8])
 }
 
 // ValidateWebHandoffArtifactTicket accepts only a current ticket delivered in a
