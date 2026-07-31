@@ -108,3 +108,18 @@ func TestRunManagedServiceWithRetryRetriesTransientStartupFailure(t *testing.T) 
 		t.Fatalf("run attempts = %d, want 2", attempts)
 	}
 }
+
+func TestRunManagedServiceWithRetryStopsOnPermanentJoinFailure(t *testing.T) {
+	cause := errors.New("join code is invalid")
+	attempts := 0
+	err := runManagedServiceWithRetry(context.Background(), time.Millisecond, func(context.Context) error {
+		attempts++
+		return permanentJoinFailure{cause: cause}
+	})
+	if !errors.Is(err, cause) {
+		t.Fatalf("runManagedServiceWithRetry() error = %v, want permanent join failure", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("run attempts = %d, want 1", attempts)
+	}
+}
