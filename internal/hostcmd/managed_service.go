@@ -1,8 +1,10 @@
 package hostcmd
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -22,7 +24,29 @@ const (
 	managedServiceIdentityFile    = "identity.json"
 	managedServiceTrustFile       = "trust.json"
 	managedServiceWorkspaceLocker = "workspace-locks"
+	managedServiceRetryDelay      = 5 * time.Second
 )
+
+func runManagedServiceWithRetry(ctx context.Context, retryDelay time.Duration, run func(context.Context) error) error {
+	for {
+		err := run(ctx)
+		if err == nil || ctx.Err() != nil {
+			return nil
+		}
+		var permanent permanentJoinFailure
+		if errors.As(err, &permanent) {
+			return err
+		}
+
+		timer := time.NewTimer(retryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-timer.C:
+		}
+	}
+}
 
 type managedServiceConfig struct {
 	SchemaVersion string `json:"schema_version"`

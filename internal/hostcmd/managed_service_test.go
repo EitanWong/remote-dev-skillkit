@@ -1,9 +1,12 @@
 package hostcmd
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestManagedServiceConfigRoundTripProducesManagedServeOptions(t *testing.T) {
@@ -82,5 +85,26 @@ func TestCopyManagedServiceFileIfPresentKeepsExistingState(t *testing.T) {
 	}
 	if string(content) != "persisted service identity" {
 		t.Fatalf("existing managed state was overwritten: %q", content)
+	}
+}
+
+func TestRunManagedServiceWithRetryRetriesTransientStartupFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	attempts := 0
+	err := runManagedServiceWithRetry(ctx, time.Millisecond, func(context.Context) error {
+		attempts++
+		if attempts == 1 {
+			return errors.New("gateway unavailable")
+		}
+		cancel()
+		return context.Canceled
+	})
+	if err != nil {
+		t.Fatalf("runManagedServiceWithRetry() error = %v, want nil", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("run attempts = %d, want 2", attempts)
 	}
 }

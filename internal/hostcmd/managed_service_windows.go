@@ -260,7 +260,11 @@ func (h managedServiceHandler) Execute(_ []string, requests <-chan svc.ChangeReq
 	ctx, cancel := context.WithCancel(h.parent)
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- h.app.runServe(ctx, h.config.serveOptions()) }()
+	go func() {
+		done <- runManagedServiceWithRetry(ctx, managedServiceRetryDelay, func(ctx context.Context) error {
+			return h.app.runServe(ctx, h.config.serveOptions())
+		})
+	}()
 	status := svc.Status{State: svc.Running, Accepts: svc.AcceptStop | svc.AcceptShutdown}
 	changes <- status
 	for {
