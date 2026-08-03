@@ -26,7 +26,7 @@ Status: ✅ covered · 🟡 partial · ❌ gap · ⚙️ live-only (real host/sy
 | `internal/update` | version compare (pre-release, v-prefix, malformed, empty), URL building (trailing slash, escaping, bad repo), HTTP non-200 / bad JSON / unreachable, token header, asset selection (dash vs underscore slug, case, no match), digest presence, shell quoting of adversarial names, plan when no update | ✅ 98% |
 | `internal/operatorauth` | file load errors (missing/bad JSON/wrong schema), JWKS fetch failure at load, claim types (aud string/array/mixed/nil, exp float64/int64/Number/garbage), roles claim forms (`[]any`/`[]string`/space-separated string/non-string), hash validation (prefix/length/hex), clock skew, wrong audience/issuer, expired/nbf token, duplicate key IDs | 🟡 76.9% — remaining: hosted token nbf/iat misuse, clock-skew edges, full SAML response corner cases (bad signature, expired assertion, wrong consumer URL) |
 | `internal/hosttrust` | noop store, file missing/corrupt/wrong schema, atomic write + 0600, rollback rejection, same-sequence content tamper, signature from stored root (not caller-supplied), protected-store backends (keychain/DPAPI/libsecret), malformed protected ref | ✅ 78.8% |
-| `internal/httpapi` | session create/join/close/revoke, event replay after cursor, long-poll wait parsing, artifact write authorization (**#19 open**), persist-state failure paths, trust bundle fetch, audit listing, `joinSession` and `resumeSessionTask` handler paths | 🟡 65.4% — ❌ `joinSession`, `resumeSessionTask`, `persistStateNoResponse` are 0% |
+| `internal/httpapi` | session create/join/close/revoke, event replay after cursor, long-poll wait parsing, artifact write authorization (operator path + endpoint lease + task ownership), persist-state failure paths, trust bundle fetch, audit listing, `joinSession` and `resumeSessionTask` handler paths | 🟡 65.4% — artifact write auth ✅ (#19 fixed); ❌ `joinSession`, `resumeSessionTask`, `persistStateNoResponse` are 0% |
 | `internal/protectedstore` | ref parsing (URL-like, missing account, unknown prefix), backend fallthrough, per-platform backends (keychain/DPAPI/libsecret/keyctl/TPM/MDM), empty service/account, backend error propagation | 🟡 36.8% — platform backends are ⚙️ live-only (real keyring/TPM) or need mock seam; parse/open/store logic ✅ |
 | `internal/policy` | capability checks, shell allow/deny, scoping, unknown capability handling | 🟡 73.2% |
 | `internal/audit` | chain integrity, JSONL append, redaction of secrets, tamper detection | ✅ 76.5% |
@@ -61,13 +61,12 @@ the gate is part of adding a surface.
 
 ## Known gaps (ordered by priority)
 
-1. **#19 — authorize session artifact writes** (`internal/httpapi`): security-relevant fix, must land before release.
-2. `internal/httpapi` `joinSession` / `resumeSessionTask` / `persistStateNoResponse` have 0% coverage — add L2 handler tests.
-3. `internal/operatorauth` SAML/OIDC clock-skew and expired-assertion corners — extend L1.
-4. `internal/workspace` (64%) and `internal/toolchain` (54%) bootstrap/idempotency corners — extend L1.
-5. `internal/protectedstore` platform backends (keyctl/libsecret/TPM) — L3 on a real Linux desktop with keyring available.
-6. `internal/hostawake` — L3 on real hosts (part of the managed-host E2E runbook).
-7. Windows managed-host E2E regression cadence — every handoff/service change must re-run the live runbook (boot time, sleep/wake, lock screen evidence) before merge.
+1. `internal/httpapi` `joinSession` / `resumeSessionTask` / `persistStateNoResponse` have 0% coverage — add L2 handler tests. Artifact write auth (#19) is fixed and covered.
+2. `internal/operatorauth` SAML/OIDC clock-skew and expired-assertion corners — extend L1.
+3. `internal/workspace` (64%) and `internal/toolchain` (54%) bootstrap/idempotency corners — extend L1.
+4. `internal/protectedstore` platform backends (keyctl/libsecret/TPM) — L3 on a real Linux desktop with keyring available.
+5. `internal/hostawake` — L3 on real hosts (part of the managed-host E2E runbook).
+6. Windows managed-host E2E regression cadence — every handoff/service change must re-run the live runbook (boot time, sleep/wake, lock screen evidence) before merge.
 
 ## How to add a surface
 

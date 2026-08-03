@@ -578,9 +578,27 @@ func (s Server) resumeSessionTask(w http.ResponseWriter, r *http.Request, sessio
 }
 
 func (s Server) upsertSessionArtifact(w http.ResponseWriter, r *http.Request, sessionID string) {
+	endpointID := strings.TrimSpace(r.URL.Query().Get("endpoint_id"))
+	if endpointID == "" {
+		// Operator path: the agent-side MCP proxy writes artifacts with an
+		// operator bearer token; no endpoint lease applies.
+		if !s.authorizeOperator(r, operatorauth.RoleOperator) {
+			writeProtocolError(w, http.StatusForbidden, protocolHTTPError(controlplane.ErrUnauthorizedEndpoint, "operator role is required", false))
+			return
+		}
+	} else {
+		if err := s.Gateway.ValidateSessionLease(sessionID, endpointID, extractBearerToken(r)); err != nil {
+			writeControlPlaneError(w, err)
+			return
+		}
+	}
 	var ref controlplane.ArtifactRef
 	if err := json.NewDecoder(r.Body).Decode(&ref); err != nil {
 		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrPayloadTooLarge, "invalid JSON body", false))
+		return
+	}
+	if endpointID != "" && ref.TaskID != "" && !s.taskOwnedByEndpoint(sessionID, ref.TaskID, endpointID) {
+		writeProtocolError(w, http.StatusNotFound, protocolHTTPError(controlplane.ErrTaskNotFound, "task not found", false))
 		return
 	}
 	artifact, event, err := s.Gateway.UpsertSessionArtifact(sessionID, ref)
@@ -592,6 +610,22 @@ func (s Server) upsertSessionArtifact(w http.ResponseWriter, r *http.Request, se
 		return
 	}
 	writeJSON(w, http.StatusAccepted, map[string]any{"artifact": artifact, "event": event})
+}
+
+// taskOwnedByEndpoint reports whether taskID exists in the session and is
+// routed to endpointID. Artifact writes are endpoint-scoped: an endpoint may
+// attach artifacts only to tasks it owns.
+func (s Server) taskOwnedByEndpoint(sessionID, taskID, endpointID string) bool {
+	session, err := s.Gateway.Session(sessionID)
+	if err != nil {
+		return false
+	}
+	for _, task := range session.Tasks {
+		if task.ID == taskID {
+			return task.TargetEndpointID == endpointID
+		}
+	}
+	return false
 }
 
 func (s Server) listSessionArtifacts(w http.ResponseWriter, r *http.Request, sessionID string) {
