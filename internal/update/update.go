@@ -307,9 +307,10 @@ func parseVersion(value string) ([3]int, bool) {
 
 func selectPlatformArchive(assets []ReleaseAsset, platform string) *ReleaseAsset {
 	slug := strings.NewReplacer("/", "-", "_", "-").Replace(strings.ToLower(strings.TrimSpace(platform)))
+	underscoreSlug := strings.ReplaceAll(slug, "-", "_")
 	for _, asset := range assets {
 		name := strings.ToLower(asset.Name)
-		if strings.Contains(name, slug) && (strings.HasSuffix(name, ".tar.gz") || strings.HasSuffix(name, ".zip")) {
+		if (strings.Contains(name, slug) || strings.Contains(name, underscoreSlug)) && (strings.HasSuffix(name, ".tar.gz") || strings.HasSuffix(name, ".zip")) {
 			copied := asset
 			return &copied
 		}
