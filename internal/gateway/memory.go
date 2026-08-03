@@ -38,6 +38,11 @@ type MemoryGateway struct {
 	publicKey    ed25519.PublicKey
 	privateKey   ed25519.PrivateKey
 	trustBundle  model.SignedTrustBundle
+	// notifySecrets: webhook signing secrets by session ID, kept off the
+	// control-plane session so serialization can never leak them. Locked
+	// separately so the store event hook (store lock held) can read it.
+	notifySecretsMu sync.RWMutex
+	notifySecrets   map[string]string
 }
 
 func NewMemoryGateway() *MemoryGateway {

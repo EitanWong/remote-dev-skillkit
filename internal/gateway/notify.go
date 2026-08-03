@@ -40,8 +40,20 @@ func (g *MemoryGateway) SetSessionNotifyURL(sessionID, rawURL string) error {
 			rawURL = parsed.String()
 		}
 	}
-	if _, err := g.controlPlane().SetSessionNotifyURL(sessionID, rawURL, secret); err != nil {
+	if _, err := g.controlPlane().SetSessionNotifyURL(sessionID, rawURL); err != nil {
 		return err
+	}
+	if secret != "" {
+		g.notifySecretsMu.Lock()
+		if g.notifySecrets == nil {
+			g.notifySecrets = map[string]string{}
+		}
+		g.notifySecrets[sessionID] = secret
+		g.notifySecretsMu.Unlock()
+	} else {
+		g.notifySecretsMu.Lock()
+		delete(g.notifySecrets, sessionID)
+		g.notifySecretsMu.Unlock()
 	}
 	action := "session.notify.clear"
 	message := "cleared session event notifications"
@@ -74,11 +86,21 @@ func validNotifyURL(rawURL string) bool {
 // notifyEvent is installed as the store event hook. It is invoked with the
 // store lock held, so it only reads the already-resolved notify URL and
 // signing secret, then hands the POST to a goroutine.
-func (g *MemoryGateway) notifyEvent(sessionID string, event controlplane.Event, notifyURL, notifySecret string) {
+func (g *MemoryGateway) notifyEvent(sessionID string, event controlplane.Event, notifyURL string) {
 	if strings.TrimSpace(notifyURL) == "" {
 		return
 	}
-	go g.postNotification(sessionID, notifyURL, notifySecret, event)
+	secret := g.notifySecret(sessionID)
+	go g.postNotification(sessionID, notifyURL, secret, event)
+}
+
+// notifySecrets holds webhook signing secrets by session ID. It lives at the
+// gateway layer (not on controlplane.Session) so session serialization —
+// snapshots, host join responses, audit — can never leak it.
+func (g *MemoryGateway) notifySecret(sessionID string) string {
+	g.notifySecretsMu.RLock()
+	defer g.notifySecretsMu.RUnlock()
+	return g.notifySecrets[sessionID]
 }
 
 func (g *MemoryGateway) postNotification(sessionID, rawURL, secret string, event controlplane.Event) {

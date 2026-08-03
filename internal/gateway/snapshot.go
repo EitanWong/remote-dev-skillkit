@@ -22,6 +22,9 @@ type Snapshot struct {
 	TrustBundle   model.SignedTrustBundle `json:"trust_bundle"`
 	ControlPlane  controlplane.Snapshot   `json:"control_plane"`
 	Audit         []model.AuditEvent      `json:"audit"`
+	// NotifySecrets persists webhook signing secrets (sessionID -> secret)
+	// in the 0600 state file so signed deliveries survive gateway restarts.
+	NotifySecrets map[string]string `json:"notify_secrets,omitempty"`
 }
 
 func (g *MemoryGateway) Snapshot() Snapshot {
@@ -94,6 +97,9 @@ func (g *MemoryGateway) RestoreSnapshot(snapshot Snapshot) error {
 	g.sessionStore = sessionStore
 	g.audit = auditEvents
 	g.trustBundle = snapshot.TrustBundle
+	g.notifySecretsMu.Lock()
+	g.notifySecrets = snapshot.NotifySecrets
+	g.notifySecretsMu.Unlock()
 	return nil
 }
 
@@ -105,12 +111,19 @@ func (g *MemoryGateway) snapshotLocked(now time.Time) Snapshot {
 	sort.Slice(auditEvents, func(i, j int) bool {
 		return auditEvents[i].Sequence < auditEvents[j].Sequence
 	})
+	g.notifySecretsMu.RLock()
+	notifySecrets := make(map[string]string, len(g.notifySecrets))
+	for sessionID, secret := range g.notifySecrets {
+		notifySecrets[sessionID] = secret
+	}
+	g.notifySecretsMu.RUnlock()
 	return Snapshot{
 		SchemaVersion: SnapshotSchemaVersion,
 		GeneratedAt:   now.UTC(),
 		TrustBundle:   g.trustBundle,
 		ControlPlane:  g.sessionStore.Snapshot(),
 		Audit:         auditEvents,
+		NotifySecrets: notifySecrets,
 	}
 }
 

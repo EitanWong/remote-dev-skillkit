@@ -67,22 +67,20 @@ type MemoryStore struct {
 	hosts             map[string]Host
 	// onEvent fires once per appended event (never on idempotent replays).
 	// Called with the store lock held, so the callback receives the session's
-	// current notify URL and signing secret and must not block or re-enter
-	// the store.
-	onEvent func(sessionID string, event Event, notifyURL, notifySecret string)
+	// current notify URL and must not block or re-enter the store.
+	onEvent func(sessionID string, event Event, notifyURL string)
 }
 
 // SetEventHook installs a per-appended-event callback. Nil disables it.
-func (s *MemoryStore) SetEventHook(hook func(sessionID string, event Event, notifyURL, notifySecret string)) {
+func (s *MemoryStore) SetEventHook(hook func(sessionID string, event Event, notifyURL string)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onEvent = hook
 }
 
 // SetSessionNotifyURL updates the event push webhook for a session. An empty
-// URL disables push notifications. The secret is used to sign deliveries
-// (sent as X-Gitlab-Token) and is never included in snapshot output.
-func (s *MemoryStore) SetSessionNotifyURL(sessionID, notifyURL, secret string) (Session, error) {
+// URL disables push notifications.
+func (s *MemoryStore) SetSessionNotifyURL(sessionID, notifyURL string) (Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	session, ok := s.sessions[sessionID]
@@ -91,7 +89,6 @@ func (s *MemoryStore) SetSessionNotifyURL(sessionID, notifyURL, secret string) (
 	}
 	session = session.clone()
 	session.NotifyURL = strings.TrimSpace(notifyURL)
-	session.NotifySecret = secret
 	session.UpdatedAt = s.now().UTC()
 	s.sessions[sessionID] = session
 	return session.clone(), nil
@@ -949,7 +946,7 @@ func (s *MemoryStore) appendEventLocked(sessionID string, event Event, enforceLi
 		s.idempotency[eventKey] = idempotencyRecord{Fingerprint: fingerprint, Event: event}
 	}
 	if s.onEvent != nil {
-		s.onEvent(sessionID, event, session.NotifyURL, session.NotifySecret)
+		s.onEvent(sessionID, event, session.NotifyURL)
 	}
 	return event, nil
 }

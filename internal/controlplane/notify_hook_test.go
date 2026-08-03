@@ -13,10 +13,10 @@ func TestEventHookFiresOnAppend(t *testing.T) {
 	var got []Event
 	var gotURLs []string
 	var gotSecrets []string
-	store.SetEventHook(func(sessionID string, event Event, notifyURL, notifySecret string) {
+	store.SetEventHook(func(sessionID string, event Event, notifyURL string) {
 		got = append(got, event)
 		gotURLs = append(gotURLs, notifyURL)
-		gotSecrets = append(gotSecrets, notifySecret)
+		gotSecrets = append(gotSecrets, "")
 	})
 
 	session, err := store.CreateSession(SessionSpec{Reason: "hook test", NotifyURL: "https://hooks.example.test/session"})
@@ -42,7 +42,7 @@ func TestEventHookSkipsIdempotentReplay(t *testing.T) {
 	store := NewMemoryStore(func() time.Time { return now })
 
 	var count int
-	store.SetEventHook(func(string, Event, string, string) { count++ })
+	store.SetEventHook(func(string, Event, string) { count++ })
 
 	session, err := store.CreateSession(SessionSpec{Reason: "replay test"})
 	if err != nil {
@@ -71,27 +71,24 @@ func TestSetSessionNotifyURL(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	updated, err := store.SetSessionNotifyURL(session.ID, "  https://hooks.example.test/agent  ", "topsecret")
+	updated, err := store.SetSessionNotifyURL(session.ID, "  https://hooks.example.test/agent  ")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if updated.NotifyURL != "https://hooks.example.test/agent" {
 		t.Fatalf("notify url not trimmed: %q", updated.NotifyURL)
 	}
-	if updated.NotifySecret != "topsecret" {
-		t.Fatalf("notify secret not stored: %q", updated.NotifySecret)
+	if updated.NotifySecret != "" {
+		t.Fatalf("store must not carry a signing secret: %q", updated.NotifySecret)
 	}
-	if snapshot := updated.Snapshot(); snapshot.Session.NotifySecret != "" {
-		t.Fatalf("snapshot leaks notify secret: %q", snapshot.Session.NotifySecret)
-	}
-	cleared, err := store.SetSessionNotifyURL(session.ID, "", "")
+	cleared, err := store.SetSessionNotifyURL(session.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cleared.NotifyURL != "" || cleared.NotifySecret != "" {
-		t.Fatalf("notify not cleared: %q/%q", cleared.NotifyURL, cleared.NotifySecret)
+	if cleared.NotifyURL != "" {
+		t.Fatalf("notify url not cleared: %q", cleared.NotifyURL)
 	}
-	if _, err := store.SetSessionNotifyURL("ses_unknown", "https://x.example.test", ""); err == nil || !strings.Contains(err.Error(), "not found") {
+	if _, err := store.SetSessionNotifyURL("ses_unknown", "https://x.example.test"); err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("unknown session should fail, got %v", err)
 	}
 }

@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -153,8 +156,11 @@ func TestNotifySignsDeliveriesWithSecret(t *testing.T) {
 	if stored.NotifyURL != webhook.URL+"?x=1" {
 		t.Fatalf("secret not stripped from stored URL: %q", stored.NotifyURL)
 	}
-	if stored.NotifySecret != "sup3rs3cret" {
-		t.Fatalf("secret not stored separately: %q", stored.NotifySecret)
+	if stored.NotifySecret != "" {
+		t.Fatalf("session must not carry the signing secret: %q", stored.NotifySecret)
+	}
+	if secret := gw.notifySecret(session.ID); secret != "sup3rs3cret" {
+		t.Fatalf("gateway secret store wrong: %q", secret)
 	}
 	if snapshot := stored.Snapshot(); snapshot.Session.NotifySecret != "" {
 		t.Fatalf("snapshot leaks secret: %q", snapshot.Session.NotifySecret)
@@ -175,5 +181,36 @@ func TestNotifySignsDeliveriesWithSecret(t *testing.T) {
 	defer mu.Unlock()
 	if gotToken != "sup3rs3cret" {
 		t.Fatalf("X-Gitlab-Token = %q, want the registered secret", gotToken)
+	}
+}
+
+// TestNotifySecretSurvivesSnapshotRoundTrip proves the signing secret
+// persists through SaveSnapshot/LoadSnapshot (0600 state file) so signed
+// deliveries keep working after a gateway restart.
+func TestNotifySecretSurvivesSnapshotRoundTrip(t *testing.T) {
+	gw := NewMemoryGateway()
+	session, err := gw.CreateSession(controlplane.SessionSpec{Reason: "notify persist"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gw.SetSessionNotifyURL(session.ID, "https://hooks.example.test/x?secret=persist-secret"); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(t.TempDir(), "state", "gateway.json")
+	if _, err := gw.SaveSnapshot(path); err != nil {
+		t.Fatal(err)
+	}
+	reloaded := NewMemoryGatewayWithSigningKey(gw.now, gw.signingID, gw.publicKey, gw.privateKey)
+	if _, err := reloaded.LoadSnapshot(path); err != nil {
+		t.Fatal(err)
+	}
+	if secret := reloaded.notifySecret(session.ID); secret != "persist-secret" {
+		t.Fatalf("secret lost across snapshot round trip: %q", secret)
+	}
+	if raw, err := os.ReadFile(path); err == nil && strings.Contains(string(raw), "persist-secret") == false {
+		t.Fatal("state file missing persisted secret")
+	} else if err != nil {
+		t.Fatal(err)
 	}
 }

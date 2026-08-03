@@ -197,7 +197,7 @@ type Session struct {
 	ReconnectGraceMS   int                `json:"reconnect_grace_ms"`
 	RetryAfterMS       int                `json:"retry_after_ms"`
 	NotifyURL          string             `json:"notify_url,omitempty"`
-	NotifySecret       string             `json:"notify_secret,omitempty"`
+	NotifySecret       string             `json:"-"`
 	LatestEvent        Event              `json:"latest_event,omitempty"`
 	CreatedAt          time.Time          `json:"created_at"`
 	UpdatedAt          time.Time          `json:"updated_at"`

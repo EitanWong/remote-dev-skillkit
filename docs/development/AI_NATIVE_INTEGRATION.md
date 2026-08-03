@@ -36,7 +36,7 @@ Delivery is fire-and-forget (5s timeout); failures are audited as
 `session.notify.delivery_failed`. URL policy: HTTPS anywhere; HTTP on
 loopback only (localhost / 127.0.0.1 / ::1).
 
-## Hermes integration (implemented, verified 2026-08-03)
+## Hermes integration (implemented, verified live)
 
 Hermes ships a webhook platform that consumes exactly this contract.
 
