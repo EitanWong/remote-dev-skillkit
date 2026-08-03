@@ -33,8 +33,8 @@ Status: ✅ covered · 🟡 partial · ❌ gap · ⚙️ live-only (real host/sy
 | `internal/model` | trust bundle validity windows, key status transitions, hash consistency | ✅ 71.7% |
 | `internal/contracts` | tool schema round-trip, required fields, enum constraints, MCP surface parity with `mcp/tools.json` | ✅ 77.6% |
 | `internal/hostidentity` | key generation, fingerprint, validation of malformed keys | 🟡 69.0% |
-| `internal/workspace` | worktree create/cleanup/rollback, lock contention, write-scope enforcement (absolute/`..`/drive-letter paths, escaping symlinks, scope membership), dirty policy | 🟡 68.0% — write-path/scope guards ✅; remaining: snapshot diffing and worktree finalize corners |
-| `internal/toolchain` + `internal/depsinstall` | node/toolchain bootstrap, idempotency, failure mid-install, archive security (zip-slip, escaping symlinks, byte limits, HTTPS-only sources, SHA-256 verify), retry classification, atomic copy | 🟡 62–66% — archive security guards ✅; remaining: network fetch integration paths |
+| `internal/workspace` | worktree create/cleanup/rollback, lock contention, write-scope enforcement (absolute/`..`/drive-letter paths, escaping symlinks, scope membership), snapshot diffing (change detection, truncation at 200 files, .git exclusion, escaping scopes), dirty policy | ✅ 71.7% |
+| `internal/toolchain` + `internal/depsinstall` | node/toolchain bootstrap, idempotency, failure mid-install, archive security (zip-slip, escaping symlinks, byte limits, HTTPS-only sources + same-host redirects, SHA-256 verify), retry classification and retry loops, atomic copy | ✅ 67–69% — network fetch paths covered with httptest |
 | `internal/hostcmd` | managed service start/stop/retry, route pool concurrency, exit codes | ✅ 75.7% |
 | `internal/gateway` + `internal/controlplane` | session state machine, lease binding, reconnect, revocation, persistence, snapshot/event sequencing | ✅ 80–81% |
 | `internal/hostrunner` | engineering loop, progress, limits (duration/output/attempts), isolation, runtime profiles | ✅ 81.2% |
@@ -55,17 +55,19 @@ the gate is part of adding a surface.
 | cli | 82 |
 | update | 90 |
 | operatorauth, hosttrust, audit, contracts | 70 |
-| policy, model | 65 |
+| policy, model, workspace | 65 |
 | httpapi, hostidentity | 60 |
+| toolchain, depsinstall | 60 |
 | protectedstore | 30 |
 
 ## Known gaps (ordered by priority)
 
-1. `internal/toolchain`/`internal/depsinstall` network fetch integration paths (`Fetch`, `downloadOnce`, node bootstrap) — L2 with httptest; archive security guards are covered.
-2. `internal/workspace` snapshot diffing and worktree-finalize corners — extend L1.
-3. `internal/protectedstore` platform backends (keyctl/libsecret/TPM) — L3 on a real Linux desktop with keyring available.
-4. `internal/hostawake` — L3 on real hosts (part of the managed-host E2E runbook).
-5. Windows managed-host E2E regression cadence — every handoff/service change must re-run the live runbook (boot time, sleep/wake, lock screen evidence) before merge.
+All L1/L2 gaps are closed. Remaining items require live infrastructure:
+
+1. `internal/protectedstore` platform backends (keyctl/libsecret/TPM) — L3 on a real Linux desktop with keyring available.
+2. `internal/hostawake` — L3 on real hosts (part of the managed-host E2E runbook).
+3. Windows managed-host E2E regression cadence — every handoff/service change must re-run the live runbook (boot time, sleep/wake, lock screen evidence) before merge.
+4. Raise floors as coverage grows: workspace 65→70, toolchain/depsinstall 60→65, protectedstore 30→50 after L3.
 
 ## How to add a surface
 

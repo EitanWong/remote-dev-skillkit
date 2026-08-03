@@ -20,6 +20,9 @@ checks=(
   "./internal/model:65"
   "./internal/contracts:70"
   "./internal/protectedstore:30"
+  "./internal/toolchain:60"
+  "./internal/depsinstall:60"
+  "./internal/workspace:65"
 )
 
 for entry in "${checks[@]}"; do
