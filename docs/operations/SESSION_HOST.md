@@ -54,6 +54,31 @@ For an immediate control stop, call `rdev.sessions.close` with
 `action: "revoke"`. It invalidates endpoint leases immediately and records the
 lifecycle action in the durable audit log. Normal `close` remains the default.
 
+## Host directory
+
+The gateway keeps a durable directory of every target that has joined. One
+record exists per host identity (identity fingerprint), so reconnects and new
+sessions update one stable entry instead of creating duplicates:
+
+- `host_id` — stable operator-facing identifier for this host.
+- `display_name` — operator-controlled name. The connector name seeds a new
+  record; a later join never overwrites an operator-set name.
+- `platform`, `capabilities`, `state`, `first_seen_at`, `last_seen_at`.
+- `last_session_id` / `last_endpoint_id` — where the host was most recently
+  seen, useful for routing a fresh session to an already enrolled host.
+
+Agents manage the directory through MCP:
+
+```text
+rdev.hosts.list                 # newest last-seen first
+rdev.hosts.rename {host_id, display_name}
+```
+
+`rdev.hosts.rename` requires the operator role, writes a `host.rename` audit
+event, and persists with the gateway state file. Display names are bounded
+(64 characters, no control characters). The directory is restored from the
+state file on gateway restart alongside sessions, leases, and audit events.
+
 ## Join a host
 
 ```bash

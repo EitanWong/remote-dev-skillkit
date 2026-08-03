@@ -133,6 +133,24 @@ func Tools() []Tool {
 				"idempotency_key": stringField(),
 			}, []string{"session_id"}),
 		},
+		{
+			Name:        "rdev.hosts.list",
+			Description: "List the durable target host directory with host_id, display_name, platform, identity fingerprint, capabilities, state, first/last seen, and last session/endpoint references so Agents can select and manage enrolled hosts.",
+			Safety:      "Read-only. Returns operator-curated host directory metadata; does not expose endpoint lease secrets, target-local credentials, or raw logs.",
+			InputSchema: object(map[string]any{
+				"gateway_url": gatewayURL,
+			}, nil),
+		},
+		{
+			Name:        "rdev.hosts.rename",
+			Description: "Set the operator-controlled display name for one enrolled host directory entry and return the updated host record. The name is preserved across host reconnects and new sessions.",
+			Safety:      "Mutates operator-curated host directory metadata only. Does not execute on the target, install persistence, mutate network settings, or bypass local OS controls.",
+			InputSchema: object(map[string]any{
+				"gateway_url":  gatewayURL,
+				"host_id":      stringField(),
+				"display_name": stringField(),
+			}, []string{"host_id", "display_name"}),
+		},
 	}
 }
 
