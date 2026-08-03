@@ -60,6 +60,19 @@ the gate is part of adding a surface.
 | toolchain, depsinstall | 60 |
 | protectedstore | 30 |
 
+## AI-Native surface (2026-08)
+
+Agent-facing push notifications: every session carries an optional `notify_url`
+(HTTPS only, operator-scoped, audited). When set, the gateway POSTs each
+appended session event as `rdev.notification.v1` — host online/offline
+(`hello`/`status`), task lifecycle, artifacts — so Hermes/OpenClaw-class agents
+react without polling. Manage via MCP `rdev.sessions.notify` (set/clear/get)
+or `POST /v1/sessions/{id}/notify`.
+
+Delivery is fire-and-forget with a 5s timeout; failures are audited as
+`session.notify.delivery_failed`. No retry queue — add one when delivery
+guarantees are required. `notify_url` persists in session snapshots.
+
 ## Known gaps (ordered by priority)
 
 All L1/L2 gaps are closed. Remaining items require live infrastructure:

@@ -170,6 +170,9 @@ type SessionSpec struct {
 	RetryAfterMS       int                `json:"retry_after_ms"`
 	SnapshotSeq        uint64             `json:"snapshot_seq"`
 	ExpiresAt          time.Time          `json:"expires_at"`
+	// NotifyURL receives a POST for every session event (host up/down, task
+	// lifecycle, artifacts). HTTPS only; empty means no push notifications.
+	NotifyURL string `json:"notify_url,omitempty"`
 }
 
 type Session struct {
@@ -193,6 +196,7 @@ type Session struct {
 	Limits             Limits             `json:"limits"`
 	ReconnectGraceMS   int                `json:"reconnect_grace_ms"`
 	RetryAfterMS       int                `json:"retry_after_ms"`
+	NotifyURL          string             `json:"notify_url,omitempty"`
 	LatestEvent        Event              `json:"latest_event,omitempty"`
 	CreatedAt          time.Time          `json:"created_at"`
 	UpdatedAt          time.Time          `json:"updated_at"`
@@ -387,6 +391,7 @@ func NewSession(spec SessionSpec, now time.Time) (Session, error) {
 		Limits:             limits,
 		ReconnectGraceMS:   spec.ReconnectGraceMS,
 		RetryAfterMS:       spec.RetryAfterMS,
+		NotifyURL:          strings.TrimSpace(spec.NotifyURL),
 		CreatedAt:          now.UTC(),
 		UpdatedAt:          now.UTC(),
 		ExpiresAt:          spec.ExpiresAt.UTC(),

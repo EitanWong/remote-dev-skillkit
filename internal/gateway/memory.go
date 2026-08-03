@@ -67,7 +67,7 @@ func NewMemoryGatewayWithSigningKey(now func() time.Time, signingID string, publ
 	if err != nil {
 		panic(fmt.Sprintf("create initial trust bundle: %v", err))
 	}
-	return &MemoryGateway{
+	g := &MemoryGateway{
 		now:          now,
 		sessionStore: controlplane.NewMemoryStore(now),
 		webHandoffs:  map[string]webHandoffState{},
@@ -76,6 +76,8 @@ func NewMemoryGatewayWithSigningKey(now func() time.Time, signingID string, publ
 		privateKey:   append(ed25519.PrivateKey(nil), privateKey...),
 		trustBundle:  trustBundle,
 	}
+	g.sessionStore.SetEventHook(g.notifyEvent)
+	return g
 }
 
 func initialSignedTrustBundle(signingID string, publicKey ed25519.PublicKey, privateKey ed25519.PrivateKey, now time.Time) (model.SignedTrustBundle, error) {

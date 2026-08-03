@@ -209,6 +209,8 @@ func (s Server) sessionRoute(w http.ResponseWriter, r *http.Request) {
 		s.upsertSessionArtifact(w, r, sessionID)
 	case r.Method == http.MethodGet && resource == "artifacts":
 		s.listSessionArtifacts(w, r, sessionID)
+	case r.Method == http.MethodPost && resource == "notify":
+		s.setSessionNotify(w, r, sessionID)
 	case r.Method == http.MethodPost && resource == "close":
 		s.closeSession(w, r, sessionID)
 	case r.Method == http.MethodPost && resource == "revoke":
@@ -626,6 +628,39 @@ func (s Server) taskOwnedByEndpoint(sessionID, taskID, endpointID string) bool {
 		}
 	}
 	return false
+}
+
+func (s Server) setSessionNotify(w http.ResponseWriter, r *http.Request, sessionID string) {
+	if !s.authorizeOperator(r, operatorauth.RoleOperator) {
+		writeProtocolError(w, http.StatusForbidden, protocolHTTPError(controlplane.ErrUnauthorizedEndpoint, "operator role is required", false))
+		return
+	}
+	var req struct {
+		NotifyURL string `json:"notify_url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrPayloadTooLarge, "invalid JSON body", false))
+		return
+	}
+	if err := s.Gateway.SetSessionNotifyURL(sessionID, req.NotifyURL); err != nil {
+		var protocolErr controlplane.ProtocolError
+		if errors.As(err, &protocolErr) {
+			writeControlPlaneError(w, err)
+			return
+		}
+		// URL validation failures are client errors, not internal ones.
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrPayloadTooLarge, err.Error(), false))
+		return
+	}
+	if !s.persistState(w) {
+		return
+	}
+	session, err := s.Gateway.Session(sessionID)
+	if err != nil {
+		writeControlPlaneError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"session": session})
 }
 
 func (s Server) listSessionArtifacts(w http.ResponseWriter, r *http.Request, sessionID string) {
