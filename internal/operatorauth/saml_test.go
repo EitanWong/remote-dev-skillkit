@@ -32,7 +32,10 @@ func TestSAMLVerifierAuthorizesSignedResponseByRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response := signedSAMLResponse(t, privateKey, certDER, now, "rdev-gateway", "operator auditor")
+	response := signedSAMLResponse(t, privateKey, certDER, now, samlResponseSpec{
+		audience: "rdev-gateway",
+		roles:    "operator auditor",
+	})
 	if !verifier.AuthorizeBearer("Bearer "+response, RoleOperator) {
 		t.Fatal("expected operator role to authorize")
 	}
@@ -62,7 +65,10 @@ func TestSAMLVerifierRejectsWrongAudience(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response := signedSAMLResponse(t, privateKey, certDER, now, "other-audience", RoleOperator)
+	response := signedSAMLResponse(t, privateKey, certDER, now, samlResponseSpec{
+		audience: "other-audience",
+		roles:    RoleOperator,
+	})
 	if verifier.AuthorizeBearer("Bearer "+response, RoleOperator) {
 		t.Fatal("wrong audience should fail")
 	}
@@ -104,12 +110,31 @@ func testSAMLCertificate(t *testing.T, now time.Time) (*rsa.PrivateKey, []byte, 
 	return privateKey, certDER, certPEM
 }
 
-func signedSAMLResponse(t *testing.T, privateKey *rsa.PrivateKey, certDER []byte, now time.Time, audience, roles string) string {
+type samlResponseSpec struct {
+	audience     string
+	roles        string
+	notOnOrAfter string          // "" defaults to now+1h
+	recipient    string          // "" defaults to the standard ACS
+	signKey      *rsa.PrivateKey // nil defaults to privateKey
+}
+
+func signedSAMLResponse(t *testing.T, privateKey *rsa.PrivateKey, certDER []byte, now time.Time, spec samlResponseSpec) string {
 	t.Helper()
 	notBefore := now.Add(-time.Minute).UTC().Format(time.RFC3339)
-	notOnOrAfter := now.Add(time.Hour).UTC().Format(time.RFC3339)
+	notOnOrAfter := spec.notOnOrAfter
+	if notOnOrAfter == "" {
+		notOnOrAfter = now.Add(time.Hour).UTC().Format(time.RFC3339)
+	}
+	recipient := spec.recipient
+	if recipient == "" {
+		recipient = "https://gateway.example.test/saml/acs"
+	}
+	signingKey := spec.signKey
+	if signingKey == nil {
+		signingKey = privateKey
+	}
 	issueInstant := now.UTC().Format(time.RFC3339)
-	raw := fmt.Sprintf(`<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="response-id" Version="2.0" IssueInstant="%s" Destination="https://gateway.example.test/saml/acs">
+	raw := fmt.Sprintf(`<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="response-id" Version="2.0" IssueInstant="%s" Destination="%s">
   <saml:Issuer>https://idp.example.test/saml</saml:Issuer>
   <samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status>
   <saml:Assertion ID="assertion-id" Version="2.0" IssueInstant="%s">
@@ -117,7 +142,7 @@ func signedSAMLResponse(t *testing.T, privateKey *rsa.PrivateKey, certDER []byte
     <saml:Subject>
       <saml:NameID>operator@example.test</saml:NameID>
       <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
-        <saml:SubjectConfirmationData NotOnOrAfter="%s" Recipient="https://gateway.example.test/saml/acs"/>
+        <saml:SubjectConfirmationData NotOnOrAfter="%s" Recipient="%s"/>
       </saml:SubjectConfirmation>
     </saml:Subject>
     <saml:Conditions NotBefore="%s" NotOnOrAfter="%s">
@@ -128,12 +153,12 @@ func signedSAMLResponse(t *testing.T, privateKey *rsa.PrivateKey, certDER []byte
       <saml:Attribute Name="rdev_roles"><saml:AttributeValue>%s</saml:AttributeValue></saml:Attribute>
     </saml:AttributeStatement>
   </saml:Assertion>
-</samlp:Response>`, issueInstant, issueInstant, notOnOrAfter, notBefore, notOnOrAfter, audience, roles)
+</samlp:Response>`, issueInstant, recipient, issueInstant, notOnOrAfter, recipient, notBefore, notOnOrAfter, spec.audience, spec.roles)
 	doc := etree.NewDocument()
 	if err := doc.ReadFromString(raw); err != nil {
 		t.Fatal(err)
 	}
-	ctx, err := dsig.NewSigningContext(privateKey, [][]byte{certDER})
+	ctx, err := dsig.NewSigningContext(signingKey, [][]byte{certDER})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -24,17 +24,17 @@ Status: ✅ covered · 🟡 partial · ❌ gap · ⚙️ live-only (real host/sy
 | Module | Corner cases to consider | Status |
 |---|---|---|
 | `internal/update` | version compare (pre-release, v-prefix, malformed, empty), URL building (trailing slash, escaping, bad repo), HTTP non-200 / bad JSON / unreachable, token header, asset selection (dash vs underscore slug, case, no match), digest presence, shell quoting of adversarial names, plan when no update | ✅ 98% |
-| `internal/operatorauth` | file load errors (missing/bad JSON/wrong schema), JWKS fetch failure at load, claim types (aud string/array/mixed/nil, exp float64/int64/Number/garbage), roles claim forms (`[]any`/`[]string`/space-separated string/non-string), hash validation (prefix/length/hex), clock skew boundaries (OIDC exp/nbf at skew edge; hosted exp/nbf strict), wrong audience/issuer, expired/nbf token, duplicate key IDs | ✅ 77.7% — remaining: full SAML response corner cases (bad signature, expired assertion, wrong consumer URL) |
+| `internal/operatorauth` | file load errors (missing/bad JSON/wrong schema), JWKS fetch failure at load, claim types (aud string/array/mixed/nil, exp float64/int64/Number/garbage), roles claim forms (`[]any`/`[]string`/space-separated string/non-string), hash validation (prefix/length/hex), clock skew boundaries (OIDC exp/nbf at skew edge; hosted exp/nbf strict), wrong audience/issuer, expired/nbf token, duplicate key IDs, SAML response corners (expired assertion, wrong recipient, bad signature, empty response) | ✅ 78.0% |
 | `internal/hosttrust` | noop store, file missing/corrupt/wrong schema, atomic write + 0600, rollback rejection, same-sequence content tamper, signature from stored root (not caller-supplied), protected-store backends (keychain/DPAPI/libsecret), malformed protected ref | ✅ 78.8% |
-| `internal/httpapi` | session create/join/close/revoke, event replay after cursor, long-poll wait parsing, artifact write authorization (operator path + endpoint lease + task ownership), task resume (operator role, checkpoint/idempotency validation, unknown task), persist-state failure paths, trust bundle fetch, audit listing | 🟡 ~70% — artifact write auth ✅ (#19 fixed); `joinSession`/`resumeSessionTask` ✅ covered; `persistStateNoResponse` removed as dead code; remaining: persist-state failure-path handler tests |
+| `internal/httpapi` | session create/join/close/revoke, event replay after cursor, long-poll wait parsing, artifact write authorization (operator path + endpoint lease + task ownership), task resume (operator role, checkpoint/idempotency validation, unknown task), persist-state failure (failing StateStore → 500) | ✅ 71.0% — artifact auth (#19), join/resume, persist-failure covered; `persistStateNoResponse` removed as dead code |
 | `internal/protectedstore` | ref parsing (URL-like, missing account, unknown prefix), backend fallthrough, per-platform backends (keychain/DPAPI/libsecret/keyctl/TPM/MDM), empty service/account, backend error propagation | 🟡 36.8% — platform backends are ⚙️ live-only (real keyring/TPM) or need mock seam; parse/open/store logic ✅ |
 | `internal/policy` | capability checks, shell allow/deny, scoping, unknown capability handling | 🟡 73.2% |
 | `internal/audit` | chain integrity, JSONL append, redaction of secrets, tamper detection | ✅ 76.5% |
 | `internal/model` | trust bundle validity windows, key status transitions, hash consistency | ✅ 71.7% |
 | `internal/contracts` | tool schema round-trip, required fields, enum constraints, MCP surface parity with `mcp/tools.json` | ✅ 77.6% |
 | `internal/hostidentity` | key generation, fingerprint, validation of malformed keys | 🟡 69.0% |
-| `internal/workspace` | worktree create/cleanup/rollback, lock contention, write-scope enforcement, dirty policy | 🟡 64.0% |
-| `internal/toolchain` + `internal/depsinstall` | node/toolchain bootstrap, idempotency, failure mid-install, authorization required | 🟡 54–60% |
+| `internal/workspace` | worktree create/cleanup/rollback, lock contention, write-scope enforcement (absolute/`..`/drive-letter paths, escaping symlinks, scope membership), dirty policy | 🟡 68.0% — write-path/scope guards ✅; remaining: snapshot diffing and worktree finalize corners |
+| `internal/toolchain` + `internal/depsinstall` | node/toolchain bootstrap, idempotency, failure mid-install, archive security (zip-slip, escaping symlinks, byte limits, HTTPS-only sources, SHA-256 verify), retry classification, atomic copy | 🟡 62–66% — archive security guards ✅; remaining: network fetch integration paths |
 | `internal/hostcmd` | managed service start/stop/retry, route pool concurrency, exit codes | ✅ 75.7% |
 | `internal/gateway` + `internal/controlplane` | session state machine, lease binding, reconnect, revocation, persistence, snapshot/event sequencing | ✅ 80–81% |
 | `internal/hostrunner` | engineering loop, progress, limits (duration/output/attempts), isolation, runtime profiles | ✅ 81.2% |
@@ -61,12 +61,11 @@ the gate is part of adding a surface.
 
 ## Known gaps (ordered by priority)
 
-1. `internal/httpapi` persist-state failure handler paths (failing `StateStore.SaveFrom` → 500) — add L2 tests. Artifact write auth (#19) and join/resume handlers are fixed and covered.
-2. `internal/operatorauth` SAML response corner cases (bad signature, expired assertion, wrong consumer URL) — extend L1.
-3. `internal/workspace` (64%) and `internal/toolchain` (54%) bootstrap/idempotency corners — extend L1.
-4. `internal/protectedstore` platform backends (keyctl/libsecret/TPM) — L3 on a real Linux desktop with keyring available.
-5. `internal/hostawake` — L3 on real hosts (part of the managed-host E2E runbook).
-6. Windows managed-host E2E regression cadence — every handoff/service change must re-run the live runbook (boot time, sleep/wake, lock screen evidence) before merge.
+1. `internal/toolchain`/`internal/depsinstall` network fetch integration paths (`Fetch`, `downloadOnce`, node bootstrap) — L2 with httptest; archive security guards are covered.
+2. `internal/workspace` snapshot diffing and worktree-finalize corners — extend L1.
+3. `internal/protectedstore` platform backends (keyctl/libsecret/TPM) — L3 on a real Linux desktop with keyring available.
+4. `internal/hostawake` — L3 on real hosts (part of the managed-host E2E runbook).
+5. Windows managed-host E2E regression cadence — every handoff/service change must re-run the live runbook (boot time, sleep/wake, lock screen evidence) before merge.
 
 ## How to add a surface
 
