@@ -10,6 +10,7 @@ Remote Dev Skillkit is a small, session-native control plane for agent-assisted 
 - `rdev host serve --join-code CODE --gateway URL`
 - `rdev gateway serve --dev` for loopback development
 - Session MCP tools: `create`, `status`, `events`, `task`, `interrupt`, `artifacts`, and `close`
+- Host directory MCP tools: `rdev.hosts.list` and `rdev.hosts.rename`
 
 ## Quick start
 

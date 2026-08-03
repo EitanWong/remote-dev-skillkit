@@ -395,6 +395,10 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.sessionArtifacts(params.Arguments)
 	case "rdev.sessions.close":
 		data, err = s.sessionClose(params.Arguments)
+	case "rdev.hosts.list":
+		data, err = s.hostsList(params.Arguments)
+	case "rdev.hosts.rename":
+		data, err = s.hostsRename(params.Arguments)
 
 	default:
 		err = unknownToolError{Name: params.Name}
@@ -763,6 +767,31 @@ func (s Server) sessionClose(args map[string]any) (any, error) {
 		"event":   event,
 		"status":  status,
 	}, status), nil
+}
+
+func (s Server) hostsList(args map[string]any) (any, error) {
+	if target := s.effectiveGatewayTarget(args); target.URL != "" {
+		return s.proxyGETToTarget(target.URL, "/v1/hosts", target.useOperatorToken)
+	}
+	return map[string]any{
+		"hosts": s.Gateway.Hosts(),
+	}, nil
+}
+
+func (s Server) hostsRename(args map[string]any) (any, error) {
+	hostID := requiredString(args, "host_id")
+	displayName := requiredString(args, "display_name")
+	if target := s.effectiveGatewayTarget(args); target.URL != "" {
+		return s.proxyPOSTToTarget(target.URL, "/v1/hosts/rename", map[string]any{
+			"host_id":      hostID,
+			"display_name": displayName,
+		}, target.useOperatorToken)
+	}
+	host, err := s.Gateway.RenameHost(hostID, displayName)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"host": host}, nil
 }
 
 func sessionSpecFromArgs(args map[string]any) controlplane.SessionSpec {

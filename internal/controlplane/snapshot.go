@@ -3,6 +3,7 @@ package controlplane
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -18,6 +19,7 @@ type Snapshot struct {
 	ResultIdempotency map[string]TaskRecord  `json:"result_idempotency,omitempty"`
 	Leases            map[string]LeaseRecord `json:"leases,omitempty"`
 	TerminalAt        map[string]time.Time   `json:"terminal_at,omitempty"`
+	Hosts             []Host                 `json:"hosts,omitempty"`
 }
 
 type IdempotencyRecord struct {
@@ -88,6 +90,7 @@ func (s *MemoryStore) Snapshot() Snapshot {
 		ResultIdempotency: cloneTaskRecordMap(s.resultIdempotency),
 		Leases:            cloneLeaseRecordMap(s.leases),
 		TerminalAt:        cloneTimeMap(s.terminalAt),
+		Hosts:             cloneHosts(s.hosts),
 	}
 }
 
@@ -195,6 +198,7 @@ func (s *MemoryStore) RestoreSnapshot(snapshot Snapshot) error {
 	if s.terminalAt == nil {
 		s.terminalAt = map[string]time.Time{}
 	}
+	s.hosts = hostsFromSnapshot(snapshot.Hosts)
 	return nil
 }
 
@@ -246,6 +250,34 @@ func cloneTimeMap(values map[string]time.Time) map[string]time.Time {
 	out := make(map[string]time.Time, len(values))
 	for key, value := range values {
 		out[key] = value
+	}
+	return out
+}
+
+func cloneHosts(hosts map[string]Host) []Host {
+	if len(hosts) == 0 {
+		return nil
+	}
+	out := make([]Host, 0, len(hosts))
+	for _, host := range hosts {
+		out = append(out, host.clone())
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].HostID < out[j].HostID
+	})
+	return out
+}
+
+func hostsFromSnapshot(hosts []Host) map[string]Host {
+	out := make(map[string]Host, len(hosts))
+	for _, host := range hosts {
+		if strings.TrimSpace(host.IdentityFingerprint) == "" || strings.TrimSpace(host.HostID) == "" {
+			continue
+		}
+		if host.SchemaVersion == "" {
+			host.SchemaVersion = HostSchemaVersion
+		}
+		out[host.IdentityFingerprint] = host
 	}
 	return out
 }

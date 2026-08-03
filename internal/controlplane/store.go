@@ -64,6 +64,7 @@ type MemoryStore struct {
 	resultIdempotency map[string]taskRecord
 	leases            map[string]leaseRecord
 	terminalAt        map[string]time.Time
+	hosts             map[string]Host
 }
 
 type idempotencyKey struct {
@@ -102,6 +103,7 @@ func NewMemoryStore(clock func() time.Time) *MemoryStore {
 		resultIdempotency: map[string]taskRecord{},
 		leases:            map[string]leaseRecord{},
 		terminalAt:        map[string]time.Time{},
+		hosts:             map[string]Host{},
 	}
 }
 
@@ -816,6 +818,7 @@ func (s *MemoryStore) joinEndpointLocked(session Session, spec EndpointSpec) (En
 			session.Status = SessionStatusOnline
 			session = session.WithEndpoint(endpoint, s.now())
 			s.sessions[session.ID] = session
+			s.UpsertHostLocked(session, endpoint, s.now())
 			return endpoint, false, nil
 		}
 	}
@@ -852,6 +855,7 @@ func (s *MemoryStore) joinEndpointLocked(session Session, spec EndpointSpec) (En
 	session.Status = SessionStatusOnline
 	session = session.WithEndpoint(endpoint, s.now())
 	s.sessions[session.ID] = session
+	s.UpsertHostLocked(session, endpoint, s.now())
 	return endpoint, true, nil
 }
 

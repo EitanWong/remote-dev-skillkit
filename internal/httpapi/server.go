@@ -115,6 +115,8 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/sessions/", s.sessionRoute)
 
 	mux.HandleFunc("GET /v1/audit", s.listAudit)
+	mux.HandleFunc("GET /v1/hosts", s.listHosts)
+	mux.HandleFunc("POST /v1/hosts/rename", s.renameHost)
 	mux.HandleFunc("GET /connect/", s.webHandoffRoute)
 	mux.HandleFunc("POST /connect/", s.webHandoffRoute)
 	return mux
@@ -680,6 +682,40 @@ func (s Server) listAudit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"events": s.Gateway.AuditEvents(),
 	})
+}
+
+func (s Server) listHosts(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeOperator(r, operatorauth.RoleAuditor, operatorauth.RoleOperator) {
+		writeError(w, http.StatusForbidden, "auditor role is required")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"hosts": s.Gateway.Hosts(),
+	})
+}
+
+func (s Server) renameHost(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeOperator(r, operatorauth.RoleOperator) {
+		writeProtocolError(w, http.StatusForbidden, protocolHTTPError(controlplane.ErrUnauthorizedEndpoint, "operator role is required", false))
+		return
+	}
+	var req struct {
+		HostID      string `json:"host_id"`
+		DisplayName string `json:"display_name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeProtocolError(w, http.StatusBadRequest, protocolHTTPError(controlplane.ErrPayloadTooLarge, "invalid JSON body", false))
+		return
+	}
+	host, err := s.Gateway.RenameHost(req.HostID, req.DisplayName)
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if !s.persistState(w) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"host": host})
 }
 
 func (s Server) authorizeOperator(r *http.Request, roles ...string) bool {

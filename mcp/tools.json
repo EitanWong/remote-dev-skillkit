@@ -875,6 +875,50 @@
         ],
         "type": "object"
       }
+    },
+    {
+      "name": "rdev.hosts.list",
+      "description": "List the durable target host directory with host_id, display_name, platform, identity fingerprint, capabilities, state, first/last seen, and last session/endpoint references so Agents can select and manage enrolled hosts.",
+      "safety": "Read-only. Returns operator-curated host directory metadata; does not expose endpoint lease secrets, target-local credentials, or raw logs.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this session call. Overrides the server-level gateway URL for this single MCP request.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
+      "name": "rdev.hosts.rename",
+      "description": "Set the operator-controlled display name for one enrolled host directory entry and return the updated host record. The name is preserved across host reconnects and new sessions.",
+      "safety": "Mutates operator-curated host directory metadata only. Does not execute on the target, install persistence, mutate network settings, or bypass local OS controls.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "display_name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "gateway_url": {
+            "description": "Optional gateway base URL to proxy this session call. Overrides the server-level gateway URL for this single MCP request.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "host_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "host_id",
+          "display_name"
+        ],
+        "type": "object"
+      }
     }
   ],
   "version": "0.0.1-dev"
