@@ -63,11 +63,17 @@ the gate is part of adding a surface.
 ## AI-Native surface (2026-08)
 
 Agent-facing push notifications: every session carries an optional `notify_url`
-(HTTPS only, operator-scoped, audited). When set, the gateway POSTs each
-appended session event as `rdev.notification.v1` — host online/offline
-(`hello`/`status`), task lifecycle, artifacts — so Hermes/OpenClaw-class agents
-react without polling. Manage via MCP `rdev.sessions.notify` (set/clear/get)
-or `POST /v1/sessions/{id}/notify`.
+(HTTPS only — loopback HTTP allowed — operator-scoped, audited). When set, the
+gateway POSTs each appended session event as `rdev.notification.v1` — host
+online/offline (`hello`/`status`), task lifecycle, artifacts — so
+Hermes/OpenClaw-class agents react without polling. Manage via MCP
+`rdev.sessions.notify` (set/clear/get) or `POST /v1/sessions/{id}/notify`.
+
+Signed deliveries: a `secret` query parameter on the registered URL is stored
+separately and sent as `X-Gitlab-Token` on every POST (verified by Hermes'
+webhook platform); it never appears in snapshots, MCP responses, or audit
+records. See `docs/development/AI_NATIVE_INTEGRATION.md` for the verified
+Hermes wiring and the OpenClaw plan.
 
 Delivery is fire-and-forget with a 5s timeout; failures are audited as
 `session.notify.delivery_failed`. No retry queue — add one when delivery

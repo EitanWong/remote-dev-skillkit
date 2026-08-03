@@ -197,6 +197,7 @@ type Session struct {
 	ReconnectGraceMS   int                `json:"reconnect_grace_ms"`
 	RetryAfterMS       int                `json:"retry_after_ms"`
 	NotifyURL          string             `json:"notify_url,omitempty"`
+	NotifySecret       string             `json:"notify_secret,omitempty"`
 	LatestEvent        Event              `json:"latest_event,omitempty"`
 	CreatedAt          time.Time          `json:"created_at"`
 	UpdatedAt          time.Time          `json:"updated_at"`
@@ -592,6 +593,7 @@ func (l Lease) TimeUntilExpiry(_ time.Time) time.Duration {
 
 func (s Session) Snapshot() SessionSnapshot {
 	session := s.clone()
+	session.NotifySecret = "" // signing secret never leaves the gateway
 	return SessionSnapshot{
 		Session:            session,
 		Endpoints:          cloneEndpoints(s.Endpoints),

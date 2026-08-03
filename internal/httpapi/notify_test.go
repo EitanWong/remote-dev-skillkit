@@ -20,11 +20,13 @@ func TestHTTPSessionNotifySetAndClear(t *testing.T) {
 	}
 	var payload struct {
 		Session struct {
-			NotifyURL string `json:"notify_url"`
+			Session struct {
+				NotifyURL string `json:"notify_url"`
+			} `json:"session"`
 		} `json:"session"`
 	}
 	decodeHTTP(t, rec, &payload)
-	if payload.Session.NotifyURL != "https://hooks.example.test/agent" {
+	if payload.Session.Session.NotifyURL != "https://hooks.example.test/agent" {
 		t.Fatalf("notify url not persisted: %#v", payload)
 	}
 
@@ -37,11 +39,13 @@ func TestHTTPSessionNotifySetAndClear(t *testing.T) {
 	}
 	var cleared struct {
 		Session struct {
-			NotifyURL string `json:"notify_url"`
+			Session struct {
+				NotifyURL string `json:"notify_url"`
+			} `json:"session"`
 		} `json:"session"`
 	}
 	decodeHTTP(t, rec, &cleared)
-	if cleared.Session.NotifyURL != "" {
+	if cleared.Session.Session.NotifyURL != "" {
 		t.Fatalf("notify url not cleared: %#v", cleared)
 	}
 }

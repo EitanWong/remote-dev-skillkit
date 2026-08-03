@@ -18,18 +18,29 @@ const (
 )
 
 // SetSessionNotifyURL registers or clears the event push webhook for a
-// session. Empty URL clears; HTTPS is required. Every appended session event
-// is then POSTed to the URL so an agent (Hermes, OpenClaw, ...) can react to
-// host up/down, task lifecycle, and artifact changes without polling.
+// session. Empty URL clears; HTTPS is required (loopback HTTP is allowed so a
+// local agent webhook such as Hermes on the same host can receive pushes).
+// A `secret` query parameter is extracted and used to sign every delivery
+// (X-Gitlab-Token header); the stored URL and audit record never include it.
+// Every appended session event is then POSTed to the URL so an agent (Hermes,
+// OpenClaw, ...) can react to host up/down, task lifecycle, and artifact
+// changes without polling.
 func (g *MemoryGateway) SetSessionNotifyURL(sessionID, rawURL string) error {
 	rawURL = strings.TrimSpace(rawURL)
+	secret := ""
 	if rawURL != "" {
 		parsed, err := url.Parse(rawURL)
-		if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
-			return fmt.Errorf("notify_url must be an absolute https URL")
+		if err != nil || !validNotifyURL(rawURL) {
+			return fmt.Errorf("notify_url must be an absolute https URL (or http on loopback)")
+		}
+		if q := parsed.Query(); q.Has("secret") {
+			secret = q.Get("secret")
+			q.Del("secret")
+			parsed.RawQuery = q.Encode()
+			rawURL = parsed.String()
 		}
 	}
-	if _, err := g.controlPlane().SetSessionNotifyURL(sessionID, rawURL); err != nil {
+	if _, err := g.controlPlane().SetSessionNotifyURL(sessionID, rawURL, secret); err != nil {
 		return err
 	}
 	action := "session.notify.clear"
@@ -42,17 +53,35 @@ func (g *MemoryGateway) SetSessionNotifyURL(sessionID, rawURL string) error {
 	return nil
 }
 
+// validNotifyURL accepts https URLs anywhere, plus http URLs on loopback
+// addresses only (local agent webhooks). This keeps SSRF surface to the
+// local host while enabling same-host agent integrations.
+func validNotifyURL(rawURL string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return false
+	}
+	if parsed.Scheme == "https" {
+		return true
+	}
+	if parsed.Scheme != "http" {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "127.0.0.1" || host == "::1" || host == "localhost"
+}
+
 // notifyEvent is installed as the store event hook. It is invoked with the
 // store lock held, so it only reads the already-resolved notify URL and
-// hands the POST to a goroutine.
-func (g *MemoryGateway) notifyEvent(sessionID string, event controlplane.Event, notifyURL string) {
+// signing secret, then hands the POST to a goroutine.
+func (g *MemoryGateway) notifyEvent(sessionID string, event controlplane.Event, notifyURL, notifySecret string) {
 	if strings.TrimSpace(notifyURL) == "" {
 		return
 	}
-	go g.postNotification(sessionID, notifyURL, event)
+	go g.postNotification(sessionID, notifyURL, notifySecret, event)
 }
 
-func (g *MemoryGateway) postNotification(sessionID, rawURL string, event controlplane.Event) {
+func (g *MemoryGateway) postNotification(sessionID, rawURL, secret string, event controlplane.Event) {
 	payload := map[string]any{
 		"schema_version":   notificationSchemaVersion,
 		"session_id":       sessionID,
@@ -72,6 +101,11 @@ func (g *MemoryGateway) postNotification(sessionID, rawURL string, event control
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if secret != "" {
+		// GitLab-style token header: the webhook platform (e.g. Hermes)
+		// verifies it against its configured subscription secret.
+		req.Header.Set("X-Gitlab-Token", secret)
+	}
 	client := &http.Client{Timeout: notifyPostTimeout}
 	resp, err := client.Do(req)
 	if err != nil {

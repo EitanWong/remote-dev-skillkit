@@ -660,7 +660,9 @@ func (s Server) setSessionNotify(w http.ResponseWriter, r *http.Request, session
 		writeControlPlaneError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"session": session})
+	// Snapshot, not the raw session: the signing secret must never leave the
+	// gateway.
+	writeJSON(w, http.StatusOK, map[string]any{"session": session.Snapshot()})
 }
 
 func (s Server) listSessionArtifacts(w http.ResponseWriter, r *http.Request, sessionID string) {
