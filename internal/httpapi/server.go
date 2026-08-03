@@ -767,10 +767,6 @@ func (s Server) persistState(w http.ResponseWriter) bool {
 	return true
 }
 
-func (s Server) persistStateNoResponse() bool {
-	return s.persistStateInternal() == nil
-}
-
 func (s Server) persistStateInternal() error {
 	if s.StateStore == nil {
 		if strings.TrimSpace(s.StatePath) == "" {
