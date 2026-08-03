@@ -393,6 +393,8 @@ func (s Server) callTool(raw json.RawMessage) (result map[string]any, err error)
 		data, err = s.sessionInterrupt(params.Arguments)
 	case "rdev.sessions.artifacts":
 		data, err = s.sessionArtifacts(params.Arguments)
+	case "rdev.sessions.notify":
+		data, err = s.sessionNotify(params.Arguments)
 	case "rdev.sessions.close":
 		data, err = s.sessionClose(params.Arguments)
 	case "rdev.hosts.list":
@@ -730,6 +732,37 @@ func (s Server) sessionArtifacts(args map[string]any) (any, error) {
 		"artifact": artifact,
 		"event":    event,
 		"status":   status,
+	}, status), nil
+}
+
+func (s Server) sessionNotify(args map[string]any) (any, error) {
+	sessionID := requiredString(args, "session_id")
+	action := stringArg(args, "action", "get")
+	notifyURL := strings.TrimSpace(stringArg(args, "notify_url", ""))
+	if action == "set" && notifyURL == "" {
+		return nil, fmt.Errorf("notify_url is required for action=set")
+	}
+	if target := s.effectiveGatewayTarget(args); target.URL != "" {
+		if action == "get" {
+			return s.proxyGETToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID), target.useOperatorToken)
+		}
+		body := map[string]any{"notify_url": notifyURL}
+		return s.proxyPOSTToTarget(target.URL, "/v1/sessions/"+url.PathEscape(sessionID)+"/notify", body, target.useOperatorToken)
+	}
+	switch action {
+	case "set", "clear":
+		if err := s.Gateway.SetSessionNotifyURL(sessionID, notifyURL); err != nil {
+			return nil, err
+		}
+	}
+	session, err := s.Gateway.Session(sessionID)
+	if err != nil {
+		return nil, err
+	}
+	status := session.DeriveStatus()
+	return withSessionStatus(map[string]any{
+		"session_id": sessionID,
+		"notify_url": session.NotifyURL,
 	}, status), nil
 }
 

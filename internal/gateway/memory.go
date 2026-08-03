@@ -38,6 +38,11 @@ type MemoryGateway struct {
 	publicKey    ed25519.PublicKey
 	privateKey   ed25519.PrivateKey
 	trustBundle  model.SignedTrustBundle
+	// notifySecrets: webhook signing secrets by session ID, kept off the
+	// control-plane session so serialization can never leak them. Locked
+	// separately so the store event hook (store lock held) can read it.
+	notifySecretsMu sync.RWMutex
+	notifySecrets   map[string]string
 }
 
 func NewMemoryGateway() *MemoryGateway {
@@ -67,7 +72,7 @@ func NewMemoryGatewayWithSigningKey(now func() time.Time, signingID string, publ
 	if err != nil {
 		panic(fmt.Sprintf("create initial trust bundle: %v", err))
 	}
-	return &MemoryGateway{
+	g := &MemoryGateway{
 		now:          now,
 		sessionStore: controlplane.NewMemoryStore(now),
 		webHandoffs:  map[string]webHandoffState{},
@@ -76,6 +81,8 @@ func NewMemoryGatewayWithSigningKey(now func() time.Time, signingID string, publ
 		privateKey:   append(ed25519.PrivateKey(nil), privateKey...),
 		trustBundle:  trustBundle,
 	}
+	g.sessionStore.SetEventHook(g.notifyEvent)
+	return g
 }
 
 func initialSignedTrustBundle(signingID string, publicKey ed25519.PublicKey, privateKey ed25519.PrivateKey, now time.Time) (model.SignedTrustBundle, error) {

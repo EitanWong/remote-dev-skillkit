@@ -490,7 +490,7 @@ func TestHTTPSessionTaskResultArtifactAndTerminalBehavior(t *testing.T) {
 		t.Fatalf("task response missing routed task event: %#v", taskPayload)
 	}
 
-	artifactRec := postJSON(t, handler, "/v1/sessions/"+url.PathEscape(created.Session.ID)+"/artifacts", `{
+	artifactRec := postJSON(t, handler, "/v1/sessions/"+url.PathEscape(created.Session.ID)+"/artifacts?endpoint_id="+url.QueryEscape(joined.Endpoint.ID), `{
 		"id":"art_1",
 		"task_id":"`+taskPayload.Task.ID+`",
 		"kind":"stdout",

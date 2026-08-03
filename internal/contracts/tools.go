@@ -122,6 +122,17 @@ func Tools() []Tool {
 			}, []string{"session_id"}),
 		},
 		{
+			Name:        "rdev.sessions.notify",
+			Description: "Register, clear, or read the event push webhook for a Control Plane v1 session. When set, the gateway POSTs every session event (host up/down via hello/status, task lifecycle, artifact changes) to notify_url so the Agent can react without polling. Returns notify_url, user_summary, agent_next_action, recoverable, and retry_after_ms.",
+			Safety:      "Registers an operator-scoped HTTPS webhook destination for session events only. Delivery is fire-and-forget; the webhook receives no lease secrets or credentials.",
+			InputSchema: object(map[string]any{
+				"gateway_url": gatewayURL,
+				"session_id":  sessionID,
+				"action":      enum("set", "clear", "get"),
+				"notify_url":  stringField(),
+			}, []string{"session_id", "action"}),
+		},
+		{
 			Name:        "rdev.sessions.close",
 			Description: "Close or revoke a Control Plane v1 session and return final status with user_summary, agent_next_action, recoverable, retry_after_ms, and lifecycle event. action defaults to close; revoke immediately invalidates endpoint leases. Event reads remain available until retention expiry.",
 			Safety:      "Closes or revokes the session control plane only. Does not uninstall software, delete local data, or mutate target OS settings.",
