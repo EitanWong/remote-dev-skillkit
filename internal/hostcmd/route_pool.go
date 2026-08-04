@@ -12,7 +12,7 @@ import (
 	"github.com/EitanWong/remote-dev-skillkit/internal/controlplane"
 )
 
-var errNoHealthyRoutes = errors.New("no healthy gateway routes")
+var errNoHealthyRoutes = errors.New("cannot reach the gateway; check the gateway URL and your network connection")
 
 const (
 	maxGatewayRoutes     = 16

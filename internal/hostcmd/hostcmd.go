@@ -171,8 +171,7 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 		return err
 	}
 	if opts.JoinCode == "" {
-		_, err := fmt.Fprintf(a.Stdout, "rdev-host foreground placeholder\nmode=%s\ngateway=%s\nstatus=not-connected\nnote=provide --gateway and --join-code for a Control Plane session\n", opts.Mode, opts.GatewayURL)
-		return err
+		return fmt.Errorf("--join-code is required; ask the operator (or the Agent) for a session join code, then run: rdev host serve --join-code CODE --gateway URL")
 	}
 	if strings.TrimSpace(opts.GatewayURL) == "" {
 		return fmt.Errorf("gateway is required when --join-code is provided")
