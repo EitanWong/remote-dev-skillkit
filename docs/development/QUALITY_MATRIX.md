@@ -83,9 +83,9 @@ guarantees are required. `notify_url` persists in session snapshots.
 
 All L1/L2 gaps are closed. Remaining items require live infrastructure:
 
-1. `internal/protectedstore` platform backends (keyctl/libsecret/TPM) — L3 on a real Linux desktop with keyring available.
-2. `internal/hostawake` — L3 on real hosts (part of the managed-host E2E runbook).
-3. Windows managed-host E2E regression cadence — every handoff/service change must re-run the live runbook (boot time, sleep/wake, lock screen evidence) before merge.
+1. `internal/protectedstore` platform backends (keyctl/libsecret/TPM) — L3 on a real Linux desktop with keyring available. Container probe (2026-08-04) confirmed `keyctl setperm` and D-Bus/secret-service are unavailable in this environment; the backend code paths themselves are covered by fake-backend tests.
+2. `internal/hostawake` — L3 on real hosts. Linux `systemd-inhibit` acquire/release verified live (2026-08-04); the `Close()` signal-error bug found and fixed (#34).
+3. Windows managed-host E2E — hz-lanlian-rtx4080 (managed, long-poll, `remote.agent.lunflux.com`): live receipt passed 2026-08-04 (Running/Auto/process, boot 2026-08-03T03:21Z); reboot autostart proven 2026-07-31 (boot time changed + Auto + Running + reconnect task receipt). Remaining: lock screen and sleep/wake — scheduled for off-hours because the host is a shared work machine.
 4. Raise floors as coverage grows: workspace 65→70, toolchain/depsinstall 60→65, protectedstore 30→50 after L3.
 
 ## How to add a surface
