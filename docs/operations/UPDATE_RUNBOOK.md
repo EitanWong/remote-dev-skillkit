@@ -78,7 +78,31 @@ a browser handoff for the new session and open it on the target Windows host:
 the bootstrap performs `service install --replace-existing`, which preserves
 identity/trust state and stages the gateway-served (current) connector.
 
-## Building a release bundle
+## Build the release bundle
+
+Use the script, not ad-hoc commands: `scripts/build-release.sh` builds all
+three binaries and **hard-fails if `rdev-host.exe` is not a PE32+ image**.
+
+> Pitfall (observed 2026-08-04): a one-off inline build produced an ELF
+> binary named `rdev-host.exe` because `GOOS` did not apply. On Windows the
+> service cannot start it, so `service update` rolls back forever and the
+> host can end up with the connector service stopped. Always build with
+> `scripts/build-release.sh` and verify `file rdev-host.exe` shows PE32+.
+
+## If a Windows host stops responding after an update attempt
+
+The connector service may have been left stopped (SCM rollback failed or the
+service is stuck). Have the host owner run in an elevated PowerShell:
+
+```powershell
+Get-Service RemoteDevSkillkitHost
+Restart-Service RemoteDevSkillkitHost -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Service -Filter "Name='RemoteDevSkillkitHost'" | Select State, PathName
+```
+
+The service rejoins its session automatically once running (join code is in
+the service config; identity is preserved). After it is back, re-run the
+host-update task to complete the rollout.
 
 ```sh
 git checkout <sha>            # verified commit, must be an ancestor of origin/main
