@@ -313,8 +313,20 @@ func requireLoopbackAddress(addr string) error {
 
 func (a App) printUsage() {
 	_, _ = fmt.Fprintln(a.Stdout, "rdev — session-native remote development toolkit")
-	_, _ = fmt.Fprintln(a.Stdout, "commands: version, doctor, git, mcp, host, gateway, toolchain")
-	_, _ = fmt.Fprintln(a.Stdout, "start with: rdev mcp tools or rdev host serve --help")
+	_, _ = fmt.Fprintln(a.Stdout, "")
+	_, _ = fmt.Fprintln(a.Stdout, "commands:")
+	_, _ = fmt.Fprintln(a.Stdout, "  version    print version and build metadata")
+	_, _ = fmt.Fprintln(a.Stdout, "  doctor     inspect this host's agent capabilities")
+	_, _ = fmt.Fprintln(a.Stdout, "  git        enforce repository git workflow policy (policy check, pr plan)")
+	_, _ = fmt.Fprintln(a.Stdout, "  mcp        list or serve the Agent MCP surface")
+	_, _ = fmt.Fprintln(a.Stdout, "  host       join a Control Plane session as a target host")
+	_, _ = fmt.Fprintln(a.Stdout, "  gateway    serve the Control Plane gateway (loopback dev or operator-managed)")
+	_, _ = fmt.Fprintln(a.Stdout, "  toolchain  plan or install agent toolchains (codex, claude-code)")
+	_, _ = fmt.Fprintln(a.Stdout, "")
+	_, _ = fmt.Fprintln(a.Stdout, "examples:")
+	_, _ = fmt.Fprintln(a.Stdout, "  rdev mcp tools                                list the Agent MCP tools")
+	_, _ = fmt.Fprintln(a.Stdout, "  rdev gateway serve --dev                      start a loopback development gateway")
+	_, _ = fmt.Fprintln(a.Stdout, "  rdev host serve --join-code CODE --gateway URL join a session as a target host")
 }
 
 func (a App) printCommandUsage(command string) {

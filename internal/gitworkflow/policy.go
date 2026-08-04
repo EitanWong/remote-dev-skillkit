@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -206,9 +207,20 @@ func validateImperativeSummary(summary string) error {
 		return fmt.Errorf("summary must start with a lowercase ASCII word")
 	}
 	if _, ok := imperativeSummaryVerbs[first]; !ok {
-		return fmt.Errorf("summary must begin with a project-approved imperative verb")
+		return fmt.Errorf("summary must begin with a project-approved imperative verb (allowed: %s)", strings.Join(imperativeVerbs(), ", "))
 	}
 	return nil
+}
+
+// imperativeVerbs returns the approved imperative verbs in sorted order so
+// policy errors can name the exact accepted vocabulary.
+func imperativeVerbs() []string {
+	verbs := make([]string, 0, len(imperativeSummaryVerbs))
+	for verb := range imperativeSummaryVerbs {
+		verbs = append(verbs, verb)
+	}
+	sort.Strings(verbs)
+	return verbs
 }
 
 func CheckPolicy(ctx context.Context, repo Repo, r Runner, base string) (PolicyReport, error) {
