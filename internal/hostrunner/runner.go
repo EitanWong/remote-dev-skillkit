@@ -44,6 +44,12 @@ type SessionTaskSpec struct {
 	Capabilities        []string
 	Limits              model.TaskLimits
 	Payload             map[string]any
+	// SessionID, LeaseSecret, and GatewayURL are transport context the host
+	// already holds for task fetch/append; adapters such as host-update reuse
+	// them to fetch gateway-served artifacts under the endpoint lease.
+	SessionID   string
+	LeaseSecret string
+	GatewayURL  string
 }
 
 type taskEnvelope struct {
@@ -59,6 +65,9 @@ type taskEnvelope struct {
 	Limits             model.TaskLimits
 	Payload            map[string]any
 	InterruptsRequired []string
+	SessionID          string
+	LeaseSecret        string
+	GatewayURL         string
 }
 
 type taskRef struct {
@@ -72,11 +81,14 @@ type DenialExplanation struct {
 	Code          string `json:"code"`
 	Summary       string `json:"summary"`
 	Detail        string `json:"detail,omitempty"`
-	TaskID        string `json:"task_id,omitempty"`
-	EndpointID    string `json:"endpoint_id,omitempty"`
-	Adapter       string `json:"adapter,omitempty"`
-	Capability    string `json:"capability,omitempty"`
-	Retryable     bool   `json:"retryable"`
+	// Hint is an actionable, agent-directed fix for the denial: the exact
+	// field to add or change so a retry succeeds without trial and error.
+	Hint       string `json:"hint,omitempty"`
+	TaskID     string `json:"task_id,omitempty"`
+	EndpointID string `json:"endpoint_id,omitempty"`
+	Adapter    string `json:"adapter,omitempty"`
+	Capability string `json:"capability,omitempty"`
+	Retryable  bool   `json:"retryable"`
 }
 
 type DenialError struct {
@@ -119,11 +131,12 @@ func RunSessionTaskWithOptionsContext(ctx context.Context, spec SessionTaskSpec,
 			Retryable: true,
 		}, fmt.Errorf("unsupported dev adapter %q", envelope.Adapter))
 	}
-	if envelope.Workspace.Root == "" {
+	if envelope.Workspace.Root == "" && adapterRequiresWorkspace(envelope.Adapter) {
 		return denyTask(ref, denialSpec{
 			Code:      "workspace_required",
 			Summary:   "Workspace root is required for adapter execution.",
 			Detail:    "Host adapters only run inside an explicit workspace root.",
+			Hint:      "Add an absolute workspace_root to the task payload (required for every adapter, e.g. C:\\Users\\Public on Windows).",
 			Adapter:   envelope.Adapter,
 			Retryable: true,
 		}, fmt.Errorf("workspace root is required"))
@@ -133,6 +146,7 @@ func RunSessionTaskWithOptionsContext(ctx context.Context, spec SessionTaskSpec,
 			Code:       "missing_capability",
 			Summary:    fmt.Sprintf("Task is missing the %s capability.", missing),
 			Detail:     fmt.Sprintf("The host requires %s before running the %s adapter.", missing, envelope.Adapter),
+			Hint:       fmt.Sprintf("Add %q to the task-level capabilities list (the session already authorizes it).", missing),
 			Adapter:    envelope.Adapter,
 			Capability: missing,
 			Retryable:  true,
@@ -167,6 +181,7 @@ func RunSessionTaskWithOptionsContext(ctx context.Context, spec SessionTaskSpec,
 			Code:       "missing_capability",
 			Summary:    fmt.Sprintf("Task is missing the %s capability.", missing),
 			Detail:     "Git worktree isolation requires git.diff before host-local Git commands may run.",
+			Hint:       fmt.Sprintf("Add %q to the task-level capabilities list.", missing),
 			Adapter:    envelope.Adapter,
 			Capability: missing,
 			Retryable:  true,
@@ -386,6 +401,9 @@ func sessionTaskEnvelope(spec SessionTaskSpec, now time.Time) taskEnvelope {
 		Limits:             limits,
 		Payload:            cloneMap(spec.Payload),
 		InterruptsRequired: stringSliceValue(spec.Payload, "interrupts_required"),
+		SessionID:          spec.SessionID,
+		LeaseSecret:        spec.LeaseSecret,
+		GatewayURL:         spec.GatewayURL,
 	}
 }
 
@@ -402,10 +420,23 @@ func cloneMap(source map[string]any) map[string]any {
 
 func supportedAdapter(adapter string) bool {
 	switch adapter {
-	case "shell", "powershell", "codex", "claude-code", "acpx", "toolchain", "file", "desktop":
+	case "shell", "powershell", "codex", "claude-code", "acpx", "toolchain", "file", "desktop", "host-update":
 		return true
 	default:
 		return false
+	}
+}
+
+// adapterRequiresWorkspace reports whether the adapter executes inside a
+// workspace root. Control-plane adapters such as host-update operate on the
+// host service itself and must not demand a workspace the operator cannot
+// meaningfully provide.
+func adapterRequiresWorkspace(adapter string) bool {
+	switch adapter {
+	case "host-update":
+		return false
+	default:
+		return true
 	}
 }
 
@@ -446,6 +477,10 @@ func missingAdapterCapability(envelope taskEnvelope) string {
 		}
 	case "file":
 		return missingFileCapability(envelope)
+	case "host-update":
+		if !hasCapability(envelope.Capabilities, "host.update") {
+			return "host.update"
+		}
 	case "desktop":
 		return missingDesktopCapability(envelope)
 	}
@@ -548,7 +583,9 @@ func normalizeAdapterAction(action string) string {
 }
 
 func acquireWorkspaceLock(hostID string, envelope taskEnvelope, opts Options, now time.Time) (func(), error) {
-	if strings.TrimSpace(opts.WorkspaceLockStore) == "" {
+	if strings.TrimSpace(opts.WorkspaceLockStore) == "" || strings.TrimSpace(envelope.Workspace.Root) == "" {
+		// No lock store, or the adapter is workspace-less (e.g. host-update):
+		// there is nothing to serialize.
 		return func() {}, nil
 	}
 	ttl := opts.WorkspaceLockTTL
@@ -689,6 +726,7 @@ type denialSpec struct {
 	Code       string
 	Summary    string
 	Detail     string
+	Hint       string
 	Adapter    string
 	Capability string
 	Retryable  bool
@@ -700,6 +738,7 @@ func denyTask(task taskRef, spec denialSpec, cause error) (Result, error) {
 		Code:          spec.Code,
 		Summary:       spec.Summary,
 		Detail:        spec.Detail,
+		Hint:          spec.Hint,
 		TaskID:        task.TaskID,
 		EndpointID:    task.EndpointID,
 		Adapter:       firstNonEmptyString(spec.Adapter, task.Adapter),
@@ -888,6 +927,7 @@ func shellDenial(err error) (denialSpec, bool) {
 			Code:      "command_not_allowlisted",
 			Summary:   "Shell command is not allowlisted.",
 			Detail:    err.Error(),
+			Hint:      "Add the executable name (e.g. sh, cmd, powershell.exe, pwsh) to payload.allow_commands.",
 			Adapter:   "shell",
 			Retryable: true,
 		}, true
@@ -896,6 +936,7 @@ func shellDenial(err error) (denialSpec, bool) {
 			Code:      "workspace_escape",
 			Summary:   "Requested write scope escapes the workspace root.",
 			Detail:    err.Error(),
+			Hint:      "Keep payload.write_scope inside workspace_root.",
 			Adapter:   "shell",
 			Retryable: true,
 		}, true
@@ -904,6 +945,7 @@ func shellDenial(err error) (denialSpec, bool) {
 			Code:      "workspace_required",
 			Summary:   "Workspace root is required for shell execution.",
 			Detail:    err.Error(),
+			Hint:      "Add an absolute workspace_root to the task payload.",
 			Adapter:   "shell",
 			Retryable: true,
 		}, true
@@ -912,6 +954,7 @@ func shellDenial(err error) (denialSpec, bool) {
 			Code:      "workspace_invalid",
 			Summary:   "Workspace root is invalid.",
 			Detail:    err.Error(),
+			Hint:      "workspace_root must be an absolute path (e.g. C:\\Users\\Public on Windows).",
 			Adapter:   "shell",
 			Retryable: true,
 		}, true
@@ -928,6 +971,7 @@ func powershellDenial(err error) (denialSpec, bool) {
 			Code:      "command_not_allowlisted",
 			Summary:   "PowerShell executable is not allowlisted.",
 			Detail:    err.Error(),
+			Hint:      "Add the PowerShell executable name (powershell.exe or pwsh) to payload.allow_commands; on Windows also set payload.powershell_command to the bare executable name.",
 			Adapter:   "powershell",
 			Retryable: true,
 		}, true
@@ -936,6 +980,7 @@ func powershellDenial(err error) (denialSpec, bool) {
 			Code:      "workspace_escape",
 			Summary:   "Requested write scope escapes the workspace root.",
 			Detail:    err.Error(),
+			Hint:      "Keep payload.write_scope inside workspace_root.",
 			Adapter:   "powershell",
 			Retryable: true,
 		}, true
@@ -944,6 +989,7 @@ func powershellDenial(err error) (denialSpec, bool) {
 			Code:      "workspace_required",
 			Summary:   "Workspace root is required for PowerShell execution.",
 			Detail:    err.Error(),
+			Hint:      "Add an absolute workspace_root to the task payload.",
 			Adapter:   "powershell",
 			Retryable: true,
 		}, true
@@ -952,6 +998,7 @@ func powershellDenial(err error) (denialSpec, bool) {
 			Code:      "workspace_invalid",
 			Summary:   "Workspace root is invalid.",
 			Detail:    err.Error(),
+			Hint:      "workspace_root must be an absolute path (e.g. C:\\Users\\Public on Windows).",
 			Adapter:   "powershell",
 			Retryable: true,
 		}, true

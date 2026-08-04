@@ -225,3 +225,50 @@ func assertDenial(t *testing.T, result Result, err error, code string) {
 		t.Fatalf("expected denial artifact, got %s", result.ArtifactContent)
 	}
 }
+
+// TestPreflightDenialsCarryAgentActionableHints pins the fix for the
+// trial-and-error retry loop observed against a live Windows host: every
+// common preflight denial must tell the Agent exactly which field to add, so
+// a retry succeeds instead of guessing one missing field per round trip.
+func TestPreflightDenialsCarryAgentActionableHints(t *testing.T) {
+	now := time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC)
+	repo := t.TempDir()
+
+	// workspace_required: every adapter needs an absolute workspace_root.
+	noRoot := shellSessionTask(repo, []string{"shell.user"})
+	noRoot.Workspace.Root = ""
+	_, err := RunSessionTaskWithOptionsContext(context.Background(), noRoot, now, Options{})
+	var denial DenialError
+	if !errors.As(err, &denial) {
+		t.Fatalf("expected DenialError, got %T %v", err, err)
+	}
+	if denial.Explanation.Code != "workspace_required" || denial.Explanation.Hint == "" {
+		t.Fatalf("workspace_required denial must carry a hint: %#v", denial.Explanation)
+	}
+
+	// missing_capability: hint names the exact capability to add.
+	noCap := shellSessionTask(repo, nil)
+	_, err = RunSessionTaskWithOptionsContext(context.Background(), noCap, now, Options{})
+	if !errors.As(err, &denial) {
+		t.Fatalf("expected DenialError, got %T %v", err, err)
+	}
+	if denial.Explanation.Code != "missing_capability" || !strings.Contains(denial.Explanation.Hint, "shell.user") {
+		t.Fatalf("missing_capability denial must name the capability in its hint: %#v", denial.Explanation)
+	}
+
+	// command_not_allowlisted: the executable-name hint must cover Windows
+	// PowerShell, whose allowlist additionally needs the bare executable name
+	// (LookPath-resolved full paths fail exact match).
+	for _, mapErr := range []struct {
+		name string
+		fn   func(error) (denialSpec, bool)
+	}{{"shell", shellDenial}, {"powershell", powershellDenial}} {
+		spec, ok := mapErr.fn(errors.New("command \"powershell.exe\" is not allowlisted"))
+		if !ok || spec.Code != "command_not_allowlisted" || spec.Hint == "" {
+			t.Fatalf("%s not-allowlisted denial must carry a hint: %#v ok=%v", mapErr.name, spec, ok)
+		}
+		if mapErr.name == "powershell" && !strings.Contains(spec.Hint, "powershell_command") {
+			t.Fatalf("powershell not-allowlisted hint must mention powershell_command: %#v", spec)
+		}
+	}
+}

@@ -494,8 +494,16 @@ func TestRegistrationCapabilitiesAdvertisesWindowsDesktopSupportOnlyWhenManifest
 		t.Fatalf("registered capabilities = %#v", got)
 	}
 	withoutDesktopGrant := ConstrainCapabilities(detected, []string{"shell.user"}, true)
-	if strings.Join(withoutDesktopGrant, ",") != "shell.user" {
+	if strings.Join(withoutDesktopGrant, ", ") != "shell.user" {
 		t.Fatalf("manifest ceiling did not restrict desktop capabilities: %#v", withoutDesktopGrant)
+	}
+	// The managed-host update capability is advertised on Windows and only
+	// granted when the session ceiling includes it.
+	if !capabilitySet(detected)["host.update"] {
+		t.Fatalf("Windows registration must advertise host.update: %#v", detected)
+	}
+	if constrained := ConstrainCapabilities(detected, []string{"host.update"}, true); strings.Join(constrained, ", ") != "host.update" {
+		t.Fatalf("host.update must be grantable from the ceiling: %#v", constrained)
 	}
 }
 
@@ -1096,7 +1104,7 @@ func TestSessionTaskSpecMapsGitWorktreeFields(t *testing.T) {
 			"isolation":      "git-worktree",
 			"dirty_policy":   "require-clean",
 		},
-	}, "endpoint-worktree", "identity-worktree")
+	}, "endpoint-worktree", "identity-worktree", "ses-worktree", "lease-worktree", "https://gateway.example.test")
 	if spec.Workspace.Root != "/workspace/repo" || spec.Workspace.Branch != "rdev/task-worktree" || spec.Workspace.BaseSHA != "0123456789abcdef0123456789abcdef01234567" || spec.Workspace.Isolation != "git-worktree" || spec.Workspace.DirtyPolicy != "require-clean" {
 		t.Fatalf("session task spec lost Git worktree fields: %#v", spec.Workspace)
 	}
@@ -1113,7 +1121,7 @@ func TestSessionTaskSpecDoesNotInventWriteScopeForReadOnlyTask(t *testing.T) {
 			"workspace_root": ".",
 			"command":        "Get-Location",
 		},
-	}, "endpoint-read-only", "identity-read-only")
+	}, "endpoint-read-only", "identity-read-only", "ses-read-only", "lease-read-only", "https://gateway.example.test")
 	if len(spec.Workspace.WriteScope) != 0 {
 		t.Fatalf("read-only task must not gain an implicit write scope: %#v", spec.Workspace)
 	}

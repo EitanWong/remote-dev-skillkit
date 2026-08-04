@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -112,7 +113,7 @@ func TestEngineeringTaskSchemaPublishesAllBuiltInAdapterProfiles(t *testing.T) {
 	}
 	want := map[string]bool{
 		"shell": true, "powershell": true, "codex": true, "claude-code": true,
-		"acpx": true, "file": true, "desktop": true,
+		"acpx": true, "file": true, "desktop": true, "host-update": true,
 	}
 	for _, profile := range profiles {
 		if !want[profile.Adapter] {
@@ -125,6 +126,54 @@ func TestEngineeringTaskSchemaPublishesAllBuiltInAdapterProfiles(t *testing.T) {
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing adapter profiles %#v", want)
+	}
+}
+
+// TestAdapterProfilesDocumentWorkspaceRequirement guards the agent-facing
+// contract against regressing to the state where a submitted task payload
+// could only be validated through denial round trips: every built-in adapter
+// requires an absolute workspace_root, and examples must show it.
+func TestAdapterProfilesDocumentWorkspaceRequirement(t *testing.T) {
+	for _, profile := range AdapterTaskProfiles() {
+		if profile.Adapter == "host-update" {
+			if profile.WorkspaceRootRequired {
+				t.Fatalf("host-update must declare workspace_root_required=false (control-plane adapter)")
+			}
+			continue
+		}
+		if !profile.WorkspaceRootRequired {
+			t.Fatalf("adapter %s must declare workspace_root_required", profile.Adapter)
+		}
+		example := profile.PayloadExample
+		if _, ok := example["workspace_root"]; !ok {
+			t.Fatalf("adapter %s payload example must include workspace_root: %#v", profile.Adapter, example)
+		}
+	}
+}
+
+// TestPowerShellAdapterProfileDocumentsWindowsExecutableContract pins the
+// Windows allowlist quirk that cost multiple denial round trips: the example
+// must declare the bare executable name in allow_commands AND set
+// powershell_command, or LookPath-resolved full paths fail exact-match
+// allowlisting on the host.
+func TestPowerShellAdapterProfileDocumentsWindowsExecutableContract(t *testing.T) {
+	var profile AdapterTaskProfile
+	for _, p := range AdapterTaskProfiles() {
+		if p.Adapter == "powershell" {
+			profile = p
+			break
+		}
+	}
+	if profile.Adapter == "" {
+		t.Fatal("missing powershell adapter profile")
+	}
+	example := profile.PayloadExample
+	if example["powershell_command"] != "powershell.exe" {
+		t.Fatalf("powershell example must set powershell_command to the bare executable name: %#v", example)
+	}
+	allow, _ := example["allow_commands"].([]string)
+	if !slices.Contains(allow, "powershell.exe") {
+		t.Fatalf("powershell example allow_commands must include powershell.exe: %#v", allow)
 	}
 }
 

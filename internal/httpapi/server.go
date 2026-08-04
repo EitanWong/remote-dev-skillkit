@@ -114,6 +114,7 @@ func (s Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/sessions/", s.sessionRoute)
 	mux.HandleFunc("POST /v1/sessions/", s.sessionRoute)
 
+	mux.HandleFunc("GET /v1/sessions/{id}/artifacts/host-update", s.serveSessionHostUpdateArtifact)
 	mux.HandleFunc("GET /v1/audit", s.listAudit)
 	mux.HandleFunc("GET /v1/hosts", s.listHosts)
 	mux.HandleFunc("POST /v1/hosts/rename", s.renameHost)

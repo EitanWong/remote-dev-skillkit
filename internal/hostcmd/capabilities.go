@@ -36,6 +36,7 @@ func RegistrationCapabilities(inventory hostcap.Inventory) []string {
 			"url.open",
 			"clipboard.read",
 			"clipboard.write",
+			"host.update",
 		)
 	}
 	return capabilities

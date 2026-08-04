@@ -397,6 +397,7 @@
                 "required_capabilities": [
                   "shell.user"
                 ],
+                "workspace_root_required": true,
                 "payload_example": {
                   "allow_commands": [
                     "go"
@@ -405,7 +406,8 @@
                     "go",
                     "test",
                     "./..."
-                  ]
+                  ],
+                  "workspace_root": "C:\\workspace\\repo"
                 }
               },
               {
@@ -414,11 +416,14 @@
                 "required_capabilities": [
                   "powershell.user"
                 ],
+                "workspace_root_required": true,
                 "payload_example": {
                   "allow_commands": [
-                    "dotnet"
+                    "powershell.exe"
                   ],
-                  "command": "dotnet test"
+                  "command": "dotnet test",
+                  "powershell_command": "powershell.exe",
+                  "workspace_root": "C:\\workspace\\repo"
                 }
               },
               {
@@ -428,6 +433,7 @@
                   "codex.run",
                   "git.diff"
                 ],
+                "workspace_root_required": true,
                 "payload_example": {
                   "allow_verification_commands": [
                     "go"
@@ -439,7 +445,8 @@
                       "test",
                       "./..."
                     ]
-                  ]
+                  ],
+                  "workspace_root": "C:\\workspace\\repo"
                 }
               },
               {
@@ -449,6 +456,7 @@
                   "claude-code.run",
                   "git.diff"
                 ],
+                "workspace_root_required": true,
                 "payload_example": {
                   "allow_verification_commands": [
                     "go"
@@ -460,7 +468,8 @@
                       "test",
                       "./..."
                     ]
-                  ]
+                  ],
+                  "workspace_root": "C:\\workspace\\repo"
                 }
               },
               {
@@ -470,6 +479,7 @@
                   "acpx.run",
                   "git.diff"
                 ],
+                "workspace_root_required": true,
                 "payload_example": {
                   "allow_verification_commands": [
                     "go"
@@ -481,7 +491,8 @@
                       "test",
                       "./..."
                     ]
-                  ]
+                  ],
+                  "workspace_root": "C:\\workspace\\repo"
                 }
               },
               {
@@ -490,10 +501,12 @@
                 "required_capabilities": [
                   "file.transfer.read"
                 ],
+                "workspace_root_required": true,
                 "payload_example": {
                   "action": "read",
                   "chunk_bytes": 4096,
-                  "path": "README.md"
+                  "path": "README.md",
+                  "workspace_root": "C:\\workspace\\repo"
                 }
               },
               {
@@ -502,8 +515,21 @@
                 "required_capabilities": [
                   "window.inspect"
                 ],
+                "workspace_root_required": true,
                 "payload_example": {
-                  "action": "window.inspect"
+                  "action": "window.inspect",
+                  "workspace_root": "C:\\workspace\\repo"
+                }
+              },
+              {
+                "adapter": "host-update",
+                "schema_version": "rdev.host-update-result.v1",
+                "required_capabilities": [
+                  "host.update"
+                ],
+                "workspace_root_required": false,
+                "payload_example": {
+                  "expected_sha256": ""
                 }
               }
             ]

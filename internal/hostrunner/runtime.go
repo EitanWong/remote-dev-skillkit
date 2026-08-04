@@ -286,6 +286,12 @@ func executeJobAdapterDirectWithToolchainRoot(ctx context.Context, envelope task
 			MaxOutputBytes:     envelope.Limits.MaxOutputBytes,
 		})
 		return execution.ArtifactContent(), err
+	case "host-update":
+		content, err := executeHostUpdate(ctx, envelope)
+		if err != nil {
+			return "", err
+		}
+		return content, nil
 	default:
 		execution, err := shelladapter.ExecuteContext(ctx, shelladapter.Spec{
 			WorkspaceRoot:      envelope.Workspace.Root,
