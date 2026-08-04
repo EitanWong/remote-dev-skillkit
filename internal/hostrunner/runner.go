@@ -583,7 +583,9 @@ func normalizeAdapterAction(action string) string {
 }
 
 func acquireWorkspaceLock(hostID string, envelope taskEnvelope, opts Options, now time.Time) (func(), error) {
-	if strings.TrimSpace(opts.WorkspaceLockStore) == "" {
+	if strings.TrimSpace(opts.WorkspaceLockStore) == "" || strings.TrimSpace(envelope.Workspace.Root) == "" {
+		// No lock store, or the adapter is workspace-less (e.g. host-update):
+		// there is nothing to serialize.
 		return func() {}, nil
 	}
 	ttl := opts.WorkspaceLockTTL

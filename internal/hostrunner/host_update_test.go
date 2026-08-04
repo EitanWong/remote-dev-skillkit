@@ -54,6 +54,14 @@ func TestHostUpdateAdapterRequiresCapabilityButNotWorkspace(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "host updater is only supported on Windows") {
 		t.Fatalf("expected platform launcher gate error, got %v", err)
 	}
+
+	// A configured workspace lock store must not trip a workspace-less
+	// host-update task: there is no repo root to serialize on.
+	lockStore := filepath.Join(t.TempDir(), "locks")
+	_, err = RunSessionTaskWithOptionsContext(context.Background(), withCapability, now, Options{WorkspaceLockStore: lockStore})
+	if err == nil || !strings.Contains(err.Error(), "host updater is only supported on Windows") {
+		t.Fatalf("workspace lock store must be skipped for host-update, got %v", err)
+	}
 }
 
 // TestExecuteHostUpdateFlow covers the adapter's decision branches: transport
