@@ -79,10 +79,15 @@ type EngineeringTaskLimits struct {
 // AdapterTaskProfile is machine-readable metadata for an existing built-in
 // adapter. It describes the outer routing adapter, not a new MCP tool.
 type AdapterTaskProfile struct {
-	Adapter              string         `json:"adapter"`
-	SchemaVersion        string         `json:"schema_version"`
-	RequiredCapabilities []string       `json:"required_capabilities"`
-	PayloadExample       map[string]any `json:"payload_example"`
+	Adapter              string   `json:"adapter"`
+	SchemaVersion        string   `json:"schema_version"`
+	RequiredCapabilities []string `json:"required_capabilities"`
+	// WorkspaceRootRequired declares the host-runner invariant that every
+	// adapter task payload must carry an absolute workspace_root. It exists so
+	// Agents can validate a payload against the contract before submitting,
+	// instead of discovering the requirement through denial round trips.
+	WorkspaceRootRequired bool           `json:"workspace_root_required"`
+	PayloadExample        map[string]any `json:"payload_example"`
 }
 
 // DecodeEngineeringTask rejects unknown fields before normalizing and
@@ -360,55 +365,63 @@ func cloneCommandMatrix(values [][]string) [][]string {
 func AdapterTaskProfiles() []AdapterTaskProfile {
 	profiles := []AdapterTaskProfile{
 		{
-			Adapter:              "shell",
-			SchemaVersion:        "rdev.shell-result.v1",
-			RequiredCapabilities: []string{"shell.user"},
-			PayloadExample:       map[string]any{"argv": []string{"go", "test", "./..."}, "allow_commands": []string{"go"}},
+			Adapter:               "shell",
+			SchemaVersion:         "rdev.shell-result.v1",
+			RequiredCapabilities:  []string{"shell.user"},
+			WorkspaceRootRequired: true,
+			PayloadExample:        map[string]any{"argv": []string{"go", "test", "./..."}, "allow_commands": []string{"go"}, "workspace_root": "C:\\workspace\\repo"},
 		},
 		{
-			Adapter:              "powershell",
-			SchemaVersion:        "rdev.powershell-result.v1",
-			RequiredCapabilities: []string{"powershell.user"},
-			PayloadExample:       map[string]any{"command": "dotnet test", "allow_commands": []string{"dotnet"}},
+			Adapter:               "powershell",
+			SchemaVersion:         "rdev.powershell-result.v1",
+			RequiredCapabilities:  []string{"powershell.user"},
+			WorkspaceRootRequired: true,
+			PayloadExample:        map[string]any{"command": "dotnet test", "allow_commands": []string{"powershell.exe"}, "powershell_command": "powershell.exe", "workspace_root": "C:\\workspace\\repo"},
 		},
 		{
-			Adapter:              "codex",
-			SchemaVersion:        "rdev.codex-result.v1",
-			RequiredCapabilities: []string{"codex.run", "git.diff"},
-			PayloadExample:       map[string]any{"prompt": "Implement the accepted change.", "verification_commands": [][]string{{"go", "test", "./..."}}, "allow_verification_commands": []string{"go"}},
+			Adapter:               "codex",
+			SchemaVersion:         "rdev.codex-result.v1",
+			RequiredCapabilities:  []string{"codex.run", "git.diff"},
+			WorkspaceRootRequired: true,
+			PayloadExample:        map[string]any{"prompt": "Implement the accepted change.", "verification_commands": [][]string{{"go", "test", "./..."}}, "allow_verification_commands": []string{"go"}, "workspace_root": "C:\\workspace\\repo"},
 		},
 		{
-			Adapter:              "claude-code",
-			SchemaVersion:        "rdev.claude-code-result.v1",
-			RequiredCapabilities: []string{"claude-code.run", "git.diff"},
-			PayloadExample:       map[string]any{"prompt": "Implement the accepted change.", "verification_commands": [][]string{{"go", "test", "./..."}}, "allow_verification_commands": []string{"go"}},
+			Adapter:               "claude-code",
+			SchemaVersion:         "rdev.claude-code-result.v1",
+			RequiredCapabilities:  []string{"claude-code.run", "git.diff"},
+			WorkspaceRootRequired: true,
+			PayloadExample:        map[string]any{"prompt": "Implement the accepted change.", "verification_commands": [][]string{{"go", "test", "./..."}}, "allow_verification_commands": []string{"go"}, "workspace_root": "C:\\workspace\\repo"},
 		},
 		{
-			Adapter:              "acpx",
-			SchemaVersion:        "rdev.acpx-result.v1",
-			RequiredCapabilities: []string{"acpx.run", "git.diff"},
-			PayloadExample:       map[string]any{"prompt": "Implement the accepted change.", "verification_commands": [][]string{{"go", "test", "./..."}}, "allow_verification_commands": []string{"go"}},
+			Adapter:               "acpx",
+			SchemaVersion:         "rdev.acpx-result.v1",
+			RequiredCapabilities:  []string{"acpx.run", "git.diff"},
+			WorkspaceRootRequired: true,
+			PayloadExample:        map[string]any{"prompt": "Implement the accepted change.", "verification_commands": [][]string{{"go", "test", "./..."}}, "allow_verification_commands": []string{"go"}, "workspace_root": "C:\\workspace\\repo"},
 		},
 		{
-			Adapter:              "file",
-			SchemaVersion:        "rdev.file-result.v1",
-			RequiredCapabilities: []string{"file.transfer.read"},
-			PayloadExample:       map[string]any{"action": "read", "path": "README.md", "chunk_bytes": 4096},
+			Adapter:               "file",
+			SchemaVersion:         "rdev.file-result.v1",
+			RequiredCapabilities:  []string{"file.transfer.read"},
+			WorkspaceRootRequired: true,
+			PayloadExample:        map[string]any{"action": "read", "path": "README.md", "chunk_bytes": 4096, "workspace_root": "C:\\workspace\\repo"},
 		},
 		{
-			Adapter:              "desktop",
-			SchemaVersion:        "rdev.desktop-result.v1",
-			RequiredCapabilities: []string{"window.inspect"},
-			PayloadExample:       map[string]any{"action": "window.inspect"},
+			Adapter:               "desktop",
+			SchemaVersion:         "rdev.desktop-result.v1",
+			RequiredCapabilities:  []string{"window.inspect"},
+			WorkspaceRootRequired: true,
+			PayloadExample:        map[string]any{"action": "window.inspect", "workspace_root": "C:\\workspace\\repo"},
 		},
 	}
 	out := make([]AdapterTaskProfile, 0, len(profiles))
 	for _, profile := range profiles {
 		out = append(out, AdapterTaskProfile{
-			Adapter:              profile.Adapter,
-			SchemaVersion:        profile.SchemaVersion,
-			RequiredCapabilities: append([]string(nil), profile.RequiredCapabilities...),
-			PayloadExample:       cloneAnyMap(profile.PayloadExample),
+			Adapter:               profile.Adapter,
+			SchemaVersion:         profile.SchemaVersion,
+			RequiredCapabilities:  append([]string(nil), profile.RequiredCapabilities...),
+			WorkspaceRootRequired: profile.WorkspaceRootRequired,
+			PayloadExample:        cloneAnyMap(profile.PayloadExample),
 		})
 	}
 	return out

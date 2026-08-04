@@ -31,13 +31,13 @@ Status: ✅ covered · 🟡 partial · ❌ gap · ⚙️ live-only (real host/sy
 | `internal/policy` | capability checks, shell allow/deny, scoping, unknown capability handling | 🟡 73.2% |
 | `internal/audit` | chain integrity, JSONL append, redaction of secrets, tamper detection | ✅ 76.5% |
 | `internal/model` | trust bundle validity windows, key status transitions, hash consistency | ✅ 71.7% |
-| `internal/contracts` | tool schema round-trip, required fields, enum constraints, MCP surface parity with `mcp/tools.json` | ✅ 77.6% |
+| `internal/contracts` | tool schema round-trip, required fields, enum constraints, MCP surface parity with `mcp/tools.json`, adapter profiles document `workspace_root_required` + complete payload examples (incl. Windows `powershell_command` allowlist contract) | ✅ 77.6% |
 | `internal/hostidentity` | key generation, fingerprint, validation of malformed keys | 🟡 69.0% |
 | `internal/workspace` | worktree create/cleanup/rollback, lock contention, write-scope enforcement (absolute/`..`/drive-letter paths, escaping symlinks, scope membership), snapshot diffing (change detection, truncation at 200 files, .git exclusion, escaping scopes), dirty policy | ✅ 71.7% |
 | `internal/toolchain` + `internal/depsinstall` | node/toolchain bootstrap, idempotency, failure mid-install, archive security (zip-slip, escaping symlinks, byte limits, HTTPS-only sources + same-host redirects, SHA-256 verify), retry classification and retry loops, atomic copy | ✅ 67–69% — network fetch paths covered with httptest |
 | `internal/hostcmd` | managed service start/stop/retry, route pool concurrency, exit codes | ✅ 75.7% |
 | `internal/gateway` + `internal/controlplane` | session state machine, lease binding, reconnect, revocation, persistence, snapshot/event sequencing | ✅ 80–81% |
-| `internal/hostrunner` | engineering loop, progress, limits (duration/output/attempts), isolation, runtime profiles | ✅ 81.2% |
+| `internal/hostrunner` | engineering loop, progress, limits (duration/output/attempts), isolation, runtime profiles, preflight denials carry agent-actionable `hint` (workspace/capability/allowlist classes) | ✅ 81.2% |
 | `internal/shelladapter` + `internal/powershelladapter` | process groups, redaction, output caps, verification commands | ✅ 68–78% |
 | `internal/hostawake` | wake on LAN / platform wake, error fallback | ⚙️ 15.8% — live-only |
 | `internal/acceptance` | managed Mac/Windows verification reports, session evidence | ⚙️ 7.3% — live E2E harness, exercised on real hosts |
