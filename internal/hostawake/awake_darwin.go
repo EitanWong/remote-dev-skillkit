@@ -24,7 +24,10 @@ func acquire(ctx context.Context) Lease {
 			if cmd.Process != nil {
 				_ = cmd.Process.Kill()
 			}
-			return cmd.Wait()
+			// The process was killed by us; Wait returning "signal: killed"
+			// is the expected outcome, not an error.
+			_ = cmd.Wait()
+			return nil
 		},
 	}
 }
