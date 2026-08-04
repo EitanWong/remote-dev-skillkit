@@ -144,7 +144,41 @@ else
   bad "task round trip failed: $(printf '%s' "${RESULT:-}" | head -c 300)"
 fi
 
-# 6. close
+# 7. error paths a novice will hit -- assert human-readable guidance
+step "exercising novice error paths"
+OUT=""
+OUT="$("$WORK/rdev" bogus 2>&1 || true)"
+if [[ "$OUT" == *"available commands"* ]]; then
+  ok "unknown command names available commands"
+else
+  bad "unknown command error lacks guidance: $(printf '%s' "$OUT" | head -c 120)"
+fi
+OUT="$("$WORK/rdev-host" serve 2>&1 || true)"
+if [[ "$OUT" == *"--join-code is required"* ]]; then
+  ok "missing --join-code explains what to do"
+else
+  bad "missing --join-code error not actionable: $(printf '%s' "$OUT" | head -c 120)"
+fi
+OUT="$(timeout 8 "$WORK/rdev-host" serve --join-code ABCD-1234 --gateway "$GW" 2>&1 || true)"
+if [[ "$OUT" =~ invalid|no\ longer\ active ]]; then
+  ok "bad join code error is human-readable"
+else
+  bad "bad join code error unclear: $(printf '%s' "$OUT" | head -c 120)"
+fi
+OUT="$(timeout 8 "$WORK/rdev-host" serve --join-code ABCD-1234 --gateway 'http://127.0.0.1:9' 2>&1 || true)"
+if [[ "$OUT" == *"cannot reach the gateway"* ]]; then
+  ok "unreachable gateway error is human-readable"
+else
+  bad "unreachable gateway error unclear: $(printf '%s' "$OUT" | head -c 120)"
+fi
+OUT="$("$WORK/rdev" gateway serve --dev --addr "127.0.0.1:${PORT}" 2>&1 || true)"
+if [[ "$OUT" == *"already in use"* || "$OUT" == *"try a different port"* ]]; then
+  ok "port-in-use error suggests an alternative"
+else
+  bad "port-in-use error lacks guidance: $(printf '%s' "$OUT" | head -c 120)"
+fi
+
+# 8. close
 step "closing session"
 if curl -sf -X POST "${GW}/v1/sessions/${SID}/close" -H 'Content-Type: application/json' -d '{"reason":"ux smoke complete"}' >/dev/null 2>&1; then
   ok "session closed"

@@ -46,7 +46,13 @@ func NewJoinSessionResponseError(statusCode int, status string, body []byte, cau
 	message := gatewayErrorMessage(status, body, cause)
 	protocolErr, complete := completeProtocolErrorEnvelope(body)
 	if complete {
-		message = protocolErr.Message
+		// user_summary is the human-readable copy written for operators;
+		// prefer it over the terse protocol message.
+		if strings.TrimSpace(protocolErr.UserSummary) != "" {
+			message = protocolErr.UserSummary
+		} else {
+			message = protocolErr.Message
+		}
 	}
 	joinErr := fmt.Errorf("join session failed: %s", message)
 	if statusCode >= 400 && statusCode <= 499 && complete && !protocolErr.Recoverable {
