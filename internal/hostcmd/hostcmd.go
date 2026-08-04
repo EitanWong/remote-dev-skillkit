@@ -243,10 +243,10 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 
 	enc := json.NewEncoder(a.Stdout)
 	enc.SetIndent("", "  ")
+	writeSessionControlCard(a.Stderr, sessionControlEntry)
 	if opts.Once {
 		return enc.Encode(payload)
 	}
-	writeSessionControlCard(a.Stderr, sessionControlEntry)
 	keepAwake := hostawake.Disabled()
 	if opts.KeepAwake {
 		keepAwake = hostawake.Acquire(ctx)

@@ -15,7 +15,7 @@ const defaultGitWorkflowBase = "main"
 
 func (a App) git(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("missing git subcommand")
+		return fmt.Errorf("missing git subcommand (available: branch, worktree, policy, sync, pr)")
 	}
 	switch args[0] {
 	case "branch":
