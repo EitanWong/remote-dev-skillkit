@@ -13,3 +13,4 @@ scripts/check-coverage.sh
 find scripts -name '*.sh' -print0 | xargs -0 -n1 bash -n
 scripts/audit-public-surface.sh
 scripts/audit-skills.sh
+scripts/ux-smoke.sh
