@@ -2,7 +2,7 @@
 
 [English](README.md)
 
-**面向 Agent 的远程开发工具包。** 让 Claude Code、Codex、Hermes、OpenCode 或任意支持 MCP 的 Agent，在你的 Mac、Windows、Linux 主机上安全地干活 —— 有边界、可审计、可中断。
+**给 AI Agent 用的远程电脑操控工具。** Claude Code、Codex、Hermes、OpenCode 或任意支持 MCP 的 Agent，可以操控你的 Mac、Windows、Linux 主机，帮你完成各种复杂任务 —— 写代码、修故障、跑运维、做自动化，凡是需要一台真实电脑的事。
 
 ```text
 Agent (MCP client) ── rdev mcp serve ──> 控制面 ── long-poll ──> 主机
@@ -11,7 +11,7 @@ Agent (MCP client) ── rdev mcp serve ──> 控制面 ── long-poll ─�
 
 ## 为什么
 
-Agent 有模型、有写代码的能力，但没有一台"能干活的主机"——你也不该给它一把能碰所有东西的钥匙。Remote Dev Skillkit 就是两者之间的受控通道。
+Agent 有模型、有推理能力，但没有一台"能干活的主机"——你也不该给它一把能碰所有东西的钥匙。Remote Dev Skillkit 就是它们之间的受控远程操控层。
 
 - **有边界** —— 主机用短期 join code 加入会话，每个任务受策略与能力上限约束。
 - **可审计、可中断** —— 每个动作都有记录，随时可以中断或撤销。

@@ -2,7 +2,7 @@
 
 [中文](README.zh-CN.md)
 
-**Agent-native remote development.** Let Claude Code, Codex, Hermes, OpenCode, or any MCP-capable agent work on your Mac, Windows, and Linux machines — scoped, audited, interruptible.
+**Remote control for AI agents.** Claude Code, Codex, Hermes, OpenCode — or any MCP-capable agent — operate your Mac, Windows, and Linux machines to get complex work done: coding, repair, ops, automation, anything that needs a real computer.
 
 ```text
 Agent (MCP client) ── rdev mcp serve ──> Control Plane ── long-poll ──> Host
@@ -11,7 +11,7 @@ Agent (MCP client) ── rdev mcp serve ──> Control Plane ── long-poll 
 
 ## Why
 
-Agents have models and code ability — but no machine of their own, and you shouldn't hand them the keys to everything. Remote Dev Skillkit is the controlled channel between them.
+Agents have models and reasoning — but no machine of their own, and you shouldn't hand them the keys to everything. Remote Dev Skillkit is the controlled remote-control layer between them.
 
 - **Scoped sessions** — hosts join with short-lived join codes; every task is bounded by policy and capability ceilings.
 - **Audited & interruptible** — every action is recorded and can be interrupted or revoked at any time.
