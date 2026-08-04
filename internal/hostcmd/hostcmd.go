@@ -219,7 +219,10 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 		return err
 	}
 	opts.CapabilityCeiling = append([]string(nil), session.Capabilities...)
-	opts.CapabilityCeilingSet = true
+	// An empty session ceiling means the operator did not constrain the
+	// session; enforcing an empty set would reject every task. Match the
+	// gateway-side semantics (limited only when the ceiling is non-empty).
+	opts.CapabilityCeilingSet = len(opts.CapabilityCeiling) > 0
 	sessionControlEntry := buildSessionControlEntry(session, endpoint)
 	payload := map[string]any{
 		"mode":      opts.Mode,
