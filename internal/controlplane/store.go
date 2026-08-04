@@ -1121,8 +1121,19 @@ func (s *MemoryStore) err(code ErrorCode, message string, recoverable bool) Prot
 		Message:         message,
 		Recoverable:     recoverable,
 		RetryAfterMS:    500,
-		UserSummary:     message,
+		UserSummary:     defaultUserSummary(code, message),
 		AgentNextAction: defaultAgentNextAction(code),
+	}
+}
+
+// defaultUserSummary returns the human-readable copy for a protocol error.
+// Message is the terse technical text; some codes deserve plain guidance.
+func defaultUserSummary(code ErrorCode, message string) string {
+	switch code {
+	case ErrTerminalSession:
+		return "This session has ended; ask the operator (or the Agent) for a fresh session."
+	default:
+		return message
 	}
 }
 
