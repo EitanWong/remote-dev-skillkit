@@ -13,12 +13,30 @@ Remote Dev Skillkit is a small, session-native control plane for agent-assisted 
 - Event push notifications: register an HTTPS webhook per session (`rdev.sessions.notify`); the gateway POSTs host up/down, task, and artifact events to the Agent without polling
 - Host directory MCP tools: `rdev.hosts.list` and `rdev.hosts.rename`
 
+## Install
+
+Install the latest release from source (Go 1.25+):
+
+```bash
+go install github.com/EitanWong/remote-dev-skillkit/cmd/rdev@latest
+rdev version
+```
+
+Or run from a checkout without installing:
+
+```bash
+go run ./cmd/rdev doctor
+```
+
+Windows target hosts do not need a manual download: the session browser
+handoff fetches and hash-verifies the scoped host binary automatically.
+
 ## Quick start
 
 ```bash
 go test ./...
-go run ./cmd/rdev doctor
-go run ./cmd/rdev mcp tools
+rdev doctor
+rdev mcp tools
 ```
 
 For local development, start a loopback gateway:
