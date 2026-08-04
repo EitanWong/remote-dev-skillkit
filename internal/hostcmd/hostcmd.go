@@ -731,6 +731,11 @@ func (a App) runSessionTaskWithRoutes(ctx context.Context, opts serveOptions, cl
 	if reason != "" {
 		payload["reason"] = reason
 	}
+	if err != nil {
+		_, _ = fmt.Fprintf(a.Stderr, "[rdev] task %s failed: %s\n", task.ID, reason)
+	} else {
+		_, _ = fmt.Fprintf(a.Stderr, "[rdev] task %s completed\n", task.ID)
+	}
 	if result.RuntimeFixtureContent != "" {
 		payload["runtime_fixture_content"] = result.RuntimeFixtureContent
 	}

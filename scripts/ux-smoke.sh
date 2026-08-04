@@ -82,7 +82,7 @@ SID2_JSON="$(curl -sf -X POST "${GW}/v1/sessions" -H 'Content-Type: application/
 SID2="$(printf '%s' "$SID2_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['session']['id'])" 2>/dev/null || true)"
 JOIN2="$(printf '%s' "$SID2_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin)['session']['join_code'])" 2>/dev/null || true)"
 step "starting resident host for task execution"
-"$WORK/rdev-host" serve --join-code "$JOIN2" --gateway "$GW" --name ux-smoke-host --once=false \
+"$WORK/rdev-host" serve --join-code "$JOIN2" --gateway "$GW" --name ux-smoke-host --once=false --max-tasks 0 \
   >"$WORK/host2.json" 2>"$WORK/host2.err" &
 HOSTPID=$!
 cleanup() {
@@ -143,6 +143,28 @@ if [[ -n "$RESULT_OK" ]]; then
 else
   bad "task round trip failed: $(printf '%s' "${RESULT:-}" | head -c 300)"
 fi
+if grep -q '\[rdev\] task .*completed' "$WORK/host2.err"; then
+  ok "host window reports completed tasks"
+else
+  bad "host stderr lacks task completion notice"
+fi
+# submit a deliberately rejected task (missing workspace_root) so the host
+# window must surface the failure notice
+curl -sf -X POST "${GW}/v1/sessions/${SID}/tasks" -H 'Content-Type: application/json' \
+  -d '{"adapter":"shell","idempotency_key":"ux-smoke-denial-'"${PORT}"'","capabilities":["shell.user"],"limits":{"max_duration_seconds":15,"max_output_bytes":1024},"payload":{"argv":["printf","x"],"allow_commands":["printf"]}}' >/dev/null 2>&1 || true
+FAIL_SEEN=""
+for _ in $(seq 1 10); do
+  if grep -q '\[rdev\] task .*failed' "$WORK/host2.err"; then
+    FAIL_SEEN=1
+    break
+  fi
+  sleep 1
+done
+if [[ -n "$FAIL_SEEN" ]]; then
+  ok "host window reports rejected tasks"
+else
+  bad "host stderr lacks task failure notice; tail: $(tail -c 300 "$WORK/host2.err" | tr '\n' ' ')"
+fi
 
 # 7. error paths a novice will hit -- assert human-readable guidance
 step "exercising novice error paths"
@@ -178,12 +200,18 @@ else
   bad "port-in-use error lacks guidance: $(printf '%s' "$OUT" | head -c 120)"
 fi
 
-# 8. close
+# 8. close, then prove the old join code fails with human-readable guidance
 step "closing session"
 if curl -sf -X POST "${GW}/v1/sessions/${SID}/close" -H 'Content-Type: application/json' -d '{"reason":"ux smoke complete"}' >/dev/null 2>&1; then
   ok "session closed"
 else
   bad "session close failed"
+fi
+OUT="$(timeout 8 "$WORK/rdev-host" serve --join-code "$JOIN2" --gateway "$GW" --once 2>&1 || true)"
+if [[ "$OUT" == *"session has ended"* ]]; then
+  ok "closed-session join error is human-readable"
+else
+  bad "closed-session join error unclear: $(printf '%s' "$OUT" | head -c 120)"
 fi
 
 printf '\n[ux-smoke] PASS=%d FAIL=%d\n' "$PASS" "$FAIL"
