@@ -67,8 +67,19 @@ rdev host serve --join-code CODE --gateway http://127.0.0.1:8788 --once
 
 ## 安装
 
-- 单二进制（`rdev` 同时包含 gateway / mcp / host / git 命令；主机侧由 gateway 按平台分发 scoped 二进制）。
-- 所有环境：`go install github.com/EitanWong/remote-dev-skillkit/cmd/rdev@latest`。
+最快（一条命令，自动装 Go，无需管理员）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/EitanWong/remote-dev-skillkit/main/scripts/install.sh | bash
+```
+
+或手动（需要 Go 1.25+）：
+
+```bash
+go install github.com/EitanWong/remote-dev-skillkit/cmd/rdev@latest
+```
+
+Windows 目标主机无需手动下载：浏览器 handoff 会自动获取并校验主机二进制。
 
 ## 排障速查
 
