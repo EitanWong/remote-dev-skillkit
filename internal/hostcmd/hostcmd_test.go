@@ -494,8 +494,16 @@ func TestRegistrationCapabilitiesAdvertisesWindowsDesktopSupportOnlyWhenManifest
 		t.Fatalf("registered capabilities = %#v", got)
 	}
 	withoutDesktopGrant := ConstrainCapabilities(detected, []string{"shell.user"}, true)
-	if strings.Join(withoutDesktopGrant, ",") != "shell.user" {
+	if strings.Join(withoutDesktopGrant, ", ") != "shell.user" {
 		t.Fatalf("manifest ceiling did not restrict desktop capabilities: %#v", withoutDesktopGrant)
+	}
+	// The managed-host update capability is advertised on Windows and only
+	// granted when the session ceiling includes it.
+	if !capabilitySet(detected)["host.update"] {
+		t.Fatalf("Windows registration must advertise host.update: %#v", detected)
+	}
+	if constrained := ConstrainCapabilities(detected, []string{"host.update"}, true); strings.Join(constrained, ", ") != "host.update" {
+		t.Fatalf("host.update must be grantable from the ceiling: %#v", constrained)
 	}
 }
 
