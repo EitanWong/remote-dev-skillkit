@@ -20,6 +20,11 @@ type EndpointSpec struct {
 	RenewAfterMS        int          `json:"renew_after_ms"`
 	RetryAfterMS        int          `json:"retry_after_ms"`
 	PreviousLeaseSecret string       `json:"previous_lease_secret"`
+	// HostVersion and HostCommit report the connector build that joined. The
+	// control plane surfaces them on the endpoint so operators can verify a
+	// remote host update by comparing them against the promoted release.
+	HostVersion string `json:"host_version,omitempty"`
+	HostCommit  string `json:"host_commit,omitempty"`
 }
 
 type EventCursor struct {
@@ -842,6 +847,10 @@ func (s *MemoryStore) joinEndpointLocked(session Session, spec EndpointSpec) (En
 			endpoint.Transport = transport
 			endpoint.State = state
 			endpoint.LastSeenAt = s.now()
+			if spec.HostVersion != "" {
+				endpoint.HostVersion = spec.HostVersion
+				endpoint.HostCommit = spec.HostCommit
+			}
 			session.Status = SessionStatusOnline
 			session = session.WithEndpoint(endpoint, s.now())
 			s.sessions[session.ID] = session
@@ -877,6 +886,8 @@ func (s *MemoryStore) joinEndpointLocked(session Session, spec EndpointSpec) (En
 		Capabilities:        constrainedEndpointCapabilities(session, role, spec.Capabilities, nil),
 		State:               state,
 		Transport:           transport,
+		HostVersion:         spec.HostVersion,
+		HostCommit:          spec.HostCommit,
 		LastSeenAt:          s.now(),
 	}
 	session.Status = SessionStatusOnline

@@ -208,3 +208,10 @@ func (g *MemoryGateway) appendAudit(actor, action, targetID, message string) {
 	defer g.mu.Unlock()
 	g.appendAuditLocked(actor, action, targetID, message)
 }
+
+// AppendAudit records an explicit audit event for transport-layer actions
+// (e.g. endpoint artifact downloads) that are authorized outside the control
+// plane's own mutation methods.
+func (g *MemoryGateway) AppendAudit(actor, action, targetID, message string) {
+	g.appendAudit(actor, action, targetID, message)
+}

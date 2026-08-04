@@ -207,6 +207,8 @@ func (a App) runServe(ctx context.Context, opts serveOptions) error {
 		LeaseTTLMS:          60_000,
 		RenewAfterMS:        20_000,
 		RetryAfterMS:        1_000,
+		HostVersion:         buildinfo.Version,
+		HostCommit:          buildinfo.Commit,
 	}
 	if opts.Transport == "poll" {
 		endpointSpec.Transport = controlplane.TransportPoll
@@ -707,7 +709,7 @@ func (a App) runSessionTaskWithRoutes(ctx context.Context, opts serveOptions, cl
 		err = fmt.Errorf("task capabilities exceed the joined session ceiling")
 	} else {
 		progressReporter := a.engineeringProgressReporter(opts, client, sessionID, endpointID, leaseSecret, task, routes)
-		result, err = hostrunner.RunSessionTaskWithOptionsContext(ctx, sessionTaskSpec(task, endpointID, identityFingerprint), time.Now(), hostrunner.Options{
+		result, err = hostrunner.RunSessionTaskWithOptionsContext(ctx, sessionTaskSpec(task, endpointID, identityFingerprint, sessionID, leaseSecret, opts.GatewayURL), time.Now(), hostrunner.Options{
 			IdentityFingerprint:           identityFingerprint,
 			WorkspaceLockStore:            opts.WorkspaceLockStore,
 			CaptureRuntimeFixture:         opts.CaptureRuntimeFixture,
@@ -825,7 +827,7 @@ func (a App) reportEngineeringProgress(ctx context.Context, opts serveOptions, c
 	}
 }
 
-func sessionTaskSpec(task controlplane.Task, endpointID, identityFingerprint string) hostrunner.SessionTaskSpec {
+func sessionTaskSpec(task controlplane.Task, endpointID, identityFingerprint, sessionID, leaseSecret, gatewayURL string) hostrunner.SessionTaskSpec {
 	payload := cloneStringAnyMap(task.Payload)
 	workspaceRoot := stringValueFromAny(payload["workspace_root"])
 	writeScope := stringSliceFromAny(payload["write_scope"])
@@ -836,6 +838,9 @@ func sessionTaskSpec(task controlplane.Task, endpointID, identityFingerprint str
 		IdentityFingerprint: identityFingerprint,
 		Adapter:             task.Adapter,
 		Intent:              task.Intent,
+		SessionID:           sessionID,
+		LeaseSecret:         leaseSecret,
+		GatewayURL:          gatewayURL,
 		Workspace: model.TaskWorkspace{
 			Root:        workspaceRoot,
 			WriteScope:  writeScope,

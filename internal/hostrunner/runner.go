@@ -44,6 +44,12 @@ type SessionTaskSpec struct {
 	Capabilities        []string
 	Limits              model.TaskLimits
 	Payload             map[string]any
+	// SessionID, LeaseSecret, and GatewayURL are transport context the host
+	// already holds for task fetch/append; adapters such as host-update reuse
+	// them to fetch gateway-served artifacts under the endpoint lease.
+	SessionID   string
+	LeaseSecret string
+	GatewayURL  string
 }
 
 type taskEnvelope struct {
@@ -59,6 +65,9 @@ type taskEnvelope struct {
 	Limits             model.TaskLimits
 	Payload            map[string]any
 	InterruptsRequired []string
+	SessionID          string
+	LeaseSecret        string
+	GatewayURL         string
 }
 
 type taskRef struct {
@@ -122,7 +131,7 @@ func RunSessionTaskWithOptionsContext(ctx context.Context, spec SessionTaskSpec,
 			Retryable: true,
 		}, fmt.Errorf("unsupported dev adapter %q", envelope.Adapter))
 	}
-	if envelope.Workspace.Root == "" {
+	if envelope.Workspace.Root == "" && adapterRequiresWorkspace(envelope.Adapter) {
 		return denyTask(ref, denialSpec{
 			Code:      "workspace_required",
 			Summary:   "Workspace root is required for adapter execution.",
@@ -392,6 +401,9 @@ func sessionTaskEnvelope(spec SessionTaskSpec, now time.Time) taskEnvelope {
 		Limits:             limits,
 		Payload:            cloneMap(spec.Payload),
 		InterruptsRequired: stringSliceValue(spec.Payload, "interrupts_required"),
+		SessionID:          spec.SessionID,
+		LeaseSecret:        spec.LeaseSecret,
+		GatewayURL:         spec.GatewayURL,
 	}
 }
 
@@ -408,10 +420,23 @@ func cloneMap(source map[string]any) map[string]any {
 
 func supportedAdapter(adapter string) bool {
 	switch adapter {
-	case "shell", "powershell", "codex", "claude-code", "acpx", "toolchain", "file", "desktop":
+	case "shell", "powershell", "codex", "claude-code", "acpx", "toolchain", "file", "desktop", "host-update":
 		return true
 	default:
 		return false
+	}
+}
+
+// adapterRequiresWorkspace reports whether the adapter executes inside a
+// workspace root. Control-plane adapters such as host-update operate on the
+// host service itself and must not demand a workspace the operator cannot
+// meaningfully provide.
+func adapterRequiresWorkspace(adapter string) bool {
+	switch adapter {
+	case "host-update":
+		return false
+	default:
+		return true
 	}
 }
 
@@ -452,6 +477,10 @@ func missingAdapterCapability(envelope taskEnvelope) string {
 		}
 	case "file":
 		return missingFileCapability(envelope)
+	case "host-update":
+		if !hasCapability(envelope.Capabilities, "host.update") {
+			return "host.update"
+		}
 	case "desktop":
 		return missingDesktopCapability(envelope)
 	}

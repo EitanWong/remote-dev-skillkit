@@ -113,7 +113,7 @@ func TestEngineeringTaskSchemaPublishesAllBuiltInAdapterProfiles(t *testing.T) {
 	}
 	want := map[string]bool{
 		"shell": true, "powershell": true, "codex": true, "claude-code": true,
-		"acpx": true, "file": true, "desktop": true,
+		"acpx": true, "file": true, "desktop": true, "host-update": true,
 	}
 	for _, profile := range profiles {
 		if !want[profile.Adapter] {
@@ -135,6 +135,12 @@ func TestEngineeringTaskSchemaPublishesAllBuiltInAdapterProfiles(t *testing.T) {
 // requires an absolute workspace_root, and examples must show it.
 func TestAdapterProfilesDocumentWorkspaceRequirement(t *testing.T) {
 	for _, profile := range AdapterTaskProfiles() {
+		if profile.Adapter == "host-update" {
+			if profile.WorkspaceRootRequired {
+				t.Fatalf("host-update must declare workspace_root_required=false (control-plane adapter)")
+			}
+			continue
+		}
 		if !profile.WorkspaceRootRequired {
 			t.Fatalf("adapter %s must declare workspace_root_required", profile.Adapter)
 		}

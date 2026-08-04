@@ -218,6 +218,8 @@ type Endpoint struct {
 	ReceivedSeq         uint64        `json:"received_seq"`
 	ProcessedSeq        uint64        `json:"processed_seq"`
 	LastSeenAt          time.Time     `json:"last_seen_at"`
+	HostVersion         string        `json:"host_version,omitempty"`
+	HostCommit          string        `json:"host_commit,omitempty"`
 }
 
 type LeaseSpec struct {

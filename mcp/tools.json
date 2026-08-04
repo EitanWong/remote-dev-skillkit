@@ -520,6 +520,17 @@
                   "action": "window.inspect",
                   "workspace_root": "C:\\workspace\\repo"
                 }
+              },
+              {
+                "adapter": "host-update",
+                "schema_version": "rdev.host-update-result.v1",
+                "required_capabilities": [
+                  "host.update"
+                ],
+                "workspace_root_required": false,
+                "payload_example": {
+                  "expected_sha256": ""
+                }
               }
             ]
           },

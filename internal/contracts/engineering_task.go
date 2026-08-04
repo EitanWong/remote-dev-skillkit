@@ -413,6 +413,13 @@ func AdapterTaskProfiles() []AdapterTaskProfile {
 			WorkspaceRootRequired: true,
 			PayloadExample:        map[string]any{"action": "window.inspect", "workspace_root": "C:\\workspace\\repo"},
 		},
+		{
+			Adapter:               "host-update",
+			SchemaVersion:         "rdev.host-update-result.v1",
+			RequiredCapabilities:  []string{"host.update"},
+			WorkspaceRootRequired: false,
+			PayloadExample:        map[string]any{"expected_sha256": ""},
+		},
 	}
 	out := make([]AdapterTaskProfile, 0, len(profiles))
 	for _, profile := range profiles {
