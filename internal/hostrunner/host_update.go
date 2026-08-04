@@ -20,7 +20,21 @@ const (
 	hostUpdateResultSchema = "rdev.host-update-result.v1"
 	hostUpdateBinaryName   = "rdev-host.exe"
 	hostUpdateMaxBytes     = 128 << 20
+	hostUpdateDownloadTime = 5 * time.Minute
 )
+
+// hostUpdateHTTPClient fetches the connector artifact over HTTP/1.1 without
+// environment proxies, mirroring the web-handoff bootstrap path verified
+// against the production gateway, with a generous download window for slow
+// operator links.
+var hostUpdateHTTPClient = &http.Client{
+	Timeout: hostUpdateDownloadTime,
+	Transport: &http.Transport{
+		Proxy:              nil,
+		ForceAttemptHTTP2:  false,
+		DisableCompression: false,
+	},
+}
 
 // executeHostUpdate implements the host-update adapter. It fetches the host
 // connector artifact the session gateway currently serves (authorized by the
@@ -75,7 +89,7 @@ func fetchHostUpdateArtifact(ctx context.Context, url, endpointID, leaseSecret s
 	}
 	request.Header.Set("Authorization", "Bearer "+leaseSecret)
 	request.Header.Set(hostUpdateEndpointIDHeader, endpointID)
-	response, err := http.DefaultClient.Do(request)
+	response, err := hostUpdateHTTPClient.Do(request)
 	if err != nil {
 		return hostUpdateArtifact{}, fmt.Errorf("fetch host update artifact: %w", err)
 	}
