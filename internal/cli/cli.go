@@ -78,7 +78,7 @@ func (a App) version(args []string) error {
 	if *jsonOut {
 		return writeJSON(a.Stdout, info)
 	}
-	_, err := fmt.Fprintf(a.Stdout, "%s %s\n", buildinfo.Name, buildinfo.Version)
+	_, err := fmt.Fprintf(a.Stdout, "%s %s (commit %s, built %s)\n", buildinfo.Name, buildinfo.Version, buildinfo.Commit, buildinfo.BuildTime)
 	return err
 }
 
@@ -119,7 +119,7 @@ func runtimeInfo() map[string]any {
 
 func (a App) mcp(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("missing mcp subcommand")
+		return fmt.Errorf("missing mcp subcommand (available: tools, serve)")
 	}
 	switch args[0] {
 	case "tools":
@@ -174,7 +174,7 @@ func readProtectedTokenFile(path string) (string, error) {
 
 func (a App) gateway(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("missing gateway subcommand")
+		return fmt.Errorf("missing gateway subcommand (available: serve)")
 	}
 	if args[0] != "serve" {
 		return fmt.Errorf("unknown gateway subcommand %q", args[0])
@@ -209,7 +209,7 @@ func (a App) gateway(ctx context.Context, args []string) error {
 	}
 	listener, err := net.Listen("tcp", *addr)
 	if err != nil {
-		return err
+		return fmt.Errorf("cannot listen on %s (is another gateway or service already running?): %w; try a different port with --addr, e.g. 127.0.0.1:8789", *addr, err)
 	}
 	defer listener.Close()
 

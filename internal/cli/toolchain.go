@@ -16,7 +16,7 @@ import (
 
 func (a App) toolchain(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("missing toolchain subcommand")
+		return fmt.Errorf("missing toolchain subcommand (available: plan, ensure)")
 	}
 	command := strings.TrimSpace(args[0])
 	if command != "plan" && command != "ensure" {
