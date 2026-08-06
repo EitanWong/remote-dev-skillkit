@@ -677,6 +677,11 @@ pollLoop:
 				continue
 			}
 			foundTask = true
+			// Accept = advance the cursor. Execution outcome is reported
+			// separately and idempotently; the gateway task watchdog fails a
+			// task whose result never arrives (max_duration + grace), so a
+			// crashed or wedged execution can never replay this offer forever.
+			afterSeq = event.Seq
 			if err := a.runSessionTaskWithRoutes(ctx, opts, client, sessionID, endpointID, identityFingerprint, leaseSecret, task, routes); err != nil {
 				if isTransientGatewayResponseError(err) {
 					// Transient gateway failure: keep the current behavior and
@@ -688,11 +693,8 @@ pollLoop:
 				// cursor the host replays this offer forever and every later
 				// task starves. Log, advance, and continue.
 				_, _ = fmt.Fprintf(a.Stderr, "[rdev] task %s not completable; advancing past it: %v\n", task.ID, err)
-				afterSeq = event.Seq
-				processed++
 				continue pollLoop
 			}
-			afterSeq = event.Seq
 			processed++
 			if processed >= maxTasks {
 				return processed, nil
