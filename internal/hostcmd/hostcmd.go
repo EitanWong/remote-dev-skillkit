@@ -678,7 +678,19 @@ pollLoop:
 			}
 			foundTask = true
 			if err := a.runSessionTaskWithRoutes(ctx, opts, client, sessionID, endpointID, identityFingerprint, leaseSecret, task, routes); err != nil {
-				return processed, err
+				if isTransientGatewayResponseError(err) {
+					// Transient gateway failure: keep the current behavior and
+					// retry the poll so the task is not silently abandoned.
+					return processed, err
+				}
+				// A task that cannot complete (denial loop, oversized result,
+				// adapter crash) must not wedge the queue: without advancing the
+				// cursor the host replays this offer forever and every later
+				// task starves. Log, advance, and continue.
+				_, _ = fmt.Fprintf(a.Stderr, "[rdev] task %s not completable; advancing past it: %v\n", task.ID, err)
+				afterSeq = event.Seq
+				processed++
+				continue pollLoop
 			}
 			afterSeq = event.Seq
 			processed++

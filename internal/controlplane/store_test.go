@@ -542,6 +542,62 @@ func TestCompleteTaskIsIdempotentForAttemptAndKey(t *testing.T) {
 	}
 }
 
+func TestCompleteTaskTruncatesOversizedResult(t *testing.T) {
+	store, _ := newStoreHarness()
+	session := mustStoreSession(t, store, SessionSpec{
+		JoinPolicy: "single-target",
+		Limits: Limits{
+			EventPayloadBytes:      16384,
+			InlineTaskSummaryBytes: 8192,
+			EventBatch:             10,
+		},
+	})
+	_, _, _, err := store.JoinSession(session.ID, EndpointSpec{
+		Role:                EndpointRoleTarget,
+		Name:                "winbox",
+		Platform:            "windows/amd64",
+		IdentityFingerprint: "fp-winbox",
+		Capabilities:        []string{"shell", "fs"},
+		Transport:           TransportLongPoll,
+	})
+	if err != nil {
+		t.Fatalf("JoinSession() error = %v", err)
+	}
+	task, _, err := store.SubmitTask(session.ID, TaskSpec{Adapter: "shell", Capabilities: []string{"shell"}, IdempotencyKey: "oversized-result"})
+	if err != nil {
+		t.Fatalf("SubmitTask() error = %v", err)
+	}
+	task, err = store.MarkTaskRunning(session.ID, task.ID)
+	if err != nil {
+		t.Fatalf("MarkTaskRunning() error = %v", err)
+	}
+
+	bigOutput := strings.Repeat("x", 20*1024)
+	completed, event, err := store.CompleteTask(session.ID, task.ID, map[string]any{
+		"attempt_id":       task.AttemptID,
+		"idempotency_key":  "result-big",
+		"status":           "succeeded",
+		"artifact_content": bigOutput,
+	})
+	if err != nil {
+		t.Fatalf("CompleteTask() with oversized result should truncate instead of rejecting: %v", err)
+	}
+	if completed.Status != TaskStatusSucceeded {
+		t.Fatalf("task should succeed: %#v", completed)
+	}
+	size, sizeErr := jsonPayloadSize(event.Payload)
+	if sizeErr != nil || size > 8192 {
+		t.Fatalf("inline result event payload %d bytes exceeds the %d-byte summary budget", size, 8192)
+	}
+	if event.Payload["output_truncated"] != true {
+		t.Fatalf("truncation marker missing from payload: %#v", event.Payload)
+	}
+	content, _ := event.Payload["artifact_content"].(string)
+	if content == bigOutput || !strings.HasSuffix(content, strings.Repeat("x", 4*1024)) {
+		t.Fatalf("artifact_content should keep the tail of the output")
+	}
+}
+
 func TestUpsertArtifactResumesOffsetAndVerifiesHash(t *testing.T) {
 	store, _ := newStoreHarness()
 	session, _, _ := mustJoinedTarget(t, store)

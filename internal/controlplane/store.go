@@ -661,12 +661,24 @@ func (s *MemoryStore) CompleteTask(sessionID, taskID string, result map[string]a
 	if err != nil {
 		return Task{}, Event{}, err
 	}
+	payload := cloneMap(result)
+	// A result event that exceeds the event payload cap would be rejected by
+	// appendEventLocked below; the host then retries the post forever and the
+	// task cursor never advances, wedging every later task in the session.
+	// Truncate the inline summary to the session's inline-result budget so the
+	// result always completes. Full output remains available through the
+	// host's artifact path.
+	if inline := session.Limits.InlineTaskSummaryBytes; inline > 0 {
+		if size, sizeErr := jsonPayloadSize(payload); sizeErr == nil && size > inline {
+			payload = truncateResultPayload(payload, inline)
+		}
+	}
 	event, err := s.appendEventLocked(sessionID, Event{
 		Type:           EventTypeTaskResult,
 		FromEndpointID: completed.TargetEndpointID,
 		TaskID:         completed.ID,
 		IdempotencyKey: "result:" + taskID + ":" + attemptID + ":" + idempotencyKey,
-		Payload:        cloneMap(result),
+		Payload:        payload,
 	}, true)
 	if err != nil {
 		return Task{}, Event{}, err
@@ -1310,6 +1322,44 @@ func jsonPayloadSize(payload map[string]any) (int, error) {
 		return 0, err
 	}
 	return len(content), nil
+}
+
+// truncateResultPayload shrinks an oversized task result to the inline
+// summary budget so the result event always completes. It keeps the
+// result-critical fields, truncates long strings to their tail, and marks
+// the truncation. If the payload still exceeds the budget, it falls back to
+// a minimal envelope so a poison result can never wedge a session queue.
+func truncateResultPayload(payload map[string]any, budget int) map[string]any {
+	const maxStringField = 8 * 1024
+	const tailKeep = 4 * 1024
+	truncated := false
+	out := make(map[string]any, len(payload))
+	for key, value := range payload {
+		text, ok := value.(string)
+		if !ok {
+			out[key] = value
+			continue
+		}
+		if len(text) <= maxStringField {
+			out[key] = text
+			continue
+		}
+		out[key] = "…" + text[len(text)-tailKeep:]
+		truncated = true
+	}
+	if truncated {
+		out["output_truncated"] = true
+	}
+	if size, err := jsonPayloadSize(out); err == nil && size <= budget {
+		return out
+	}
+	fallback := map[string]any{"output_truncated": true}
+	for _, key := range []string{"status", "attempt_id", "idempotency_key", "reason"} {
+		if value, ok := payload[key]; ok {
+			fallback[key] = value
+		}
+	}
+	return fallback
 }
 
 func stringMapValue(values map[string]any, key string) string {
