@@ -168,6 +168,7 @@ func (s *MemoryStore) Session(sessionID string) (Session, error) {
 	defer s.mu.Unlock()
 
 	s.expireSessionLocked(sessionID)
+	s.sweepExpiredTasksLocked(sessionID)
 	session, ok := s.sessions[sessionID]
 	if !ok {
 		return Session{}, s.err(ErrInvalidJoinCode, "session not found", false)
@@ -312,6 +313,8 @@ func (s *MemoryStore) EventsAfter(sessionID string, cursor EventCursor, limit in
 	if !ok {
 		return nil, Lease{}, EventReplayState{}, s.err(ErrInvalidJoinCode, "session not found", false)
 	}
+	s.sweepExpiredTasksLocked(sessionID)
+	session = s.sessions[sessionID]
 	replay := EventReplayState{
 		SnapshotSeq:  session.SnapshotSeq,
 		LastSeq:      session.LastSeq,
@@ -412,6 +415,7 @@ func (s *MemoryStore) EventsAfterForAgent(sessionID string, afterSeq uint64, lim
 	defer s.mu.Unlock()
 
 	s.expireSessionLocked(sessionID)
+	s.sweepExpiredTasksLocked(sessionID)
 	session, ok := s.sessions[sessionID]
 	if !ok {
 		return nil, EventReplayState{}, s.err(ErrInvalidJoinCode, "session not found", false)
@@ -620,6 +624,7 @@ func (s *MemoryStore) CompleteTask(sessionID, taskID string, result map[string]a
 		s.expireSessionLocked(sessionID)
 		return Task{}, Event{}, s.err(ErrTerminalSession, "session is expired", false)
 	}
+	s.sweepExpiredTasksLocked(sessionID)
 
 	task, index, session, err := s.findTaskLocked(sessionID, taskID)
 	if err != nil {
@@ -1206,6 +1211,87 @@ func eventVisibleToEndpoint(event Event, endpoint Endpoint) bool {
 		return true
 	}
 	return event.ToEndpointID == "" || event.ToEndpointID == endpoint.ID
+}
+
+// taskTimeoutGrace gives a host a bounded window to deliver a result after
+// the task deadline; results arriving inside the grace are accepted.
+const taskTimeoutGrace = 30 * time.Second
+
+func taskLimitSeconds(task Task, key string) (int, bool) {
+	raw, ok := task.Limits[key]
+	if !ok {
+		return 0, false
+	}
+	switch v := raw.(type) {
+	case float64:
+		return int(v), true
+	case int:
+		return v, true
+	case int64:
+		return int(v), true
+	}
+	return 0, false
+}
+
+// taskDeadline returns the absolute deadline for a task: started (or
+// created) time plus its configured max_duration_seconds plus the result
+// grace window.
+func taskDeadline(task Task, grace time.Duration) (time.Time, bool) {
+	base := task.CreatedAt
+	if task.StartedAt != nil {
+		base = *task.StartedAt
+	}
+	seconds, ok := taskLimitSeconds(task, "max_duration_seconds")
+	if !ok {
+		seconds = 3600
+	}
+	return base.Add(time.Duration(seconds)*time.Second + grace), true
+}
+
+// sweepExpiredTasksLocked fails non-terminal tasks whose deadline passed
+// without a result. It runs lazily from session access paths so a wedged or
+// disappeared host can never leave a task "offered forever" and block the
+// queue; the agent receives a typed timeout result instead.
+func (s *MemoryStore) sweepExpiredTasksLocked(sessionID string) {
+	session, ok := s.sessions[sessionID]
+	if !ok || sessionTerminal(session.Status) {
+		return
+	}
+	now := s.now()
+	changed := false
+	for index, task := range session.Tasks {
+		if task.Terminal() {
+			continue
+		}
+		deadline, ok := taskDeadline(task, taskTimeoutGrace)
+		if !ok || now.Before(deadline) {
+			continue
+		}
+		failed, err := task.Transition(TaskStatusFailed, now)
+		if err != nil {
+			continue
+		}
+		_, _ = s.appendEventLocked(sessionID, Event{
+			Type:           EventTypeTaskResult,
+			FromEndpointID: "gateway.lifecycle",
+			TaskID:         task.ID,
+			IdempotencyKey: fmt.Sprintf("timeout:%s:%s", task.ID, task.AttemptID),
+			Payload: map[string]any{
+				"status":          string(TaskStatusFailed),
+				"attempt_id":      task.AttemptID,
+				"idempotency_key": fmt.Sprintf("task-timeout-%s", task.ID),
+				"reason":          "task exceeded max_duration_seconds without a result",
+				"task_timeout":    true,
+				"retryable":       true,
+			},
+		}, true)
+		session.Tasks[index] = failed
+		changed = true
+	}
+	if changed {
+		session.UpdatedAt = now
+		s.sessions[sessionID] = session
+	}
 }
 
 func endpointOnlineState(state EndpointState) bool {

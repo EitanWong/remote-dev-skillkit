@@ -598,6 +598,61 @@ func TestCompleteTaskTruncatesOversizedResult(t *testing.T) {
 	}
 }
 
+func TestSweepFailsTaskPastDeadlineWithoutResult(t *testing.T) {
+	store, clock := newStoreHarness()
+	session, _, _ := mustJoinedTarget(t, store)
+	task, _, err := store.SubmitTask(session.ID, TaskSpec{
+		Adapter:        "shell",
+		Capabilities:   []string{"shell"},
+		IdempotencyKey: "timeout-base",
+		Limits:         map[string]any{"max_duration_seconds": 5},
+	})
+	if err != nil {
+		t.Fatalf("SubmitTask() error = %v", err)
+	}
+
+	// Well past 5s duration + 30s result grace.
+	clock.advance(60 * time.Second)
+
+	snapshot, err := store.Session(session.ID)
+	if err != nil {
+		t.Fatalf("Session() error = %v", err)
+	}
+	var swept *Task
+	for i := range snapshot.Tasks {
+		if snapshot.Tasks[i].ID == task.ID {
+			swept = &snapshot.Tasks[i]
+			break
+		}
+	}
+	if swept == nil {
+		t.Fatal("task not found in snapshot")
+	}
+	if swept.Status != TaskStatusFailed {
+		t.Fatalf("expired task should be failed by the watchdog, got %s", swept.Status)
+	}
+	if swept.EndedAt == nil {
+		t.Fatal("expired task should record an end time")
+	}
+
+	events, _, err := store.EventsAfterForAgent(session.ID, 0, 10)
+	if err != nil {
+		t.Fatalf("EventsAfterForAgent() error = %v", err)
+	}
+	timeoutEvents := 0
+	for _, event := range events {
+		if event.Type != EventTypeTaskResult || event.TaskID != task.ID {
+			continue
+		}
+		if event.Payload["task_timeout"] == true {
+			timeoutEvents++
+		}
+	}
+	if timeoutEvents != 1 {
+		t.Fatalf("expected exactly one typed timeout result event, got %d", timeoutEvents)
+	}
+}
+
 func TestUpsertArtifactResumesOffsetAndVerifiesHash(t *testing.T) {
 	store, _ := newStoreHarness()
 	session, _, _ := mustJoinedTarget(t, store)

@@ -699,7 +699,7 @@ func validTaskTransition(from, to TaskStatus) bool {
 	case TaskStatusQueued:
 		return to == TaskStatusOffered || to == TaskStatusCanceled
 	case TaskStatusOffered:
-		return to == TaskStatusRunning || to == TaskStatusCanceled
+		return to == TaskStatusRunning || to == TaskStatusFailed || to == TaskStatusCanceled
 	case TaskStatusRunning:
 		return to == TaskStatusPaused || to == TaskStatusSucceeded || to == TaskStatusFailed || to == TaskStatusCanceled
 	case TaskStatusPaused:
