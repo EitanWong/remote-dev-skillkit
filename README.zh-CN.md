@@ -65,6 +65,7 @@ curl -fsSL https://raw.githubusercontent.com/EitanWong/remote-dev-skillkit/main/
 - 质量矩阵（live E2E 状态）：[QUALITY_MATRIX.md](docs/development/QUALITY_MATRIX.md)
 - 主机更新手册：[UPDATE_RUNBOOK.md](docs/operations/UPDATE_RUNBOOK.md)
 - 质量门禁：`./scripts/check.sh`
+- DeepSeek Harness 集成：[integrations/deepseek-harness](integrations/deepseek-harness/README.zh-CN.md)
 
 ## 许可证
 

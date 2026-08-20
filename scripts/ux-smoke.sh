@@ -41,9 +41,10 @@ step "starting gateway on ${GW}"
 "$WORK/rdev" gateway serve --dev --addr "127.0.0.1:${PORT}" >"$WORK/gw.json" 2>"$WORK/gw.err" &
 GWPID=$!
 for _ in $(seq 1 40); do
-  curl -sf "${GW}/health" >/dev/null 2>&1 && break
+  curl -sf "${GW}/v1/hosts" >/dev/null 2>&1 && break
   sleep 0.25
 done
+curl -sf "${GW}/v1/hosts" >/dev/null || { bad "gateway API did not become ready"; exit 1; }
 if python3 -c "import json,sys; d=json.load(open('$WORK/gw.json')); assert d.get('schema_version')=='rdev.gateway-ready.v2', d; assert d.get('url')=='$GW', d" 2>"$WORK/gwcheck.err"; then
   ok "gateway ready JSON parseable (rdev.gateway-ready.v2)"
 else
