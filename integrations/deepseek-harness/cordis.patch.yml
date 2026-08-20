@@ -1,0 +1,17 @@
+- insert:
+    - id: rdev
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: rdev
+        transport: stdio
+        command: !!js >-
+          process.env.RDEV_BIN?.trim() || ((candidate) => process.getBuiltinModule('node:fs').existsSync(candidate) ? candidate : 'rdev')(process.getBuiltinModule('node:path').join(process.getBuiltinModule('node:os').homedir(), '.local', 'bin', process.platform === 'win32' ? 'rdev.exe' : 'rdev'))
+        args: !!js >-
+          ['mcp', 'serve'].concat(process.env.RDEV_GATEWAY_URL?.trim() ? ['--gateway-url', process.env.RDEV_GATEWAY_URL.trim()].concat(process.env.RDEV_GATEWAY_OPERATOR_TOKEN_FILE?.trim() ? ['--operator-token-file', process.env.RDEV_GATEWAY_OPERATOR_TOKEN_FILE.trim()] : []) : [])
+        failOnStartupError: true
+        toolCallTimeoutMs: 60000
+        reconnect:
+          enabled: true
+          initialDelayMs: 500
+          maxDelayMs: 10000
+          maxAttempts: 8

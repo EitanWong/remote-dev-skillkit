@@ -1,0 +1,10 @@
+{
+  "name": "rdev-deepseek-harness",
+  "version": "0.1.0-rc.1",
+  "description": "Remote Dev Skillkit MCP tools for DeepSeek Harness",
+  "license": "MIT",
+  "private": true,
+  "files": ["cordis.patch.yml", "README.md", "README.zh-CN.md"],
+  "engines": { "node": "^22.19.0 || >=24.0.0" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

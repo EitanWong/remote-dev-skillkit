@@ -65,6 +65,7 @@ Manual install requires Go 1.25+. Windows target hosts need no manual download â
 - Quality matrix (live E2E status): [QUALITY_MATRIX.md](docs/development/QUALITY_MATRIX.md)
 - Host update runbook: [UPDATE_RUNBOOK.md](docs/operations/UPDATE_RUNBOOK.md)
 - Quality gate: `./scripts/check.sh`
+- DeepSeek Harness integration: [integrations/deepseek-harness](integrations/deepseek-harness/README.md)
 
 ## License
 
