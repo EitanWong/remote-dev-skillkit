@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bufio"
 	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
@@ -38,12 +39,7 @@ func (g *MemoryGateway) SaveSnapshot(path string) (Snapshot, error) {
 		return Snapshot{}, fmt.Errorf("snapshot path is required")
 	}
 	snapshot := g.Snapshot()
-	content, err := json.MarshalIndent(snapshot, "", "  ")
-	if err != nil {
-		return Snapshot{}, err
-	}
-	content = append(content, '\n')
-	if err := writeSnapshotFile(path, content); err != nil {
+	if err := writeSnapshotFile(path, snapshot); err != nil {
 		return Snapshot{}, err
 	}
 	return snapshot, nil
@@ -154,7 +150,7 @@ func (g *MemoryGateway) validateSnapshot(snapshot Snapshot) error {
 	return nil
 }
 
-func writeSnapshotFile(path string, content []byte) error {
+func writeSnapshotFile(path string, snapshot Snapshot) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return err
@@ -169,7 +165,56 @@ func writeSnapshotFile(path string, content []byte) error {
 	}
 	tmpPath := tmp.Name()
 	defer func() { _ = os.Remove(tmpPath) }()
-	if _, err := tmp.Write(content); err != nil {
+	w := bufio.NewWriter(tmp)
+	enc := json.NewEncoder(w)
+	w.WriteByte('{')
+	for i, field := range []struct {
+		name  string
+		value any
+	}{
+		{"schema_version", snapshot.SchemaVersion},
+		{"generated_at", snapshot.GeneratedAt},
+		{"trust_bundle", snapshot.TrustBundle},
+		{"control_plane", snapshot.ControlPlane},
+	} {
+		if i > 0 {
+			w.WriteByte(',')
+		}
+		fmt.Fprintf(w, "%q:", field.name)
+		if err := enc.Encode(field.value); err != nil {
+			_ = tmp.Close()
+			return err
+		}
+	}
+	w.WriteString(",\"audit\":")
+	// Encoder buffers one value at a time; splitting the audit array bounds that buffer.
+	if snapshot.Audit == nil {
+		if err := enc.Encode(nil); err != nil {
+			_ = tmp.Close()
+			return err
+		}
+	} else {
+		w.WriteByte('[')
+		for i, event := range snapshot.Audit {
+			if i > 0 {
+				w.WriteByte(',')
+			}
+			if err := enc.Encode(event); err != nil {
+				_ = tmp.Close()
+				return err
+			}
+		}
+		w.WriteByte(']')
+	}
+	if len(snapshot.NotifySecrets) > 0 {
+		w.WriteString(",\"notify_secrets\":")
+		if err := enc.Encode(snapshot.NotifySecrets); err != nil {
+			_ = tmp.Close()
+			return err
+		}
+	}
+	w.WriteString("}\n")
+	if err := w.Flush(); err != nil {
 		_ = tmp.Close()
 		return err
 	}
