@@ -989,8 +989,24 @@ func selectedGatewayURLFromEvent(event Event) string {
 	return ""
 }
 
+func pruneExpiredLeaseSecrets(record leaseRecord, now time.Time) leaseRecord {
+	for _, graceUntil := range record.PreviousSecrets {
+		if now.After(graceUntil) {
+			active := make(map[string]time.Time)
+			for secret, until := range record.PreviousSecrets {
+				if !now.After(until) {
+					active[secret] = until
+				}
+			}
+			record.PreviousSecrets = active
+			break
+		}
+	}
+	return record
+}
+
 func (s *MemoryStore) issueLeaseLocked(session Session, endpoint Endpoint, ttlMS, renewAfterMS, retryAfterMS int) Lease {
-	record := s.leases[endpoint.ID]
+	record := pruneExpiredLeaseSecrets(s.leases[endpoint.ID], s.now())
 	if record.PreviousSecrets == nil {
 		record.PreviousSecrets = map[string]time.Time{}
 	}

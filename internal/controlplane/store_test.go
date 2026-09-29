@@ -176,6 +176,46 @@ func TestEventsAfterReturnsReplayAndPiggybackLease(t *testing.T) {
 	}
 }
 
+func TestExpiredLeaseSecretsArePrunedBeforeSnapshotAndRenewal(t *testing.T) {
+	store, clock := newStoreHarness()
+	session, endpoint, lease := mustJoinedTarget(t, store)
+	clock.advance(time.Second)
+
+	record := store.leases[endpoint.ID]
+	record.PreviousSecrets = map[string]time.Time{
+		"expired":  clock.now().Add(-time.Nanosecond),
+		"boundary": clock.now(),
+	}
+	store.leases[endpoint.ID] = record
+	snapshot := store.Snapshot()
+	if _, ok := snapshot.Leases[endpoint.ID].PreviousSecrets["expired"]; ok {
+		t.Fatal("snapshot retained an expired lease secret")
+	}
+	if _, ok := snapshot.Leases[endpoint.ID].PreviousSecrets["boundary"]; !ok {
+		t.Fatal("snapshot pruned a lease secret at the grace boundary")
+	}
+
+	record = store.leases[endpoint.ID]
+	record.PreviousSecrets["expired-again"] = clock.now().Add(-time.Nanosecond)
+	store.leases[endpoint.ID] = record
+	_, renewed, _, err := store.EventsAfter(session.ID, EventCursor{
+		EndpointID: endpoint.ID, LeaseSecret: lease.Secret,
+	}, 1)
+	if err != nil || renewed.Secret == lease.Secret {
+		t.Fatalf("lease renewal failed: %v", err)
+	}
+	retained := store.leases[endpoint.ID].PreviousSecrets
+	if _, ok := retained["expired-again"]; ok {
+		t.Fatal("renewal retained an expired lease secret")
+	}
+	if _, ok := retained["boundary"]; !ok {
+		t.Fatal("renewal removed a still-valid previous secret")
+	}
+	if _, ok := retained[lease.Secret]; !ok {
+		t.Fatal("renewal did not preserve its immediately previous secret")
+	}
+}
+
 func TestGatewaySwitchEventUpdatesSelectedGatewayAndRenewedLease(t *testing.T) {
 	store, _ := newStoreHarness()
 	session, target, lease := mustJoinedTarget(t, store)

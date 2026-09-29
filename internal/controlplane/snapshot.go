@@ -46,6 +46,9 @@ func (s *MemoryStore) Snapshot() Snapshot {
 	for sessionID := range s.sessions {
 		s.expireSessionLocked(sessionID)
 	}
+	for endpointID, record := range s.leases {
+		s.leases[endpointID] = pruneExpiredLeaseSecrets(record, s.now())
+	}
 
 	sessions := make([]Session, 0, len(s.sessions))
 	for _, session := range s.sessions {
