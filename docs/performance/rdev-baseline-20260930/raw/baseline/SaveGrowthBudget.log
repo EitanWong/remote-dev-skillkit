@@ -1,0 +1,13 @@
+=== RUN   TestPerfHistorySaveGrowthBudget
+    perfdiag_test.go:221: events_small=1000 events_large=10000 bytes_small=249248 bytes_large=2414120 allocs_small=2038 allocs_large=20042 ns_small=927813 ns_large=9860803 ratio=9.6856 budget=2.0000
+    perfdiag_test.go:223: SaveFrom allocation growth ratio 9.6856 exceeds fixed 2x budget
+--- FAIL: TestPerfHistorySaveGrowthBudget (0.52s)
+=== RUN   TestPerfHistorySaveGrowthBudget
+    perfdiag_test.go:221: events_small=1000 events_large=10000 bytes_small=249287 bytes_large=2414316 allocs_small=2039 allocs_large=20044 ns_small=992670 ns_large=9368513 ratio=9.6849 budget=2.0000
+    perfdiag_test.go:223: SaveFrom allocation growth ratio 9.6849 exceeds fixed 2x budget
+--- FAIL: TestPerfHistorySaveGrowthBudget (0.53s)
+=== RUN   TestPerfHistorySaveGrowthBudget
+    perfdiag_test.go:221: events_small=1000 events_large=10000 bytes_small=249268 bytes_large=2414356 allocs_small=2038 allocs_large=20043 ns_small=927586 ns_large=8375233 ratio=9.6858 budget=2.0000
+    perfdiag_test.go:223: SaveFrom allocation growth ratio 9.6858 exceeds fixed 2x budget
+--- FAIL: TestPerfHistorySaveGrowthBudget (0.49s)
+FAIL

@@ -1,0 +1,362 @@
+[
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/Snapshot/1000-2",
+    "iterations": 6321,
+    "ns_per_op": 18144.0,
+    "bytes_per_op": 98616,
+    "allocs_per_op": 8
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/Snapshot/1000-2",
+    "iterations": 5959,
+    "ns_per_op": 19959.0,
+    "bytes_per_op": 98616,
+    "allocs_per_op": 8
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/Snapshot/1000-2",
+    "iterations": 5962,
+    "ns_per_op": 23987.0,
+    "bytes_per_op": 98616,
+    "allocs_per_op": 8
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/Snapshot/10000-2",
+    "iterations": 242,
+    "ns_per_op": 439098.0,
+    "bytes_per_op": 966968,
+    "allocs_per_op": 8
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/Snapshot/10000-2",
+    "iterations": 289,
+    "ns_per_op": 401822.0,
+    "bytes_per_op": 966968,
+    "allocs_per_op": 8
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/Snapshot/10000-2",
+    "iterations": 289,
+    "ns_per_op": 457190.0,
+    "bytes_per_op": 966968,
+    "allocs_per_op": 8
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/Snapshot/20000-2",
+    "iterations": 160,
+    "ns_per_op": 739648.0,
+    "bytes_per_op": 1925432,
+    "allocs_per_op": 8
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/Snapshot/20000-2",
+    "iterations": 127,
+    "ns_per_op": 842867.0,
+    "bytes_per_op": 1925432,
+    "allocs_per_op": 8
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/Snapshot/20000-2",
+    "iterations": 148,
+    "ns_per_op": 800077.0,
+    "bytes_per_op": 1925432,
+    "allocs_per_op": 8
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/AuditEvents/1000-2",
+    "iterations": 3754,
+    "ns_per_op": 29793.0,
+    "bytes_per_op": 98472,
+    "allocs_per_op": 4
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/AuditEvents/1000-2",
+    "iterations": 3422,
+    "ns_per_op": 29669.0,
+    "bytes_per_op": 98472,
+    "allocs_per_op": 4
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/AuditEvents/1000-2",
+    "iterations": 3195,
+    "ns_per_op": 35337.0,
+    "bytes_per_op": 98472,
+    "allocs_per_op": 4
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/AuditEvents/10000-2",
+    "iterations": 228,
+    "ns_per_op": 477921.0,
+    "bytes_per_op": 966824,
+    "allocs_per_op": 4
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/AuditEvents/10000-2",
+    "iterations": 243,
+    "ns_per_op": 432039.0,
+    "bytes_per_op": 966824,
+    "allocs_per_op": 4
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/AuditEvents/10000-2",
+    "iterations": 222,
+    "ns_per_op": 465713.0,
+    "bytes_per_op": 966824,
+    "allocs_per_op": 4
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/AuditEvents/20000-2",
+    "iterations": 140,
+    "ns_per_op": 881228.0,
+    "bytes_per_op": 1925288,
+    "allocs_per_op": 4
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/AuditEvents/20000-2",
+    "iterations": 121,
+    "ns_per_op": 916222.0,
+    "bytes_per_op": 1925288,
+    "allocs_per_op": 4
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/AuditEvents/20000-2",
+    "iterations": 128,
+    "ns_per_op": 884508.0,
+    "bytes_per_op": 1925288,
+    "allocs_per_op": 4
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/SaveSnapshot/1000-2",
+    "iterations": 121,
+    "ns_per_op": 1168817.0,
+    "bytes_per_op": 249270,
+    "allocs_per_op": 2038
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/SaveSnapshot/1000-2",
+    "iterations": 88,
+    "ns_per_op": 1196145.0,
+    "bytes_per_op": 249283,
+    "allocs_per_op": 2038
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/SaveSnapshot/1000-2",
+    "iterations": 81,
+    "ns_per_op": 1269193.0,
+    "bytes_per_op": 249260,
+    "allocs_per_op": 2038
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/SaveSnapshot/10000-2",
+    "iterations": 13,
+    "ns_per_op": 8617145.0,
+    "bytes_per_op": 2413936,
+    "allocs_per_op": 20041
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/SaveSnapshot/10000-2",
+    "iterations": 13,
+    "ns_per_op": 8870184.0,
+    "bytes_per_op": 2414298,
+    "allocs_per_op": 20043
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/SaveSnapshot/10000-2",
+    "iterations": 13,
+    "ns_per_op": 8424207.0,
+    "bytes_per_op": 2413907,
+    "allocs_per_op": 20040
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/SaveSnapshot/20000-2",
+    "iterations": 6,
+    "ns_per_op": 16730545.0,
+    "bytes_per_op": 4813218,
+    "allocs_per_op": 40045
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/SaveSnapshot/20000-2",
+    "iterations": 6,
+    "ns_per_op": 17936666.0,
+    "bytes_per_op": 4812962,
+    "allocs_per_op": 40044
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/SaveSnapshot/20000-2",
+    "iterations": 6,
+    "ns_per_op": 18077520.0,
+    "bytes_per_op": 4812564,
+    "allocs_per_op": 40042
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/LoadSnapshot/1000-2",
+    "iterations": 54,
+    "ns_per_op": 2200952.0,
+    "bytes_per_op": 599040,
+    "allocs_per_op": 4083
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/LoadSnapshot/1000-2",
+    "iterations": 51,
+    "ns_per_op": 2733504.0,
+    "bytes_per_op": 599040,
+    "allocs_per_op": 4083
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/LoadSnapshot/1000-2",
+    "iterations": 45,
+    "ns_per_op": 2426374.0,
+    "bytes_per_op": 599040,
+    "allocs_per_op": 4083
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/LoadSnapshot/10000-2",
+    "iterations": 4,
+    "ns_per_op": 28463578.0,
+    "bytes_per_op": 7829952,
+    "allocs_per_op": 40091
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/LoadSnapshot/10000-2",
+    "iterations": 5,
+    "ns_per_op": 24401207.0,
+    "bytes_per_op": 7829952,
+    "allocs_per_op": 40091
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/LoadSnapshot/10000-2",
+    "iterations": 4,
+    "ns_per_op": 27267065.0,
+    "bytes_per_op": 7829952,
+    "allocs_per_op": 40091
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/LoadSnapshot/20000-2",
+    "iterations": 3,
+    "ns_per_op": 49221729.0,
+    "bytes_per_op": 16541504,
+    "allocs_per_op": 80094
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/LoadSnapshot/20000-2",
+    "iterations": 3,
+    "ns_per_op": 47394932.0,
+    "bytes_per_op": 16541504,
+    "allocs_per_op": 80094
+  },
+  {
+    "run": "gateway-bench-3",
+    "benchmark": "BenchmarkPerfHistory/LoadSnapshot/20000-2",
+    "iterations": 3,
+    "ns_per_op": 46242389.0,
+    "bytes_per_op": 16541504,
+    "allocs_per_op": 80094
+  },
+  {
+    "run": "event-only-bench-3",
+    "benchmark": "BenchmarkPerfEventOnlySave/1000-2",
+    "iterations": 24,
+    "ns_per_op": 4729291.0,
+    "bytes_per_op": 1914773,
+    "allocs_per_op": 16098
+  },
+  {
+    "run": "event-only-bench-3",
+    "benchmark": "BenchmarkPerfEventOnlySave/1000-2",
+    "iterations": 24,
+    "ns_per_op": 4581321.0,
+    "bytes_per_op": 1914735,
+    "allocs_per_op": 16098
+  },
+  {
+    "run": "event-only-bench-3",
+    "benchmark": "BenchmarkPerfEventOnlySave/1000-2",
+    "iterations": 22,
+    "ns_per_op": 5050845.0,
+    "bytes_per_op": 1859092,
+    "allocs_per_op": 16097
+  },
+  {
+    "run": "event-only-bench-3",
+    "benchmark": "BenchmarkPerfEventOnlySave/10000-2",
+    "iterations": 2,
+    "ns_per_op": 63435182.0,
+    "bytes_per_op": 48142116,
+    "allocs_per_op": 160133
+  },
+  {
+    "run": "event-only-bench-3",
+    "benchmark": "BenchmarkPerfEventOnlySave/10000-2",
+    "iterations": 2,
+    "ns_per_op": 60232252.0,
+    "bytes_per_op": 48142284,
+    "allocs_per_op": 160136
+  },
+  {
+    "run": "event-only-bench-3",
+    "benchmark": "BenchmarkPerfEventOnlySave/10000-2",
+    "iterations": 2,
+    "ns_per_op": 54056232.0,
+    "bytes_per_op": 31364516,
+    "allocs_per_op": 160117
+  },
+  {
+    "run": "profile-SaveSnapshot",
+    "benchmark": "BenchmarkPerfHistory/SaveSnapshot/20000-2",
+    "iterations": 34,
+    "ns_per_op": 17604208.0,
+    "bytes_per_op": 4812865,
+    "allocs_per_op": 40044
+  },
+  {
+    "run": "profile-LoadSnapshot",
+    "benchmark": "BenchmarkPerfHistory/LoadSnapshot/20000-2",
+    "iterations": 12,
+    "ns_per_op": 47663011.0,
+    "bytes_per_op": 16541504,
+    "allocs_per_op": 80094
+  },
+  {
+    "run": "profile-event-only",
+    "benchmark": "BenchmarkPerfEventOnlySave/10000-2",
+    "iterations": 10,
+    "ns_per_op": 53936060.0,
+    "bytes_per_op": 24652769,
+    "allocs_per_op": 160104
+  }
+]

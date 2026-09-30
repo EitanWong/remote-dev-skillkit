@@ -1,0 +1,17 @@
+File: httpapi.test
+Build ID: 52dbcb13c5b91ebd4265e0c4622e732dc919ee17
+Type: delay
+Time: 2026-09-30 15:24:01 CST
+Showing nodes accounting for 110.14s, 100% of 110.14s total
+Dropped 23 nodes (cum <= 0.55s)
+      flat  flat%   sum%        cum   cum%
+   110.14s   100%   100%    110.14s   100%  sync.(*Mutex).Unlock
+         0     0%   100%    110.14s   100%  github.com/EitanWong/remote-dev-skillkit/internal/httpapi.(*perfHTTPFixture).poll
+         0     0%   100%    110.13s   100%  github.com/EitanWong/remote-dev-skillkit/internal/httpapi.Server.persistState
+         0     0%   100%    110.13s   100%  github.com/EitanWong/remote-dev-skillkit/internal/httpapi.Server.persistStateInternal
+         0     0%   100%    110.14s   100%  github.com/EitanWong/remote-dev-skillkit/internal/httpapi.Server.sessionEventsAfter
+         0     0%   100%    110.14s   100%  github.com/EitanWong/remote-dev-skillkit/internal/httpapi.Server.sessionRoute
+         0     0%   100%    110.14s   100%  github.com/EitanWong/remote-dev-skillkit/internal/httpapi.Server.sessionRoute-fm
+         0     0%   100%    110.14s   100%  github.com/EitanWong/remote-dev-skillkit/internal/httpapi.TestPerfHTTPActiveHistoryMatrix.func1.1
+         0     0%   100%    110.14s   100%  net/http.(*ServeMux).ServeHTTP
+         0     0%   100%    110.14s   100%  net/http.HandlerFunc.ServeHTTP

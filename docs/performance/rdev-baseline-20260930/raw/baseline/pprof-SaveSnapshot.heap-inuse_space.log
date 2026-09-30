@@ -1,0 +1,20 @@
+File: gateway.test
+Build ID: c1123911fa57689e580f2eb3eb61630e0e5dd631
+Type: inuse_space
+Time: 2026-09-30 15:23:52 CST
+Showing nodes accounting for 4MB, 100% of 4MB total
+      flat  flat%   sum%        cum   cum%
+       4MB   100%   100%        4MB   100%  bytes.growSlice
+         0     0%   100%        4MB   100%  bytes.(*Buffer).Write
+         0     0%   100%        4MB   100%  bytes.(*Buffer).grow
+         0     0%   100%        4MB   100%  encoding/json.(*encodeState).marshal
+         0     0%   100%        4MB   100%  encoding/json.(*encodeState).reflectValue
+         0     0%   100%        4MB   100%  encoding/json.Marshal
+         0     0%   100%        4MB   100%  encoding/json.arrayEncoder.encode
+         0     0%   100%        4MB   100%  encoding/json.sliceEncoder.encode
+         0     0%   100%        4MB   100%  encoding/json.stringEncoder
+         0     0%   100%        4MB   100%  encoding/json.structEncoder.encode
+         0     0%   100%        4MB   100%  github.com/EitanWong/remote-dev-skillkit/internal/gateway.BenchmarkPerfHistory.func1.1
+         0     0%   100%        4MB   100%  github.com/EitanWong/remote-dev-skillkit/internal/gateway.perfDiagRoundTrip
+         0     0%   100%        4MB   100%  testing.(*B).launch
+         0     0%   100%        4MB   100%  testing.(*B).runN

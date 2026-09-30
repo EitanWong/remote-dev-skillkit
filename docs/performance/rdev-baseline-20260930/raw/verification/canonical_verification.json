@@ -1,0 +1,32 @@
+[
+  {
+    "label": "check-canonical",
+    "command": "bash scripts/check.sh",
+    "exit_code": 0,
+    "elapsed_seconds": 50.15394019099767,
+    "environment": {
+      "TMPDIR": "/srv/agent-os/state/hermes/profiles/perf/cache/scratch",
+      "GOCACHE": "/srv/agent-os/state/hermes/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOFLAGS": "-p=1",
+      "GIT_CONFIG_COUNT": null
+    },
+    "log": "../evidence/verification/check-canonical.log"
+  },
+  {
+    "label": "race-canonical",
+    "command": "go test -race -count=1 ./...",
+    "exit_code": 0,
+    "elapsed_seconds": 70.0816375320137,
+    "environment": {
+      "TMPDIR": "/srv/agent-os/state/hermes/profiles/perf/cache/scratch",
+      "GOCACHE": "/srv/agent-os/state/hermes/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOFLAGS": "-p=1",
+      "GIT_CONFIG_COUNT": null
+    },
+    "log": "../evidence/verification/race-canonical.log"
+  }
+]

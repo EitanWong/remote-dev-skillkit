@@ -1,0 +1,108 @@
+?   	github.com/EitanWong/remote-dev-skillkit/cmd/rdev	[no test files]
+ok  	github.com/EitanWong/remote-dev-skillkit/cmd/rdev-gateway	(cached)
+ok  	github.com/EitanWong/remote-dev-skillkit/cmd/rdev-host	(cached)
+ok  	github.com/EitanWong/remote-dev-skillkit/cmd/rdev-mcp	(cached)
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/acceptance	0.003s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/acpxadapter	2.295s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/audit	0.002s
+?   	github.com/EitanWong/remote-dev-skillkit/internal/buildinfo	[no test files]
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/claudecodeadapter	2.394s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/cli	0.256s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/coderadapter	0.004s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/codexadapter	2.536s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/connectionhealth	(cached)
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/contracts	(cached)
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/controlplane	(cached)
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/depsinstall	1.614s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/desktopadapter	0.054s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/devpodadapter	0.004s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/fileadapter	0.023s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/gateway	0.063s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/gitworkflow	0.576s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/hostawake	(cached)
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/hostcap	(cached)
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/hostcmd	1.320s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/hostidentity	0.004s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/hostrunner	1.170s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/hosttrust	0.008s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/httpapi	0.401s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/mcpstdio	(cached)
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/model	(cached)
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/operatorauth	0.961s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/policy	(cached)
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/powershelladapter	0.417s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/protectedstore	(cached)
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/rustdeskadapter	0.004s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/shelladapter	0.217s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/skillkit	0.040s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/tasktemplate	(cached)
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/toolchain	0.036s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/update	(cached)
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/workspace	0.128s
+ok  	github.com/EitanWong/remote-dev-skillkit/pkg/adapterkit	0.004s
+ok  	github.com/EitanWong/remote-dev-skillkit/scripts	0.124s
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/gateway	0.054s	coverage: 81.5% of statements
+coverage_check_ok package=./internal/gateway coverage=81.5 threshold=80.0
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/hostrunner	1.174s	coverage: 81.0% of statements
+coverage_check_ok package=./internal/hostrunner coverage=81.0 threshold=80.0
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/mcpstdio	0.119s	coverage: 80.9% of statements
+coverage_check_ok package=./internal/mcpstdio coverage=80.9 threshold=80.0
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/cli	0.234s	coverage: 84.8% of statements
+coverage_check_ok package=./internal/cli coverage=84.8 threshold=82.0
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/update	0.009s	coverage: 98.0% of statements
+coverage_check_ok package=./internal/update coverage=98.0 threshold=90.0
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/operatorauth	0.855s	coverage: 78.0% of statements
+coverage_check_ok package=./internal/operatorauth coverage=78.0 threshold=70.0
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/hosttrust	0.008s	coverage: 78.8% of statements
+coverage_check_ok package=./internal/hosttrust coverage=78.8 threshold=70.0
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/httpapi	0.402s	coverage: 71.6% of statements
+coverage_check_ok package=./internal/httpapi coverage=71.6 threshold=60.0
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/hostidentity	0.004s	coverage: 69.0% of statements
+coverage_check_ok package=./internal/hostidentity coverage=69.0 threshold=60.0
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/policy	0.002s	coverage: 73.2% of statements
+coverage_check_ok package=./internal/policy coverage=73.2 threshold=65.0
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/audit	0.002s	coverage: 76.5% of statements
+coverage_check_ok package=./internal/audit coverage=76.5 threshold=70.0
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/model	0.004s	coverage: 71.7% of statements
+coverage_check_ok package=./internal/model coverage=71.7 threshold=65.0
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/contracts	0.005s	coverage: 77.6% of statements
+coverage_check_ok package=./internal/contracts coverage=77.6 threshold=70.0
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/protectedstore	0.002s	coverage: 36.8% of statements
+coverage_check_ok package=./internal/protectedstore coverage=36.8 threshold=30.0
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/toolchain	0.037s	coverage: 66.8% of statements
+coverage_check_ok package=./internal/toolchain coverage=66.8 threshold=60.0
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/depsinstall	1.614s	coverage: 69.0% of statements
+coverage_check_ok package=./internal/depsinstall coverage=69.0 threshold=60.0
+ok  	github.com/EitanWong/remote-dev-skillkit/internal/workspace	0.129s	coverage: 71.7% of statements
+coverage_check_ok package=./internal/workspace coverage=71.7 threshold=65.0
+public_surface_ok=true
+skills_audit_ok=true skills=4 required=4
+[ux-smoke] building rdev and rdev-host
+[ux-smoke]   ok: binaries built
+[ux-smoke] starting gateway on http://127.0.0.1:18113
+[ux-smoke]   ok: gateway ready JSON parseable (rdev.gateway-ready.v2)
+[ux-smoke]   ok: session created (ses_xueuizc25zafsxi2)
+[ux-smoke] joining host (--once, output contract)
+[ux-smoke]   ok: host printed human-readable session card on stderr
+[ux-smoke]   ok: host stdout is pure machine-readable JSON
+[ux-smoke] creating second session for resident host
+[ux-smoke] starting resident host for task execution
+[ux-smoke] reading events
+[ux-smoke]   ok: hello event observed after join
+[ux-smoke] submitting read-only receipt task
+[ux-smoke]   ok: task offered (task_mg2lpid5wbn3cpot)
+[ux-smoke] waiting for task.result
+[ux-smoke]   ok: task.result succeeded with expected output
+[ux-smoke]   ok: host window reports completed tasks
+[ux-smoke]   ok: host window reports rejected tasks
+[ux-smoke] exercising novice error paths
+[ux-smoke]   ok: unknown command names available commands
+[ux-smoke]   ok: missing --join-code explains what to do
+[ux-smoke]   ok: bad join code error is human-readable
+[ux-smoke]   ok: unreachable gateway error is human-readable
+[ux-smoke]   ok: port-in-use error suggests an alternative
+[ux-smoke] closing session
+[ux-smoke]   ok: session closed
+[ux-smoke]   ok: closed-session join error is human-readable
+
+[ux-smoke] PASS=17 FAIL=0

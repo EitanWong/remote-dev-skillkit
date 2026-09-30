@@ -1,0 +1,29 @@
+File: httpapi.test
+Build ID: 52dbcb13c5b91ebd4265e0c4622e732dc919ee17
+Type: delay
+Time: 2026-09-30 15:24:01 CST
+Showing nodes accounting for 124.13s, 100% of 124.13s total
+Dropped 23 nodes (cum <= 0.62s)
+      flat  flat%   sum%        cum   cum%
+   113.91s 91.76% 91.76%    113.91s 91.76%  sync.(*Mutex).Lock (inline)
+     6.89s  5.55% 97.31%      6.89s  5.55%  runtime.chanrecv1
+     3.34s  2.69%   100%      3.34s  2.69%  sync.(*WaitGroup).Wait
+         0     0%   100%    113.91s 91.76%  github.com/EitanWong/remote-dev-skillkit/internal/httpapi.(*perfHTTPFixture).poll
+         0     0%   100%    113.72s 91.61%  github.com/EitanWong/remote-dev-skillkit/internal/httpapi.Server.persistState
+         0     0%   100%    113.72s 91.61%  github.com/EitanWong/remote-dev-skillkit/internal/httpapi.Server.persistStateInternal
+         0     0%   100%    113.73s 91.62%  github.com/EitanWong/remote-dev-skillkit/internal/httpapi.Server.sessionEventsAfter
+         0     0%   100%    113.73s 91.62%  github.com/EitanWong/remote-dev-skillkit/internal/httpapi.Server.sessionRoute
+         0     0%   100%    113.73s 91.62%  github.com/EitanWong/remote-dev-skillkit/internal/httpapi.Server.sessionRoute-fm
+         0     0%   100%      3.44s  2.77%  github.com/EitanWong/remote-dev-skillkit/internal/httpapi.TestPerfHTTPActiveHistoryMatrix
+         0     0%   100%      3.34s  2.69%  github.com/EitanWong/remote-dev-skillkit/internal/httpapi.TestPerfHTTPActiveHistoryMatrix.func1
+         0     0%   100%    113.91s 91.77%  github.com/EitanWong/remote-dev-skillkit/internal/httpapi.TestPerfHTTPActiveHistoryMatrix.func1.1
+         0     0%   100%      3.44s  2.77%  main.main
+         0     0%   100%    113.73s 91.62%  net/http.(*ServeMux).ServeHTTP
+         0     0%   100%    113.73s 91.62%  net/http.HandlerFunc.ServeHTTP
+         0     0%   100%      3.44s  2.77%  runtime.main
+         0     0%   100%      3.44s  2.77%  testing.(*M).Run
+         0     0%   100%      6.88s  5.54%  testing.(*T).Run
+         0     0%   100%      6.78s  5.46%  testing.(*T).Run.gowrap1
+         0     0%   100%      3.44s  2.77%  testing.runTests
+         0     0%   100%      3.44s  2.77%  testing.runTests.func1
+         0     0%   100%     10.22s  8.23%  testing.tRunner

@@ -1,0 +1,10 @@
+=== RUN   TestPerfHistorySnapshotGrowthDiagnostic
+    perfdiag_test.go:167: events_small=1000 events_large=10000 bytes_small=98616 bytes_large=966968 allocs_small=8 allocs_large=8 ns_small=23009 ns_large=509152 ratio=9.8054
+--- PASS: TestPerfHistorySnapshotGrowthDiagnostic (0.52s)
+=== RUN   TestPerfHistorySnapshotGrowthDiagnostic
+    perfdiag_test.go:167: events_small=1000 events_large=10000 bytes_small=98616 bytes_large=966968 allocs_small=8 allocs_large=8 ns_small=30667 ns_large=547076 ratio=9.8054
+--- PASS: TestPerfHistorySnapshotGrowthDiagnostic (0.45s)
+=== RUN   TestPerfHistorySnapshotGrowthDiagnostic
+    perfdiag_test.go:167: events_small=1000 events_large=10000 bytes_small=98616 bytes_large=966968 allocs_small=8 allocs_large=8 ns_small=20357 ns_large=556756 ratio=9.8054
+--- PASS: TestPerfHistorySnapshotGrowthDiagnostic (0.43s)
+PASS

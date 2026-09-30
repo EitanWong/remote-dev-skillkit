@@ -1,0 +1,33 @@
+File: httpapi.test
+Build ID: 52dbcb13c5b91ebd4265e0c4622e732dc919ee17
+Type: alloc_space
+Time: 2026-09-30 15:24:01 CST
+Showing nodes accounting for 788.47MB, 97.14% of 811.67MB total
+Dropped 64 nodes (cum <= 4.06MB)
+Showing top 25 nodes out of 49
+      flat  flat%   sum%        cum   cum%
+  298.79MB 36.81% 36.81%   313.38MB 38.61%  github.com/EitanWong/remote-dev-skillkit/internal/gateway.(*MemoryGateway).snapshotLocked
+  298.53MB 36.78% 73.59%   465.17MB 57.31%  github.com/EitanWong/remote-dev-skillkit/internal/gateway.writeSnapshotFile
+  149.01MB 18.36% 91.95%   149.01MB 18.36%  time.Time.MarshalJSON
+   11.63MB  1.43% 93.38%    11.63MB  1.43%  bytes.growSlice
+    9.79MB  1.21% 94.59%     9.79MB  1.21%  reflect.growslice
+    8.13MB  1.00% 95.59%     8.13MB  1.00%  github.com/EitanWong/remote-dev-skillkit/internal/gateway.(*MemoryGateway).appendAuditLocked
+    5.50MB  0.68% 96.27%     5.50MB  0.68%  github.com/EitanWong/remote-dev-skillkit/internal/controlplane.cloneMap (inline)
+    3.58MB  0.44% 96.71%    14.59MB  1.80%  github.com/EitanWong/remote-dev-skillkit/internal/controlplane.(*MemoryStore).Snapshot
+       3MB  0.37% 97.08%    11.20MB  1.38%  encoding/json.mapEncoder.encode
+    0.50MB 0.062% 97.14%    17.03MB  2.10%  github.com/EitanWong/remote-dev-skillkit/internal/httpapi.newPerfHTTPFixture
+         0     0% 97.14%     5.74MB  0.71%  bytes.(*Buffer).Write
+         0     0% 97.14%     4.62MB  0.57%  bytes.(*Buffer).WriteString
+         0     0% 97.14%    11.63MB  1.43%  bytes.(*Buffer).grow
+         0     0% 97.14%   166.64MB 20.53%  encoding/json.(*Encoder).Encode
+         0     0% 97.14%    10.29MB  1.27%  encoding/json.(*decodeState).array
+         0     0% 97.14%    10.29MB  1.27%  encoding/json.(*decodeState).object
+         0     0% 97.14%    10.29MB  1.27%  encoding/json.(*decodeState).unmarshal
+         0     0% 97.14%    10.29MB  1.27%  encoding/json.(*decodeState).value
+         0     0% 97.14%   166.64MB 20.53%  encoding/json.(*encodeState).marshal
+         0     0% 97.14%   166.64MB 20.53%  encoding/json.(*encodeState).reflectValue
+         0     0% 97.14%    10.29MB  1.27%  encoding/json.Unmarshal
+         0     0% 97.14%    13.13MB  1.62%  encoding/json.arrayEncoder.encode
+         0     0% 97.14%   149.01MB 18.36%  encoding/json.condAddrEncoder.encode
+         0     0% 97.14%   148.01MB 18.23%  encoding/json.marshalerEncoder
+         0     0% 97.14%    13.13MB  1.62%  encoding/json.sliceEncoder.encode

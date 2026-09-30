@@ -1,0 +1,26 @@
+{
+  "baseline_sha": "9af806f0ffd0f6e82e0e8040e86be14c9d9d7484",
+  "go": "go version go1.26.5 linux/amd64",
+  "synthetic": true,
+  "seed": 20260930,
+  "history_counts": [
+    1000,
+    10000,
+    20000
+  ],
+  "client_counts": [
+    20,
+    40
+  ],
+  "polls_per_client": 2,
+  "scope": "gateway microbench and in-process HTTP handler; no TCP/MCP/host/production",
+  "cgroup_path": "/sys/fs/cgroup/user.slice/user-0.slice/user@0.service/app.slice/hermes-worker-kanban-t_f44014f8-run-538.scope",
+  "profile_sample_period_s": 0.1,
+  "harness_sha256": {
+    "scripts/perfdiag/run_baseline.py": "fb91069436b6dbc8af5fc0c9febb8d9adcc7dd1ae5c39d7bb40abc440cdc3404",
+    "internal/gateway/perfdiag_test.go": "4115e6bc813e602c04452e288cb23f09f223df70a340c26abb83e2d23a5830b9",
+    "internal/gateway/perfdiag_events_test.go": "ecd2b25e4ba18e3aadadde56167685573987acb06eee83efd80d694ea4c38c98",
+    "internal/httpapi/perfdiag_test.go": "e85b9838865b9540d56b591fd62f334ce936d460399988bdf14e393cda298f6c",
+    "internal/httpapi/perfdiag_io_test.go": "571c04f625b6f6f69a3591143165e5576828946d6a5cd90ef8e1f87e3029c268"
+  }
+}

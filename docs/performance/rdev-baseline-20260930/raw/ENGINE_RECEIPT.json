@@ -1,0 +1,69 @@
+{
+  "codex_cli": "0.144.6",
+  "codex_runs": [
+    {
+      "log": "codex-run.log",
+      "runtime_banner_model": "gpt-6-astra",
+      "runtime_banner_provider": "lunflux",
+      "exit_code": 124
+    },
+    {
+      "log": "codex-fix.log",
+      "runtime_banner_model": "gpt-6-astra",
+      "runtime_banner_provider": "lunflux",
+      "exit_code": 0
+    },
+    {
+      "log": "codex-http.log",
+      "runtime_banner_model": "gpt-6-astra",
+      "runtime_banner_provider": "lunflux",
+      "exit_code": 0
+    }
+  ],
+  "model_evidence": "actual CLI run banners; upstream hidden backend mapping not independently inspectable",
+  "claude_cli": "2.1.215",
+  "claude_runs": [
+    {
+      "command": "IS_SANDBOX=1 timeout 150 claude --print <analysis-only-local-files-prompt> --model opus --tools Read --allowedTools Read --output-format json --permission-mode bypassPermissions < /dev/null",
+      "requested_model": "opus",
+      "actual_model": null,
+      "exit_code": 124,
+      "stdout_bytes": 779,
+      "stderr_bytes": 0,
+      "response_error": {
+        "type": "result",
+        "subtype": "error_during_execution",
+        "is_error": true,
+        "terminal_reason": "aborted_streaming",
+        "duration_api_ms": 0,
+        "modelUsage": {},
+        "errors": [
+          "[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null"
+        ]
+      }
+    },
+    {
+      "command": "IS_SANDBOX=1 timeout 120 claude --print <analysis-only-numeric-evidence-prompt> --model opus --tools empty --output-format json --permission-mode bypassPermissions < /dev/null",
+      "requested_model": "opus",
+      "actual_model": null,
+      "exit_code": 124,
+      "stdout_bytes": 779,
+      "stderr_bytes": 0,
+      "response_error": {
+        "type": "result",
+        "subtype": "error_during_execution",
+        "is_error": true,
+        "terminal_reason": "aborted_streaming",
+        "duration_api_ms": 0,
+        "modelUsage": {},
+        "errors": [
+          "[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null"
+        ]
+      }
+    }
+  ],
+  "claude_analysis_status": "BLOCKED_TIMEOUT_NO_RECEIPT",
+  "operator_escalation": "Two failures reported to Lucky; no third blind retry",
+  "production_changes": false,
+  "deployment": false
+}
