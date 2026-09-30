@@ -1,0 +1,9 @@
+=== RUN   TestPerfHistoryFixtureIntegrity
+=== RUN   TestPerfHistoryFixtureIntegrity/1000
+=== RUN   TestPerfHistoryFixtureIntegrity/10000
+=== RUN   TestPerfHistoryFixtureIntegrity/20000
+--- PASS: TestPerfHistoryFixtureIntegrity (0.28s)
+    --- PASS: TestPerfHistoryFixtureIntegrity/1000 (0.01s)
+    --- PASS: TestPerfHistoryFixtureIntegrity/10000 (0.09s)
+    --- PASS: TestPerfHistoryFixtureIntegrity/20000 (0.17s)
+PASS

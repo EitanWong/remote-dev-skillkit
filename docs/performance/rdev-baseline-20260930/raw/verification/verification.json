@@ -1,0 +1,23 @@
+[
+  {
+    "label": "check",
+    "command": "bash scripts/check.sh",
+    "exit_code": 1,
+    "elapsed_seconds": 34.22501844901126,
+    "log": "../evidence/verification/check.log"
+  },
+  {
+    "label": "race",
+    "command": "go test -race ./...",
+    "exit_code": 1,
+    "elapsed_seconds": 118.98772862600163,
+    "log": "../evidence/verification/race.log"
+  },
+  {
+    "label": "diag-race",
+    "command": "go test -race -p=1 -tags=perfdiag ./internal/gateway ./internal/httpapi '-run=TestPerfHistoryFixtureIntegrity|TestPerfHTTPActiveHistoryMatrix' -count=1 -timeout=90s",
+    "exit_code": 0,
+    "elapsed_seconds": 6.673563110001851,
+    "log": "../evidence/verification/diag-race.log"
+  }
+]

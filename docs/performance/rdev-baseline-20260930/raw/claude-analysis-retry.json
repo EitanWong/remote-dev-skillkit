@@ -1,0 +1,37 @@
+{
+  "type": "result",
+  "subtype": "error_during_execution",
+  "duration_ms": 119541,
+  "duration_api_ms": 0,
+  "is_error": true,
+  "num_turns": 2,
+  "stop_reason": null,
+  "session_id": "87f00604-ea8d-4350-ba81-d842143c9b9c",
+  "total_cost_usd": 0,
+  "usage": {
+    "input_tokens": 0,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "output_tokens": 0,
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "",
+    "iterations": [],
+    "speed": "standard"
+  },
+  "modelUsage": {},
+  "permission_denials": [],
+  "terminal_reason": "aborted_streaming",
+  "fast_mode_state": "off",
+  "uuid": "5c4448bc-bbd1-496a-8749-057fa7c67389",
+  "errors": [
+    "[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null"
+  ]
+}

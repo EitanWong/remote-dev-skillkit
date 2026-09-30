@@ -1,0 +1,10 @@
+File: gateway.test
+Build ID: c1123911fa57689e580f2eb3eb61630e0e5dd631
+Type: inuse_space
+Time: 2026-09-30 15:23:57 CST
+Showing nodes accounting for 512.05kB, 100% of 512.05kB total
+      flat  flat%   sum%        cum   cum%
+  512.05kB   100%   100%   512.05kB   100%  runtime.mallocgc
+         0     0%   100%   512.05kB   100%  runtime.(*scavengerState).init
+         0     0%   100%   512.05kB   100%  runtime.bgscavenge
+         0     0%   100%   512.05kB   100%  runtime.newobject

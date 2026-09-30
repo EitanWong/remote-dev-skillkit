@@ -1,0 +1,6 @@
+goos: linux
+goarch: amd64
+pkg: github.com/EitanWong/remote-dev-skillkit/internal/gateway
+cpu: AMD EPYC 7T83 64-Core Processor
+BenchmarkPerfEventOnlySave/10000-2         	      10	  53936060 ns/op	24652769 B/op	  160104 allocs/op
+PASS

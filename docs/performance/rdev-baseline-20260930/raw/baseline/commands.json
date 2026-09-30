@@ -1,0 +1,1443 @@
+[
+  {
+    "label": "build-gateway",
+    "argv": [
+      "go",
+      "test",
+      "-p=1",
+      "-tags=perfdiag",
+      "-c",
+      "-o",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "./internal/gateway"
+    ],
+    "command": "go test -p=1 -tags=perfdiag -c -o /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test ./internal/gateway",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:22:59Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3398451200,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1470660608",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 291876326\nuser_usec 262705921\nsystem_usec 29170405\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "build-gateway.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 0.9106075669988059,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1484738560",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 293154554\nuser_usec 263832121\nsystem_usec 29322432\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "build-httpapi",
+    "argv": [
+      "go",
+      "test",
+      "-p=1",
+      "-tags=perfdiag",
+      "-c",
+      "-o",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test",
+      "./internal/httpapi"
+    ],
+    "command": "go test -p=1 -tags=perfdiag -c -o /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test ./internal/httpapi",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:23:00Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3373592576,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1484734464",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 293155023\nuser_usec 263832590\nsystem_usec 29322432\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "build-httpapi.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 1.1125913459982257,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1499521024",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 294682543\nuser_usec 265190376\nsystem_usec 29492166\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "fixture",
+    "argv": [
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "-test.run=^TestPerfHistoryFixtureIntegrity$",
+      "-test.count=1",
+      "-test.v",
+      "-test.timeout=60s"
+    ],
+    "command": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test '-test.run=^TestPerfHistoryFixtureIntegrity$' -test.count=1 -test.v -test.timeout=60s",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:23:01Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3295559680,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1499459584",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 294683365\nuser_usec 265191198\nsystem_usec 29492166\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "fixture.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 0.30301810801029205,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1499512832",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 295006865\nuser_usec 265472492\nsystem_usec 29534372\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "SnapshotGrowthDiagnostic",
+    "argv": [
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "-test.run=^TestPerfHistorySnapshotGrowthDiagnostic$",
+      "-test.count=3",
+      "-test.v",
+      "-test.benchtime=100ms",
+      "-test.timeout=60s"
+    ],
+    "command": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test '-test.run=^TestPerfHistorySnapshotGrowthDiagnostic$' -test.count=3 -test.v -test.benchtime=100ms -test.timeout=60s",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:23:02Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3292622848,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1499447296",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 295007754\nuser_usec 265473293\nsystem_usec 29534461\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "SnapshotGrowthDiagnostic.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 1.407950072985841,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1499471872",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 297214274\nuser_usec 267515246\nsystem_usec 29699027\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "SaveGrowthBudget",
+    "argv": [
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "-test.run=^TestPerfHistorySaveGrowthBudget$",
+      "-test.count=3",
+      "-test.v",
+      "-test.benchtime=100ms",
+      "-test.timeout=60s"
+    ],
+    "command": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test '-test.run=^TestPerfHistorySaveGrowthBudget$' -test.count=3 -test.v -test.benchtime=100ms -test.timeout=60s",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:23:03Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3322855424,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1499373568",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 297215663\nuser_usec 267515700\nsystem_usec 29699963\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "SaveGrowthBudget.log",
+    "expected_exit_codes": [
+      0,
+      1
+    ],
+    "exit_code": 1,
+    "elapsed_s": 1.6093447509920225,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1499615232",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 298908805\nuser_usec 268980508\nsystem_usec 29928297\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "gateway-bench-3",
+    "argv": [
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "-test.run=^$",
+      "-test.bench=^BenchmarkPerfHistory$",
+      "-test.benchmem",
+      "-test.benchtime=100ms",
+      "-test.count=3",
+      "-test.timeout=120s"
+    ],
+    "command": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test '-test.run=^$' '-test.bench=^BenchmarkPerfHistory$' -test.benchmem -test.benchtime=100ms -test.count=3 -test.timeout=120s",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:23:05Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3342712832,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1499750400",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 298910194\nuser_usec 268981897\nsystem_usec 29928297\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "gateway-bench-3.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 24.987895592028508,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1499574272",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 329328479\nuser_usec 296631565\nsystem_usec 32696914\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "event-only-bench-3",
+    "argv": [
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "-test.run=^$",
+      "-test.bench=^BenchmarkPerfEventOnlySave$",
+      "-test.benchmem",
+      "-test.benchtime=100ms",
+      "-test.count=3",
+      "-test.timeout=120s"
+    ],
+    "command": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test '-test.run=^$' '-test.bench=^BenchmarkPerfEventOnlySave$' -test.benchmem -test.benchtime=100ms -test.count=3 -test.timeout=120s",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:23:30Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3307364352,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1500106752",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 329334227\nuser_usec 296637313\nsystem_usec 32696914\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "event-only-bench-3.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 2.836284194025211,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1499938816",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 332710973\nuser_usec 299661816\nsystem_usec 33049157\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "http-matrix-3",
+    "argv": [
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test",
+      "-test.run=^TestPerfHTTPActiveHistoryMatrix$",
+      "-test.count=3",
+      "-test.v",
+      "-test.timeout=120s"
+    ],
+    "command": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test '-test.run=^TestPerfHTTPActiveHistoryMatrix$' -test.count=3 -test.v -test.timeout=120s",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:23:33Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3381084160,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1500229632",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 332716805\nuser_usec 299666672\nsystem_usec 33050132\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "http-matrix-3.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 14.31349349100492,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1500774400",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 346677531\nuser_usec 311915174\nsystem_usec 34762357\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "PollWriteAmplificationGrowthBudget",
+    "argv": [
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test",
+      "-test.run=^TestPerfHTTPPollWriteAmplificationGrowth$",
+      "-test.count=3",
+      "-test.v",
+      "-test.timeout=60s"
+    ],
+    "command": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test '-test.run=^TestPerfHTTPPollWriteAmplificationGrowth$' -test.count=3 -test.v -test.timeout=60s",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:23:47Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3371073536,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1503551488",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 346703010\nuser_usec 311937705\nsystem_usec 34765305\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "PollWriteAmplificationGrowthBudget.log",
+    "expected_exit_codes": [
+      0,
+      1
+    ],
+    "exit_code": 1,
+    "elapsed_s": 0.20148318298743106,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1503862784",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 346901178\nuser_usec 312116955\nsystem_usec 34784222\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "HTTPLatencyBudget",
+    "argv": [
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test",
+      "-test.run=^TestPerfHTTPActiveHistoryMatrix$",
+      "-test.count=3",
+      "-test.v",
+      "-test.timeout=60s"
+    ],
+    "command": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test '-test.run=^TestPerfHTTPActiveHistoryMatrix$' -test.count=3 -test.v -test.timeout=60s",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:23:47Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "20000",
+      "PERF_DIAG_CLIENTS": "20",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": "1"
+    },
+    "mem_available_before_bytes": 3368984576,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1504104448",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 346918103\nuser_usec 312132882\nsystem_usec 34785221\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "HTTPLatencyBudget.log",
+    "expected_exit_codes": [
+      0,
+      1
+    ],
+    "exit_code": 1,
+    "elapsed_s": 3.0235668039822485,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1503367168",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 349752147\nuser_usec 314617714\nsystem_usec 35134433\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "profile-SaveSnapshot",
+    "argv": [
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "-test.run=^$",
+      "-test.bench=^BenchmarkPerfHistory/SaveSnapshot/20000$",
+      "-test.benchmem",
+      "-test.benchtime=500ms",
+      "-test.count=1",
+      "-test.timeout=60s",
+      "-test.cpuprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/SaveSnapshot.cpu.pprof",
+      "-test.memprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/SaveSnapshot.heap.pprof"
+    ],
+    "command": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test '-test.run=^$' '-test.bench=^BenchmarkPerfHistory/SaveSnapshot/20000$' -test.benchmem -test.benchtime=500ms -test.count=1 -test.timeout=60s -test.cpuprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/SaveSnapshot.cpu.pprof -test.memprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/SaveSnapshot.heap.pprof",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:23:50Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3352981504,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1503801344",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 349771065\nuser_usec 314636632\nsystem_usec 35134433\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "profile-SaveSnapshot.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 2.2235978019889444,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1504280576",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 352229785\nuser_usec 316854097\nsystem_usec 35375688\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "profile-LoadSnapshot",
+    "argv": [
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "-test.run=^$",
+      "-test.bench=^BenchmarkPerfHistory/LoadSnapshot/20000$",
+      "-test.benchmem",
+      "-test.benchtime=500ms",
+      "-test.count=1",
+      "-test.timeout=60s",
+      "-test.cpuprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/LoadSnapshot.cpu.pprof",
+      "-test.memprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/LoadSnapshot.heap.pprof"
+    ],
+    "command": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test '-test.run=^$' '-test.bench=^BenchmarkPerfHistory/LoadSnapshot/20000$' -test.benchmem -test.benchtime=500ms -test.count=1 -test.timeout=60s -test.cpuprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/LoadSnapshot.cpu.pprof -test.memprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/LoadSnapshot.heap.pprof",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:23:52Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3357732864,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1504014336",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 352248678\nuser_usec 316871994\nsystem_usec 35376683\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "profile-LoadSnapshot.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 2.3320650389941875,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1503883264",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 354864010\nuser_usec 319288252\nsystem_usec 35575757\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "profile-event-only",
+    "argv": [
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "-test.run=^$",
+      "-test.bench=^BenchmarkPerfEventOnlySave/10000$",
+      "-test.benchmem",
+      "-test.benchtime=500ms",
+      "-test.count=1",
+      "-test.timeout=60s",
+      "-test.cpuprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/EventOnly.cpu.pprof",
+      "-test.memprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/EventOnly.heap.pprof"
+    ],
+    "command": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test '-test.run=^$' '-test.bench=^BenchmarkPerfEventOnlySave/10000$' -test.benchmem -test.benchtime=500ms -test.count=1 -test.timeout=60s -test.cpuprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/EventOnly.cpu.pprof -test.memprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/EventOnly.heap.pprof",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:23:55Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "10000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3318702080,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1503588352",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 354900506\nuser_usec 319322790\nsystem_usec 35577715\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "profile-event-only.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 2.673175511008594,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1503875072",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 358010073\nuser_usec 322123428\nsystem_usec 35886644\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "profile-http",
+    "argv": [
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test",
+      "-test.run=^TestPerfHTTPActiveHistoryMatrix$",
+      "-test.count=1",
+      "-test.v",
+      "-test.timeout=60s",
+      "-test.cpuprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.cpu.pprof",
+      "-test.memprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.heap.pprof",
+      "-test.blockprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.block.pprof",
+      "-test.blockprofilerate=1",
+      "-test.mutexprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.mutex.pprof",
+      "-test.mutexprofilefraction=1"
+    ],
+    "command": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test '-test.run=^TestPerfHTTPActiveHistoryMatrix$' -test.count=1 -test.v -test.timeout=60s -test.cpuprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.cpu.pprof -test.memprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.heap.pprof -test.blockprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.block.pprof -test.blockprofilerate=1 -test.mutexprofile=/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.mutex.pprof -test.mutexprofilefraction=1",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:23:57Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "20000",
+      "PERF_DIAG_CLIENTS": "40",
+      "PERF_DIAG_POLLS": "4",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3291078656,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1503985664",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 358029887\nuser_usec 322142353\nsystem_usec 35887534\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "profile-http.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 3.537089132005349,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1503907840",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 362034090\nuser_usec 325654809\nsystem_usec 36379280\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "pprof-EventOnly.cpu-top",
+    "argv": [
+      "go",
+      "tool",
+      "pprof",
+      "-top",
+      "-nodecount=25",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/EventOnly.cpu.pprof"
+    ],
+    "command": "go tool pprof -top -nodecount=25 /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/EventOnly.cpu.pprof",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:24:01Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3320803328,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1504567296",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 362056822\nuser_usec 325675574\nsystem_usec 36381248\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "pprof-EventOnly.cpu-top.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 0.10111587200663052,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1504485376",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 362214220\nuser_usec 325784033\nsystem_usec 36430187\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "pprof-EventOnly.heap-alloc_space",
+    "argv": [
+      "go",
+      "tool",
+      "pprof",
+      "-top",
+      "-nodecount=25",
+      "-alloc_space",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/EventOnly.heap.pprof"
+    ],
+    "command": "go tool pprof -top -nodecount=25 -alloc_space /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/EventOnly.heap.pprof",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:24:01Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3320823808,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1504497664",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 362235417\nuser_usec 325804304\nsystem_usec 36431113\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "pprof-EventOnly.heap-alloc_space.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 0.10114004599745385,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1504751616",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 362404407\nuser_usec 325921511\nsystem_usec 36482896\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "pprof-EventOnly.heap-inuse_space",
+    "argv": [
+      "go",
+      "tool",
+      "pprof",
+      "-top",
+      "-nodecount=25",
+      "-inuse_space",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/EventOnly.heap.pprof"
+    ],
+    "command": "go tool pprof -top -nodecount=25 -inuse_space /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/EventOnly.heap.pprof",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:24:01Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3320827904,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1504718848",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 362425306\nuser_usec 325941410\nsystem_usec 36483896\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "pprof-EventOnly.heap-inuse_space.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 0.1011474599945359,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1504493568",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 362575712\nuser_usec 326045310\nsystem_usec 36530402\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "pprof-HTTP.block-top",
+    "argv": [
+      "go",
+      "tool",
+      "pprof",
+      "-top",
+      "-nodecount=25",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.block.pprof"
+    ],
+    "command": "go tool pprof -top -nodecount=25 /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.block.pprof",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:24:01Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3315933184,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1504440320",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 362596601\nuser_usec 326065203\nsystem_usec 36531397\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "pprof-HTTP.block-top.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 0.1011011140071787,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1504747520",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 362754712\nuser_usec 326182653\nsystem_usec 36572058\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "pprof-HTTP.cpu-top",
+    "argv": [
+      "go",
+      "tool",
+      "pprof",
+      "-top",
+      "-nodecount=25",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.cpu.pprof"
+    ],
+    "command": "go tool pprof -top -nodecount=25 /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.cpu.pprof",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:24:02Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3315421184,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1504727040",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 362775982\nuser_usec 326201989\nsystem_usec 36573992\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "pprof-HTTP.cpu-top.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 0.10115121799753979,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1505038336",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 362921031\nuser_usec 326314908\nsystem_usec 36606123\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "pprof-HTTP.heap-alloc_space",
+    "argv": [
+      "go",
+      "tool",
+      "pprof",
+      "-top",
+      "-nodecount=25",
+      "-alloc_space",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.heap.pprof"
+    ],
+    "command": "go tool pprof -top -nodecount=25 -alloc_space /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.heap.pprof",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:24:02Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3323682816,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1504993280",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 362942267\nuser_usec 326335214\nsystem_usec 36607053\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "pprof-HTTP.heap-alloc_space.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 0.10106522700516507,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1504780288",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 363103175\nuser_usec 326452634\nsystem_usec 36650540\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "pprof-HTTP.heap-inuse_space",
+    "argv": [
+      "go",
+      "tool",
+      "pprof",
+      "-top",
+      "-nodecount=25",
+      "-inuse_space",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.heap.pprof"
+    ],
+    "command": "go tool pprof -top -nodecount=25 -inuse_space /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.heap.pprof",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:24:02Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3337113600,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1504739328",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 363123978\nuser_usec 326473437\nsystem_usec 36650540\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "pprof-HTTP.heap-inuse_space.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 0.10115994399529882,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1504514048",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 363292107\nuser_usec 326592137\nsystem_usec 36699970\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "pprof-HTTP.mutex-top",
+    "argv": [
+      "go",
+      "tool",
+      "pprof",
+      "-top",
+      "-nodecount=25",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.mutex.pprof"
+    ],
+    "command": "go tool pprof -top -nodecount=25 /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/httpapi.test /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/HTTP.mutex.pprof",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:24:02Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3329048576,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1504444416",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 363313985\nuser_usec 326614013\nsystem_usec 36699972\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "pprof-HTTP.mutex-top.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 0.1010609490040224,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1504681984",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 363456898\nuser_usec 326709960\nsystem_usec 36746938\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "pprof-LoadSnapshot.cpu-top",
+    "argv": [
+      "go",
+      "tool",
+      "pprof",
+      "-top",
+      "-nodecount=25",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/LoadSnapshot.cpu.pprof"
+    ],
+    "command": "go tool pprof -top -nodecount=25 /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/LoadSnapshot.cpu.pprof",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:24:02Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3332276224,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1504796672",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 363478652\nuser_usec 326730638\nsystem_usec 36748014\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "pprof-LoadSnapshot.cpu-top.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 0.10112910598400049,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1504677888",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 363632810\nuser_usec 326832102\nsystem_usec 36800708\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "pprof-LoadSnapshot.heap-alloc_space",
+    "argv": [
+      "go",
+      "tool",
+      "pprof",
+      "-top",
+      "-nodecount=25",
+      "-alloc_space",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/LoadSnapshot.heap.pprof"
+    ],
+    "command": "go tool pprof -top -nodecount=25 -alloc_space /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/LoadSnapshot.heap.pprof",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:24:02Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3344445440,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1504595968",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 363654491\nuser_usec 326853783\nsystem_usec 36800708\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "pprof-LoadSnapshot.heap-alloc_space.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 0.10107226998661645,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1505054720",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 363809690\nuser_usec 326960864\nsystem_usec 36848826\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "pprof-LoadSnapshot.heap-inuse_space",
+    "argv": [
+      "go",
+      "tool",
+      "pprof",
+      "-top",
+      "-nodecount=25",
+      "-inuse_space",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/LoadSnapshot.heap.pprof"
+    ],
+    "command": "go tool pprof -top -nodecount=25 -inuse_space /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/LoadSnapshot.heap.pprof",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:24:02Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3351408640,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1505144832",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 363831392\nuser_usec 326981591\nsystem_usec 36849801\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "pprof-LoadSnapshot.heap-inuse_space.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 0.10114640899701044,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1504780288",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 363976578\nuser_usec 327087888\nsystem_usec 36888690\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "pprof-SaveSnapshot.cpu-top",
+    "argv": [
+      "go",
+      "tool",
+      "pprof",
+      "-top",
+      "-nodecount=25",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/SaveSnapshot.cpu.pprof"
+    ],
+    "command": "go tool pprof -top -nodecount=25 /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/SaveSnapshot.cpu.pprof",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:24:02Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3339542528,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1504628736",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 363998051\nuser_usec 327109360\nsystem_usec 36888690\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "pprof-SaveSnapshot.cpu-top.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 0.10112482798285782,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1504894976",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 364159685\nuser_usec 327216429\nsystem_usec 36943255\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "pprof-SaveSnapshot.heap-alloc_space",
+    "argv": [
+      "go",
+      "tool",
+      "pprof",
+      "-top",
+      "-nodecount=25",
+      "-alloc_space",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/SaveSnapshot.heap.pprof"
+    ],
+    "command": "go tool pprof -top -nodecount=25 -alloc_space /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/SaveSnapshot.heap.pprof",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:24:03Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3350282240,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1504694272",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 364181612\nuser_usec 327236360\nsystem_usec 36945252\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "pprof-SaveSnapshot.heap-alloc_space.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 0.10114010699908249,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1505124352",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 364329974\nuser_usec 327350673\nsystem_usec 36979300\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  },
+  {
+    "label": "pprof-SaveSnapshot.heap-inuse_space",
+    "argv": [
+      "go",
+      "tool",
+      "pprof",
+      "-top",
+      "-nodecount=25",
+      "-inuse_space",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test",
+      "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/SaveSnapshot.heap.pprof"
+    ],
+    "command": "go tool pprof -top -nodecount=25 -inuse_space /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/gateway.test /srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/evidence/final/SaveSnapshot.heap.pprof",
+    "cwd": "/srv/agent-os/state/hermes/kanban/boards/eng/workspaces/t_f44014f8/source",
+    "synthetic": true,
+    "start_utc": "2026-09-30T07:24:03Z",
+    "environment": {
+      "TMPDIR": "/opt/data/profiles/perf/cache/scratch",
+      "GOCACHE": "/opt/data/profiles/perf/cache/scratch/go-build",
+      "GOMAXPROCS": "2",
+      "GOMEMLIMIT": "512MiB",
+      "GOPROXY": "off",
+      "GOSUMDB": "off",
+      "PERF_DIAG_EVENTS": "1000,10000,20000",
+      "PERF_DIAG_CLIENTS": "20,40",
+      "PERF_DIAG_POLLS": "2",
+      "PERF_DIAG_LARGE": null,
+      "PERF_DIAG_ENFORCE_SLO": null
+    },
+    "mem_available_before_bytes": 3339292672,
+    "cgroup_before": {
+      "memory.max": "3918663680",
+      "memory.current": "1504927744",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 364351535\nuser_usec 327368280\nsystem_usec 36983254\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "log": "pprof-SaveSnapshot.heap-inuse_space.log",
+    "expected_exit_codes": [
+      0
+    ],
+    "exit_code": 0,
+    "elapsed_s": 0.10110729601001367,
+    "cgroup_after": {
+      "memory.max": "3918663680",
+      "memory.current": "1505206272",
+      "memory.events": "low 0\nhigh 0\nmax 0\noom 0\noom_kill 0\noom_group_kill 0",
+      "memory.swap.max": "max",
+      "cpu.stat": "usage_usec 364500635\nuser_usec 327464002\nsystem_usec 37036632\ncore_sched.force_idle_usec 0\ncore_sched.force_idle_task_usec 0\nsibidle_usec 0\nsibidle_task_usec 0"
+    },
+    "abort_reason": null
+  }
+]

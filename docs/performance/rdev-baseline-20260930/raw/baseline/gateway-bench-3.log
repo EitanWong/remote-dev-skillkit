@@ -1,0 +1,41 @@
+goos: linux
+goarch: amd64
+pkg: github.com/EitanWong/remote-dev-skillkit/internal/gateway
+cpu: AMD EPYC 7T83 64-Core Processor
+BenchmarkPerfHistory/Snapshot/1000-2    	    6321	     18144 ns/op	   98616 B/op	       8 allocs/op
+BenchmarkPerfHistory/Snapshot/1000-2    	    5959	     19959 ns/op	   98616 B/op	       8 allocs/op
+BenchmarkPerfHistory/Snapshot/1000-2    	    5962	     23987 ns/op	   98616 B/op	       8 allocs/op
+BenchmarkPerfHistory/Snapshot/10000-2   	     242	    439098 ns/op	  966968 B/op	       8 allocs/op
+BenchmarkPerfHistory/Snapshot/10000-2   	     289	    401822 ns/op	  966968 B/op	       8 allocs/op
+BenchmarkPerfHistory/Snapshot/10000-2   	     289	    457190 ns/op	  966968 B/op	       8 allocs/op
+BenchmarkPerfHistory/Snapshot/20000-2   	     160	    739648 ns/op	 1925432 B/op	       8 allocs/op
+BenchmarkPerfHistory/Snapshot/20000-2   	     127	    842867 ns/op	 1925432 B/op	       8 allocs/op
+BenchmarkPerfHistory/Snapshot/20000-2   	     148	    800077 ns/op	 1925432 B/op	       8 allocs/op
+BenchmarkPerfHistory/AuditEvents/1000-2 	    3754	     29793 ns/op	   98472 B/op	       4 allocs/op
+BenchmarkPerfHistory/AuditEvents/1000-2 	    3422	     29669 ns/op	   98472 B/op	       4 allocs/op
+BenchmarkPerfHistory/AuditEvents/1000-2 	    3195	     35337 ns/op	   98472 B/op	       4 allocs/op
+BenchmarkPerfHistory/AuditEvents/10000-2         	     228	    477921 ns/op	  966824 B/op	       4 allocs/op
+BenchmarkPerfHistory/AuditEvents/10000-2         	     243	    432039 ns/op	  966824 B/op	       4 allocs/op
+BenchmarkPerfHistory/AuditEvents/10000-2         	     222	    465713 ns/op	  966824 B/op	       4 allocs/op
+BenchmarkPerfHistory/AuditEvents/20000-2         	     140	    881228 ns/op	 1925288 B/op	       4 allocs/op
+BenchmarkPerfHistory/AuditEvents/20000-2         	     121	    916222 ns/op	 1925288 B/op	       4 allocs/op
+BenchmarkPerfHistory/AuditEvents/20000-2         	     128	    884508 ns/op	 1925288 B/op	       4 allocs/op
+BenchmarkPerfHistory/SaveSnapshot/1000-2         	     121	   1168817 ns/op	  249270 B/op	    2038 allocs/op
+BenchmarkPerfHistory/SaveSnapshot/1000-2         	      88	   1196145 ns/op	  249283 B/op	    2038 allocs/op
+BenchmarkPerfHistory/SaveSnapshot/1000-2         	      81	   1269193 ns/op	  249260 B/op	    2038 allocs/op
+BenchmarkPerfHistory/SaveSnapshot/10000-2        	      13	   8617145 ns/op	 2413936 B/op	   20041 allocs/op
+BenchmarkPerfHistory/SaveSnapshot/10000-2        	      13	   8870184 ns/op	 2414298 B/op	   20043 allocs/op
+BenchmarkPerfHistory/SaveSnapshot/10000-2        	      13	   8424207 ns/op	 2413907 B/op	   20040 allocs/op
+BenchmarkPerfHistory/SaveSnapshot/20000-2        	       6	  16730545 ns/op	 4813218 B/op	   40045 allocs/op
+BenchmarkPerfHistory/SaveSnapshot/20000-2        	       6	  17936666 ns/op	 4812962 B/op	   40044 allocs/op
+BenchmarkPerfHistory/SaveSnapshot/20000-2        	       6	  18077520 ns/op	 4812564 B/op	   40042 allocs/op
+BenchmarkPerfHistory/LoadSnapshot/1000-2         	      54	   2200952 ns/op	  599040 B/op	    4083 allocs/op
+BenchmarkPerfHistory/LoadSnapshot/1000-2         	      51	   2733504 ns/op	  599040 B/op	    4083 allocs/op
+BenchmarkPerfHistory/LoadSnapshot/1000-2         	      45	   2426374 ns/op	  599040 B/op	    4083 allocs/op
+BenchmarkPerfHistory/LoadSnapshot/10000-2        	       4	  28463578 ns/op	 7829952 B/op	   40091 allocs/op
+BenchmarkPerfHistory/LoadSnapshot/10000-2        	       5	  24401207 ns/op	 7829952 B/op	   40091 allocs/op
+BenchmarkPerfHistory/LoadSnapshot/10000-2        	       4	  27267065 ns/op	 7829952 B/op	   40091 allocs/op
+BenchmarkPerfHistory/LoadSnapshot/20000-2        	       3	  49221729 ns/op	16541504 B/op	   80094 allocs/op
+BenchmarkPerfHistory/LoadSnapshot/20000-2        	       3	  47394932 ns/op	16541504 B/op	   80094 allocs/op
+BenchmarkPerfHistory/LoadSnapshot/20000-2        	       3	  46242389 ns/op	16541504 B/op	   80094 allocs/op
+PASS

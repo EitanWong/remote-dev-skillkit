@@ -1,0 +1,10 @@
+=== RUN   TestPerfHTTPPollWriteAmplificationGrowth
+    perfdiag_test.go:327: diagnostic archive/hot-path budget exceeded: small_bytes=163239 large_bytes=1603242 budget_multiplier=2
+--- FAIL: TestPerfHTTPPollWriteAmplificationGrowth (0.06s)
+=== RUN   TestPerfHTTPPollWriteAmplificationGrowth
+    perfdiag_test.go:327: diagnostic archive/hot-path budget exceeded: small_bytes=163239 large_bytes=1603242 budget_multiplier=2
+--- FAIL: TestPerfHTTPPollWriteAmplificationGrowth (0.05s)
+=== RUN   TestPerfHTTPPollWriteAmplificationGrowth
+    perfdiag_test.go:327: diagnostic archive/hot-path budget exceeded: small_bytes=163239 large_bytes=1603242 budget_multiplier=2
+--- FAIL: TestPerfHTTPPollWriteAmplificationGrowth (0.06s)
+FAIL

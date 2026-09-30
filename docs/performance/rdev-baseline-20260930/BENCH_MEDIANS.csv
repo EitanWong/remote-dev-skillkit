@@ -1,0 +1,15 @@
+run,benchmark,repeats,ns_per_op_median,ns_per_op_min,ns_per_op_max,bytes_per_op_median,allocs_per_op_median
+gateway-bench-3,BenchmarkPerfHistory/AuditEvents/1000-2,3,29793.0,29669.0,35337.0,98472,4
+gateway-bench-3,BenchmarkPerfHistory/AuditEvents/10000-2,3,465713.0,432039.0,477921.0,966824,4
+gateway-bench-3,BenchmarkPerfHistory/AuditEvents/20000-2,3,884508.0,881228.0,916222.0,1925288,4
+gateway-bench-3,BenchmarkPerfHistory/LoadSnapshot/1000-2,3,2426374.0,2200952.0,2733504.0,599040,4083
+gateway-bench-3,BenchmarkPerfHistory/LoadSnapshot/10000-2,3,27267065.0,24401207.0,28463578.0,7829952,40091
+gateway-bench-3,BenchmarkPerfHistory/LoadSnapshot/20000-2,3,47394932.0,46242389.0,49221729.0,16541504,80094
+gateway-bench-3,BenchmarkPerfHistory/SaveSnapshot/1000-2,3,1196145.0,1168817.0,1269193.0,249270,2038
+gateway-bench-3,BenchmarkPerfHistory/SaveSnapshot/10000-2,3,8617145.0,8424207.0,8870184.0,2413936,20041
+gateway-bench-3,BenchmarkPerfHistory/SaveSnapshot/20000-2,3,17936666.0,16730545.0,18077520.0,4812962,40044
+gateway-bench-3,BenchmarkPerfHistory/Snapshot/1000-2,3,19959.0,18144.0,23987.0,98616,8
+gateway-bench-3,BenchmarkPerfHistory/Snapshot/10000-2,3,439098.0,401822.0,457190.0,966968,8
+gateway-bench-3,BenchmarkPerfHistory/Snapshot/20000-2,3,800077.0,739648.0,842867.0,1925432,8
+event-only-bench-3,BenchmarkPerfEventOnlySave/1000-2,3,4729291.0,4581321.0,5050845.0,1914735,16098
+event-only-bench-3,BenchmarkPerfEventOnlySave/10000-2,3,60232252.0,54056232.0,63435182.0,48142116,160133

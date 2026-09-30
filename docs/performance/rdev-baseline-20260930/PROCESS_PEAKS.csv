@@ -1,0 +1,7 @@
+command,observed_rss_max_bytes,observed_pss_max_bytes,observed_hwm_max_bytes,observed_cpu_user_s,observed_cpu_system_s,observed_fd_max,observed_threads_max
+gateway-bench-3,73043968,71572480,82051072,27.46,2.55,6,6
+event-only-bench-3,119951360,118479872,128434176,3.01,0.31,6,6
+http-matrix-3,38408192,36936704,41385984,12.12,1.62,6,6
+profile-SaveSnapshot,62468096,60996608,62468096,2.2,0.22,7,7
+profile-LoadSnapshot,58707968,57269248,63172608,2.39,0.16,7,7
+profile-http,39682048,38210560,39682048,3.48,0.46,7,7

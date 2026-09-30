@@ -1,0 +1,33 @@
+File: gateway.test
+Build ID: c1123911fa57689e580f2eb3eb61630e0e5dd631
+Type: alloc_space
+Time: 2026-09-30 15:23:52 CST
+Showing nodes accounting for 717.92MB, 99.44% of 721.99MB total
+Dropped 18 nodes (cum <= 3.61MB)
+Showing top 25 nodes out of 47
+      flat  flat%   sum%        cum   cum%
+  162.01MB 22.44% 22.44%   162.01MB 22.44%  github.com/EitanWong/remote-dev-skillkit/internal/gateway.(*MemoryGateway).snapshotLocked
+  130.01MB 18.01% 40.45%   188.51MB 26.11%  github.com/EitanWong/remote-dev-skillkit/internal/gateway.writeSnapshotFile
+   97.88MB 13.56% 54.00%   200.21MB 27.73%  encoding/json.Marshal
+   87.50MB 12.12% 66.12%    87.50MB 12.12%  time.Time.MarshalJSON
+   73.33MB 10.16% 76.28%    73.33MB 10.16%  bytes.growSlice
+   49.90MB  6.91% 83.19%    49.90MB  6.91%  reflect.growslice
+   34.81MB  4.82% 88.01%    34.81MB  4.82%  github.com/EitanWong/remote-dev-skillkit/internal/gateway.(*MemoryGateway).appendAuditLocked
+   31.50MB  4.36% 92.38%    31.50MB  4.36%  fmt.Sprintf
+   19.67MB  2.72% 95.10%    19.67MB  2.72%  os.readFileContents
+   11.30MB  1.57% 96.67%    11.30MB  1.57%  github.com/EitanWong/remote-dev-skillkit/internal/gateway.(*MemoryGateway).RestoreSnapshot
+    9.50MB  1.32% 97.98%       38MB  5.26%  github.com/EitanWong/remote-dev-skillkit/internal/gateway.perfDiagAudit
+    8.50MB  1.18% 99.16%     8.50MB  1.18%  encoding/json.(*decodeState).literalStore
+       2MB  0.28% 99.44%    39.81MB  5.51%  github.com/EitanWong/remote-dev-skillkit/internal/gateway.perfDiagFixture
+         0     0% 99.44%    53.09MB  7.35%  bytes.(*Buffer).Write
+         0     0% 99.44%    18.34MB  2.54%  bytes.(*Buffer).WriteString
+         0     0% 99.44%    73.33MB 10.16%  bytes.(*Buffer).grow
+         0     0% 99.44%    58.50MB  8.10%  encoding/json.(*Encoder).Encode
+         0     0% 99.44%    58.40MB  8.09%  encoding/json.(*decodeState).array
+         0     0% 99.44%    58.40MB  8.09%  encoding/json.(*decodeState).object
+         0     0% 99.44%    58.40MB  8.09%  encoding/json.(*decodeState).unmarshal
+         0     0% 99.44%    58.40MB  8.09%  encoding/json.(*decodeState).value
+         0     0% 99.44%   160.84MB 22.28%  encoding/json.(*encodeState).marshal
+         0     0% 99.44%   160.84MB 22.28%  encoding/json.(*encodeState).reflectValue
+         0     0% 99.44%    58.40MB  8.09%  encoding/json.Unmarshal
+         0     0% 99.44%    30.91MB  4.28%  encoding/json.addrMarshalerEncoder

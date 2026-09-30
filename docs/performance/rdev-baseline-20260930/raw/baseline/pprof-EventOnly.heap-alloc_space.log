@@ -1,0 +1,33 @@
+File: gateway.test
+Build ID: c1123911fa57689e580f2eb3eb61630e0e5dd631
+Type: alloc_space
+Time: 2026-09-30 15:23:57 CST
+Showing nodes accounting for 1060.19MB, 98.95% of 1071.40MB total
+Dropped 33 nodes (cum <= 5.36MB)
+Showing top 25 nodes out of 64
+      flat  flat%   sum%        cum   cum%
+  278.57MB 26.00% 26.00%   278.57MB 26.00%  github.com/EitanWong/remote-dev-skillkit/internal/controlplane.cloneMap (inline)
+  256.47MB 23.94% 49.94%   256.47MB 23.94%  bytes.growSlice
+   78.37MB  7.31% 57.25%    78.37MB  7.31%  reflect.growslice
+   69.60MB  6.50% 63.75%   323.95MB 30.24%  github.com/EitanWong/remote-dev-skillkit/internal/controlplane.(*MemoryStore).Snapshot
+   62.03MB  5.79% 69.54%   188.56MB 17.60%  github.com/EitanWong/remote-dev-skillkit/internal/controlplane.cloneEvents (inline)
+      52MB  4.85% 74.39%   158.97MB 14.84%  encoding/json.mapEncoder.encode
+   45.02MB  4.20% 78.60%   121.03MB 11.30%  github.com/EitanWong/remote-dev-skillkit/internal/controlplane.(*MemoryStore).appendEventLocked
+   37.69MB  3.52% 82.11%    37.69MB  3.52%  os.readFileContents
+      35MB  3.27% 85.38%       35MB  3.27%  reflect.unsafe_New
+      28MB  2.61% 87.99%       28MB  2.61%  time.Time.MarshalJSON
+   26.01MB  2.43% 90.42%    26.01MB  2.43%  reflect.mapassign_faststr0
+   22.50MB  2.10% 92.52%       31MB  2.89%  encoding/json.(*decodeState).literalStore
+   18.92MB  1.77% 94.29%    70.16MB  6.55%  github.com/EitanWong/remote-dev-skillkit/internal/controlplane.(*MemoryStore).RestoreSnapshot
+   15.50MB  1.45% 95.73%   176.23MB 16.45%  github.com/EitanWong/remote-dev-skillkit/internal/gateway.perfEventFixture
+    9.50MB  0.89% 96.62%    23.50MB  2.19%  encoding/json.Marshal
+    8.50MB  0.79% 97.41%     8.50MB  0.79%  github.com/EitanWong/remote-dev-skillkit/internal/controlplane.cloneEndpoints (inline)
+    8.50MB  0.79% 98.21%     8.50MB  0.79%  encoding/json.unquoteBytes
+    7.50MB   0.7% 98.91%       21MB  1.96%  github.com/EitanWong/remote-dev-skillkit/internal/controlplane.eventFingerprint
+    0.50MB 0.047% 98.95%   143.38MB 13.38%  encoding/json.(*decodeState).object
+         0     0% 98.95%    32.01MB  2.99%  bytes.(*Buffer).Grow (inline)
+         0     0% 98.95%   210.50MB 19.65%  bytes.(*Buffer).Write
+         0     0% 98.95%    13.96MB  1.30%  bytes.(*Buffer).WriteString
+         0     0% 98.95%   256.47MB 23.94%  bytes.(*Buffer).grow
+         0     0% 98.95%   353.97MB 33.04%  encoding/json.(*Encoder).Encode
+         0     0% 98.95%   143.38MB 13.38%  encoding/json.(*decodeState).array

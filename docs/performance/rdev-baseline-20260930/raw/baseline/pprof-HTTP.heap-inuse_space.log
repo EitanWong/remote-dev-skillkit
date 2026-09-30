@@ -1,0 +1,19 @@
+File: httpapi.test
+Build ID: 52dbcb13c5b91ebd4265e0c4622e732dc919ee17
+Type: inuse_space
+Time: 2026-09-30 15:24:01 CST
+Showing nodes accounting for 1547.48kB, 100% of 1547.48kB total
+      flat  flat%   sum%        cum   cum%
+ 1035.43kB 66.91% 66.91%  1035.43kB 66.91%  regexp.onePassCopy
+  512.05kB 33.09%   100%   512.05kB 33.09%  runtime.mallocgc
+         0     0%   100%  1035.43kB 66.91%  github.com/EitanWong/remote-dev-skillkit/internal/contracts.init
+         0     0%   100%  1035.43kB 66.91%  regexp.Compile (inline)
+         0     0%   100%  1035.43kB 66.91%  regexp.MustCompile
+         0     0%   100%  1035.43kB 66.91%  regexp.compile
+         0     0%   100%  1035.43kB 66.91%  regexp.compileOnePass
+         0     0%   100%   512.05kB 33.09%  runtime.(*scavengerState).init
+         0     0%   100%   512.05kB 33.09%  runtime.bgscavenge
+         0     0%   100%  1035.43kB 66.91%  runtime.doInit (inline)
+         0     0%   100%  1035.43kB 66.91%  runtime.doInit1
+         0     0%   100%  1035.43kB 66.91%  runtime.main
+         0     0%   100%   512.05kB 33.09%  runtime.newobject
