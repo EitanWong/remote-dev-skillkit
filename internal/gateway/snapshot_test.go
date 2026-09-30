@@ -1,8 +1,10 @@
 package gateway
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,6 +103,37 @@ func TestFileStateStorePersistsCurrentSessionState(t *testing.T) {
 	}
 	if got, err := restored.Session(session.ID); err != nil || got.ID != session.ID {
 		t.Fatalf("restored session = %#v err=%v", got, err)
+	}
+}
+
+func TestFileStateStoreStreamsLargeAuditWithoutChangingSnapshot(t *testing.T) {
+	gw := NewMemoryGateway()
+	for i := 0; i < 10000; i++ {
+		gw.appendAudit("target", "session.join", "endpoint", "endpoint joined session")
+	}
+	gw.notifySecrets = map[string]string{"session": "test-webhook-secret"}
+	path := filepath.Join(t.TempDir(), "state.json")
+	snapshot, err := gw.SaveSnapshot(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := json.Marshal(snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, content); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(compact.Bytes(), want) {
+		t.Fatal("streamed snapshot differs from the standard JSON encoding")
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("snapshot permissions: %v, %v", info, err)
 	}
 }
 
