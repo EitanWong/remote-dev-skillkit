@@ -1,0 +1,24 @@
+{
+  "source_archive": "/srv/Projects/_inbox/rdev-quality-20260930/t_d4919217/RDEV_INCIDENT_RUN275.tar.gz",
+  "source_member": "run275/BASELINE_SAMPLES.csv",
+  "sample_count": 21,
+  "window_start": "2026-09-30T14:57:56.896593+08:00",
+  "window_end": "2026-09-30T15:07:56.739375+08:00",
+  "elapsed_seconds": 599.842782,
+  "write_bytes_delta": 23150555136,
+  "wchar_delta": 23157806868,
+  "write_bytes_per_second": 38594371.44314925,
+  "write_mib_per_second": 36.806460803174254,
+  "state_start_bytes": 126005903,
+  "state_end_bytes": 126037278,
+  "net_state_growth_bytes": 31375,
+  "physical_write_to_net_state_growth_ratio": 737866.2991553785,
+  "pid_stable": true,
+  "nrestarts_values": [
+    1
+  ],
+  "rss_p95_kib": 514540,
+  "rss_max_kib": 516932,
+  "rss_min_kib": 489992,
+  "scope": "ops-provided production statistical sampling, not perf synthetic load or real-host availability/soak PASS"
+}

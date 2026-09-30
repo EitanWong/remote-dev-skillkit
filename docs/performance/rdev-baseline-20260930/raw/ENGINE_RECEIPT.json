@@ -62,8 +62,17 @@
       }
     }
   ],
-  "claude_analysis_status": "BLOCKED_TIMEOUT_NO_RECEIPT",
+  "claude_analysis_status": "FAILED_EFFECTIVE_ANALYSIS_NOT_RUN",
   "operator_escalation": "Two failures reported to Lucky; no third blind retry",
   "production_changes": false,
-  "deployment": false
+  "deployment": false,
+  "ceo_scoped_decision": {
+    "timestamp_beijing": "2026-09-30 16:04",
+    "task_scope": "baseline diagnostic only",
+    "fallback": "verified commands/raw data + perf-authored analysis accepted for diagnostic handoff",
+    "independent_reviewer": "t_1b876885",
+    "dual_engine_pass": false,
+    "downstream_release_gates_relaxed": false,
+    "third_same_path_request": "STOP"
+  }
 }

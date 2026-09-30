@@ -28,7 +28,7 @@ Increasing concurrency without eliminating full-history synchronous writes canno
 
 ## 4 — Cold recovery materializes file + JSON + restored copies (CONFIRMED cost, production peak UNKNOWN)
 
-20k audit LoadSnapshot median16,541,504 B/op,47.395ms/op;1000 audit599,040 B/op. Load profile shows ReadFile, json.Unmarshal/reflect.growslice and RestoreSnapshot. Measured test RSS/PSS includes setup/validation and retained comparison snapshots; no700k recovery or bounded long-term gateway RSS is inferred. Operator now reports SIGKILL was panel-manual, notOOM. We did not access production or independently obtain ops attachments; do not repurpose kill-9 as heap evidence.
+20k audit LoadSnapshot median16,541,504 B/op,47.395ms/op;1000 audit599,040 B/op. Load profile shows ReadFile, json.Unmarshal/reflect.growslice and RestoreSnapshot. Measured test RSS/PSS includes setup/validation and retained comparison snapshots; no700k recovery or bounded long-term gateway RSS is inferred. Operator now reports SIGKILL was panel-manual, notOOM. This worker did not re-investigate production kill cause. The supplied ops archive statistical CSV was subsequently read: exact21-sample window599.842782s write_bytes delta23,150,555,136B =38,594,371.443B/s (36.806MiB/s), not the earlier uptime-derived~45MB/s estimate. See OPS_WINDOW.md; no production state or profile was accessed.
 
 ## Proposed implementation direction (not implemented; architect/coder own decisions)
 
